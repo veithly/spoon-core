@@ -1,0 +1,13 @@
+loguru==0.7.3
+fastapi==0.115.7
+langchain==0.3.15
+uvicorn==0.34.0
+sqlalchemy==2.0.37
+redis==5.2.1
+langchain_openai==0.3.3
+python-dotenv==1.0.1
+psycopg2-binary==2.9.10
+PyJWT==2.10.1
+langchain-anthropic
+langchain-deepseek
+inquirerpy==0.3.4
