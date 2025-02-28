@@ -1,24 +1,27 @@
 import asyncio
+import uuid
 from typing import AsyncIterable, Awaitable, List
 
-from fastapi import APIRouter, HTTPException, Depends
+import jwt
+from api.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from starlette.status import HTTP_401_UNAUTHORIZED
 from langchain.callbacks import AsyncIteratorCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
-
 from models.base.chat import CompletionsRequest, Messages, SessionRequest
-from models.controller import model_manager
+from models.base.model import ModelTable, SessionStateTable
 from models.response import OpenAIStreamResponse
 from models.workflow import Workflow
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.status import HTTP_401_UNAUTHORIZED
 
 from utils import ALGORITHM, SECRET_KEY
-import jwt
 
 router = APIRouter(prefix="/v1/chat")
 security = HTTPBearer()
-def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(credentials:HTTPAuthorizationCredentials = Depends(security), db: AsyncSession = Depends(get_db)):
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         address = payload.get("sub")
@@ -32,6 +35,7 @@ async def send_message(
     messages_contents: List[Messages],
     session_id: str,
     disconnect_event: asyncio.Event = None,
+    db: AsyncSession = Depends(get_db)
 ) -> AsyncIterable[str]:
     callback = AsyncIteratorCallbackHandler()
     messages = []
@@ -47,11 +51,8 @@ async def send_message(
                 status_code=401,
                 detail="Invalid role. Must be one of 'user', 'system', 'assistant'",
             )
-        model_id = model_manager.get_model_id_from_session(session_id)
-        logger.debug(f"Model ID: {model_id}")
-        if model_id.startswith("b'") and model_id.endswith("'"):
-            model_id = model_id[2:-1]
-        model = model_manager.get_model_via_id(model_id)
+        model = await db.execute(select(ModelTable).where(ModelTable.id == session_id))
+        logger.debug(f"Model ID: {model.id}")
         if model is None:
             raise HTTPException(status_code=404, detail="Model not found")
         workflow = Workflow(model=model, session_id=session_id, callback=callback)
@@ -87,16 +88,23 @@ async def stream_completions(body: CompletionsRequest):
     )
 
 @router.post("/session")
-async def create_session(body: SessionRequest, current_address: str = Depends(get_current_user)):
-    session_id = model_manager.create_session(body.model_id, current_address)
+async def create_session(body: SessionRequest, current_address: str = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    session_id = uuid.uuid4().hex
+    session_table = SessionStateTable(id=session_id, model_id=body.model_id, owner_address=current_address)
+    db.add(session_table)
     return {"data": {"session_id": session_id}, "message": "success"}
 
 @router.get("/session/messages/{id}")
-async def get_messsages(id, current_address: str = Depends(get_current_user)):
-    models_via_address = model_manager.get_models_via_address(current_address)
-    model_ids = [model.id for model in models_via_address]
-    model_id = model_manager.get_model_id_from_session(id)
-    if model_id not in model_ids:
+async def get_messsages(id, current_address: str = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    session = await db.execute(select(SessionStateTable).where(SessionStateTable.id == id))
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.owner_address != current_address:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    messages = model_manager.get_chat_history_from_session(id)
+    messages = session.chat_history
     return {"data": {"messages": messages}, "message": "success"}
+
+@router.get("/session/ids/{model_id}")
+async def get_session_ids_via_model_id(model_id: str, current_address: str = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    sessions = await db.execute(select(SessionStateTable).where(SessionStateTable.model_id == model_id))
+    return {"data": {"sessions": [session.id for session in sessions]}, "message": "success"}
