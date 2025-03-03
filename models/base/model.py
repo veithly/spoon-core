@@ -58,6 +58,7 @@ class SessionStateTable(Base):
     session_id = Column(String, primary_key=True)
     model_id = Column(String, ForeignKey("models.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    owner_address = Column(String, nullable=False)
     
     model = relationship("ModelTable", back_populates="sessions")
     chat_history = Column(JSON, default=list, nullable=False)

@@ -3,20 +3,20 @@ import uuid
 from typing import AsyncIterable, Awaitable, List
 
 import jwt
-from api.core.database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from langchain.callbacks import AsyncIteratorCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
-from models.base.chat import CompletionsRequest, Messages, SessionRequest
-from models.base.model import ModelTable, SessionStateTable
-from models.response import OpenAIStreamResponse
-from models.workflow import Workflow
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_401_UNAUTHORIZED
 
+from api.core.database import get_db
+from models.base.chat import CompletionsRequest, Messages, SessionRequest
+from models.base.model import ModelTable, SessionStateTable
+from models.response import OpenAIStreamResponse
+from models.workflow import Workflow
+from spoon_ai.callbacks import StorageAsyncIteratorCallbackHandler
 from utils import ALGORITHM, SECRET_KEY
 
 router = APIRouter(prefix="/v1/chat")
@@ -37,7 +37,7 @@ async def send_message(
     disconnect_event: asyncio.Event = None,
     db: AsyncSession = Depends(get_db)
 ) -> AsyncIterable[str]:
-    callback = AsyncIteratorCallbackHandler()
+    callback = StorageAsyncIteratorCallbackHandler(session_id=session_id)
     messages = []
     for message_content in messages_contents:
         if message_content.role == "user":
@@ -106,5 +106,8 @@ async def get_messsages(id, current_address: str = Depends(get_current_user), db
 
 @router.get("/session/ids/{model_id}")
 async def get_session_ids_via_model_id(model_id: str, current_address: str = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    sessions = await db.execute(select(SessionStateTable).where(SessionStateTable.model_id == model_id))
+    sessions = await db.execute(select(SessionStateTable).where(
+        (SessionStateTable.model_id == model_id) & 
+        (SessionStateTable.owner_address == current_address)
+    ))
     return {"data": {"sessions": [session.id for session in sessions]}, "message": "success"}
