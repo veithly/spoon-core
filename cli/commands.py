@@ -18,16 +18,29 @@ from prompt_toolkit.styles import Style
 from spoon_ai.agent import Agent, debug_log
 from spoon_ai.trade.aggregator import Aggregator
 from utils.config_manager import ConfigManager
-
+from spoon_ai.retrieval.document_loader import DocumentLoader
+# from termcolor import colored
+# class ColoredFormatter(logging.Formatter):
+#     COLORS = {
+#         'DEBUG': 'cyan',
+#         'INFO': 'green',
+#         'WARNING': 'yellow',
+#         'ERROR': 'red',
+#         'CRITICAL': 'bold_red'}
+#     def format(self, record):
+#         level_color = super().format(record)
+#         return colored(level_color, self.COLORS[record.levelname])
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
-
 logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("langchain_openai").setLevel(logging.ERROR)
 logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
+# handler = logging.StreamHandler()
+# handler.setFormatter(ColoredFormatter())
+# logger.addHandler(handler)
 
 DEBUG = False
 def cli_debug_log(message):
@@ -150,6 +163,14 @@ class SpoonAICLI:
             name="swap",
             description="Swap tokens using aggregator",
             handler=self._handle_swap
+        ))
+        
+        # Load Documents Command
+        self.add_command(SpoonCommand(
+            name="load-docs",
+            description="Load documents from a directory into the current agent",
+            handler=self._handle_load_docs,
+            aliases=["docs"]
         ))
     
     def add_command(self, command: SpoonCommand):
@@ -336,7 +357,7 @@ class SpoonAICLI:
                     print_formatted_text(PromptHTML(f"<user>You:</user> {entry['content']}"), style=chat_style)
                 else:
                     print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {entry['content']}"), style=chat_style)
-            print("\n" + "-"*50 + "\n")
+            logger.info("\n" + "-"*50 + "\n")
         
         # Start chat loop
         try:
@@ -371,8 +392,6 @@ class SpoonAICLI:
                         # Define a simpler streaming function
                         async def stream_response():
                             cli_debug_log("Starting stream_response function")
-                            # Clear the "thinking" line and show agent name
-                            # print("\033[1A\033[K", end="")
                             
                             # Display agent name
                             print_formatted_text(
@@ -802,3 +821,63 @@ class SpoonAICLI:
             
         except Exception as e:
             print(f"Swap failed: {str(e)}")
+
+    def _handle_load_docs(self, input_list: List[str]):
+        """Handle the load-docs command"""
+        if not self.current_agent:
+            print("No agent loaded. Please load an agent first.")
+            return
+            
+        if len(input_list) < 1:
+            print("Usage: load-docs <path> [glob_pattern]")
+            print("\nThe path can be either a directory or a specific file.")
+            print("\nSupported file types (auto-detected):")
+            print("  - Text files (*.txt)")
+            print("  - PDF files (*.pdf)")
+            print("  - CSV files (*.csv)")
+            print("  - JSON files (*.json)")
+            print("  - HTML files (*.html, *.htm)")
+            print("\nExamples:")
+            print("  load-docs /path/to/documents")
+            print("  load-docs /path/to/documents \"**/*.txt\"")
+            print("  load-docs /path/to/documents \"**/*.{txt,pdf,md}\"")
+            print("  load-docs /path/to/specific_file.pdf")
+            print("\nIf a directory is provided without a glob pattern, the system will automatically detect and load all supported file types.")
+            return
+            
+        path = input_list[0]
+        glob_pattern = input_list[1] if len(input_list) > 1 else None
+        
+        try:
+            loader = DocumentLoader()
+            print(f"Loading documents from {path}...")
+            documents = loader.load_directory(path, glob_pattern)
+            print(f"Loaded {len(documents)} document chunks.")
+            
+            print("Adding documents to agent...")
+            self.current_agent.add_documents(documents)
+            print(f"Successfully added {len(documents)} document chunks to agent {self.current_agent.name}.")
+            print("You can now ask questions about these documents.")
+        except Exception as e:
+            print(f"Error loading documents: {e}")
+            
+    def _handle_delete_docs(self, input_list: List[str]):
+        """Handle the delete-docs command"""
+        if not self.current_agent and len(self.agents) == 0:
+            ("No agent loaded. Please load an agent first.")
+            return
+            
+        if len(input_list) >= 1:
+            print("Usage: delete-docs <agent_name>")
+            return
+            
+        if len(input_list) == 1:
+            agent_name = input_list[0]
+            if agent_name in self.agents:
+                self.agents[agent_name].delete_documents()
+            else:
+                print(f"Agent {agent_name} not found")
+        elif len(input_list) == 0:
+            self.current_agent.delete_documents()
+            
+            
