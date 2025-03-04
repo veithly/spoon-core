@@ -1,12 +1,26 @@
+import asyncio
+import datetime
+import json
 import logging
+import os
 import shlex
 import sys
 from pathlib import Path
 from typing import Callable, Dict, List
-import json
-import datetime
-import os
-import asyncio
+
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.formatted_text import HTML as PromptHTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style
+
+from spoon_ai.agent import Agent, debug_log
+from spoon_ai.trade.aggregator import Aggregator
+from utils.config_manager import ConfigManager
+
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger("cli")
 
 logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("langchain_openai").setLevel(logging.ERROR)
@@ -14,20 +28,6 @@ logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
-
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.formatted_text import HTML as PromptHTML
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.styles import Style
-from prompt_toolkit import print_formatted_text
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-
-from spoon_ai.agent import Agent, debug_log
-from utils.config_manager import ConfigManager
-
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-logger = logging.getLogger("cli")
 
 DEBUG = False
 def cli_debug_log(message):
@@ -44,7 +44,7 @@ class SpoonCommand:
         self.description = description
         self.handler = handler
         self.aliases = aliases
-
+        
 class SpoonAICLI:
     def __init__(self):
         self.agents = {}
@@ -53,6 +53,7 @@ class SpoonAICLI:
         self.config_dir.mkdir(exist_ok=True)
         self.commands: Dict[str, SpoonCommand] = {}
         self.config_manager = ConfigManager()
+        self.aggregator = Aggregator(rpc_url=os.getenv("RPC_URL"), chain_id=os.getenv("CHAIN_ID", 1), scan_url=os.getenv("SCAN_URL", "https://etherscan.io"))
         self._init_commands()
         self._set_prompt_toolkit()
         
@@ -134,6 +135,21 @@ class SpoonAICLI:
             name="load-chat",
             description="Load a specific chat history",
             handler=self._handle_load_chat
+        ))
+        
+        # Transfer Command
+        self.add_command(SpoonCommand(
+            name="transfer",
+            description="Transfer tokens to an address",
+            handler=self._handle_transfer,
+            aliases=["send"]
+        ))
+        
+        # Swap Command
+        self.add_command(SpoonCommand(
+            name="swap",
+            description="Swap tokens using aggregator",
+            handler=self._handle_swap
         ))
     
     def add_command(self, command: SpoonCommand):
@@ -289,7 +305,7 @@ class SpoonAICLI:
                 f.write(f"Chat session with {self.current_agent.name}\n")
                 f.write(f"Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 
-                # 获取消息列表
+                # Get message list
                 chat_messages = []
                 if isinstance(self.current_agent.chat_history, dict) and 'messages' in self.current_agent.chat_history:
                     chat_messages = self.current_agent.chat_history.get('messages', [])
@@ -669,3 +685,120 @@ class SpoonAICLI:
         
         self.current_agent.reload_config()
         logger.info(f"Reloaded configuration for agent '{self.current_agent.name}'")
+
+    def _handle_transfer(self, input_list: List[str]):
+        """
+        Handle the transfer command
+        Usage: transfer <to_address> <amount> [token_address]
+        """
+        
+        if len(input_list) < 2:
+            print("Usage: transfer <to_address> <amount> [token_address]")
+            return
+        
+        to_address = input_list[0]
+        
+        try:
+            amount = float(input_list[1])
+        except ValueError:
+            print("Amount must be a number")
+            return
+        
+        token_address = None
+        if len(input_list) >= 3:
+            token_address = input_list[2]
+        
+        # Initialize aggregator
+        try:
+            
+            # Get account address from private key
+            private_key = os.getenv("PRIVATE_KEY")
+            if not private_key:
+                print("PRIVATE_KEY is not set in environment variables")
+                return
+                
+            account = self.aggregator._web3.eth.account.from_key(private_key)
+            account_address = account.address
+            
+            # Confirm transaction details with user
+            token_name = "Native Token" if not token_address else token_address
+            print(f"\nTransaction Confirmation:")
+            print(f"From: {account_address}")
+            print(f"To: {to_address}")
+            print(f"Amount: {amount} {token_name}")
+            
+            confirm = input("Confirm transaction? (y/n): ")
+            if confirm.lower() != 'y':
+                print("Transaction cancelled")
+                return
+            
+            # Execute transfer
+            tx_hash = self.aggregator.transfer(to_address, amount, token_address)
+            print(f"Transaction sent! Transaction hash: {tx_hash}")
+            
+        except Exception as e:
+            print(f"Transfer failed: {str(e)}")
+    
+    def _handle_swap(self, input_list: List[str]):
+        """
+        Handle the swap command
+        Usage: swap <token_in> <token_out> <amount> [slippage]
+        """
+        
+        if len(input_list) < 3:
+            print("Usage: swap <token_in> <token_out> <amount> [slippage]")
+            return
+        
+        token_in = input_list[0]
+        token_out = input_list[1]
+        
+        try:
+            amount = float(input_list[2])
+        except ValueError:
+            print("Amount must be a number")
+            return
+        
+        slippage = 0.5  # Default slippage
+        if len(input_list) >= 4:
+            try:
+                slippage = float(input_list[3])
+            except ValueError:
+                print("Slippage must be a number")
+                return
+        
+        # Initialize aggregator
+        try:
+            
+            # Get account address from private key
+            private_key = os.getenv("PRIVATE_KEY")
+            if not private_key:
+                print("PRIVATE_KEY is not set in environment variables")
+                return
+                
+            account = self.aggregator._web3.eth.account.from_key(private_key)
+            account_address = account.address
+            
+            # Get current balance
+            current_balance = self.aggregator.get_balance(
+                token_address=None if token_in.lower() == self.aggregator.get_native_token_address().lower() else token_in
+            )
+            
+            # Confirm transaction details with user
+            print(f"\nSwap Confirmation:")
+            print(f"Account Address: {account_address}")
+            print(f"Swap: {amount} {token_in}")
+            print(f"Receive: {token_out}")
+            print(f"Slippage: {slippage}%")
+            print(f"Current Balance: {current_balance} {token_in}")
+            
+            confirm = input("Confirm swap? (y/n): ")
+            if confirm.lower() != 'y':
+                print("Swap cancelled")
+                return
+            
+            # Execute swap
+            result = self.aggregator.swap(token_in, token_out, amount, slippage)
+            print(result)
+            
+        except Exception as e:
+            print(f"Swap failed: {str(e)}")
