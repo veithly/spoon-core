@@ -15,10 +15,11 @@ from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
-from spoon_ai.agent import Agent, debug_log
+from spoon_ai.agents import SpoonAI, debug_log
+from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.trade.aggregator import Aggregator
 from utils.config_manager import ConfigManager
-from spoon_ai.retrieval.document_loader import DocumentLoader
+
 # from termcolor import colored
 # class ColoredFormatter(logging.Formatter):
 #     COLORS = {
@@ -165,6 +166,21 @@ class SpoonAICLI:
             handler=self._handle_swap
         ))
         
+        # Token Info Commands
+        self.add_command(SpoonCommand(
+            name="token-info",
+            description="Get token information by address",
+            handler=self._handle_token_info_by_address,
+            aliases=["token"]
+        ))
+        
+        self.add_command(SpoonCommand(
+            name="token-by-symbol",
+            description="Get token information by symbol",
+            handler=self._handle_token_info_by_symbol,
+            aliases=["symbol"]
+        ))
+        
         # Load Documents Command
         self.add_command(SpoonCommand(
             name="load-docs",
@@ -203,9 +219,12 @@ class SpoonAICLI:
         self._load_agent(name)
     
     def  _load_agent(self, name: str):
-        self.agents[name] = Agent(name)
-        self.current_agent = self.agents[name]
-        logger.info(f"Loaded agent: {self.current_agent.name}")
+        if name == "default":
+            self.agents[name] = SpoonAI(name)
+            self.current_agent = self.agents[name]
+            logger.info(f"Loaded agent: {self.current_agent.name}")
+        else:
+            logger.error(f"Agent {name} not found")
     
     def _handle_list_agents(self, input_list: List[str]):
         logger.info("Available agents:")
@@ -821,6 +840,76 @@ class SpoonAICLI:
             
         except Exception as e:
             print(f"Swap failed: {str(e)}")
+
+    def _handle_token_info_by_address(self, input_list: List[str]):
+        """
+        Handle the token-info command
+        Usage: token-info <token_address>
+        """
+        if not input_list:
+            print("Usage: token-info <token_address>")
+            return
+        
+        token_address = input_list[0]
+        
+        try:
+            token_info = self.aggregator.get_token_info_by_address(token_address)
+            if token_info:
+                print("\nToken Information:")
+                print(f"Name: {token_info.get('name')}")
+                print(f"Symbol: {token_info.get('symbol')}")
+                print(f"Address: {token_info.get('address')}")
+                print(f"Decimals: {token_info.get('decimals')}")
+                print(f"Total Supply: {token_info.get('totalSupply')}")
+                print(f"Network: {token_info.get('network')}")
+                print(f"Chain ID: {token_info.get('chainId')}")
+                
+                # Print additional information if available
+                if 'price_usd' in token_info and token_info['price_usd']:
+                    print(f"Price (USD): ${token_info['price_usd']:.6f}")
+                if 'market_cap' in token_info and token_info['market_cap']:
+                    print(f"Market Cap (USD): ${token_info['market_cap']:,.2f}")
+                if 'image' in token_info and token_info['image']:
+                    print(f"Image URL: {token_info['image']}")
+            else:
+                print(f"No information found for token address: {token_address}")
+        except Exception as e:
+            print(f"Error getting token information: {str(e)}")
+    
+    def _handle_token_info_by_symbol(self, input_list: List[str]):
+        """
+        Handle the token-by-symbol command
+        Usage: token-by-symbol <symbol>
+        """
+        if not input_list:
+            print("Usage: token-by-symbol <symbol>")
+            return
+        
+        symbol = input_list[0]
+        
+        try:
+            token_info = self.aggregator.get_token_info_by_symbol(symbol)
+            if token_info:
+                print("\nToken Information:")
+                print(f"Name: {token_info.get('name')}")
+                print(f"Symbol: {token_info.get('symbol')}")
+                print(f"Address: {token_info.get('address')}")
+                print(f"Decimals: {token_info.get('decimals')}")
+                print(f"Total Supply: {token_info.get('totalSupply')}")
+                print(f"Network: {token_info.get('network')}")
+                print(f"Chain ID: {token_info.get('chainId')}")
+                
+                # Print additional information if available
+                if 'price_usd' in token_info and token_info['price_usd']:
+                    print(f"Price (USD): ${token_info['price_usd']:.6f}")
+                if 'market_cap' in token_info and token_info['market_cap']:
+                    print(f"Market Cap (USD): ${token_info['market_cap']:,.2f}")
+                if 'image' in token_info and token_info['image']:
+                    print(f"Image URL: {token_info['image']}")
+            else:
+                print(f"No token found with symbol: {symbol} on network: {self.aggregator.network}")
+        except Exception as e:
+            print(f"Error getting token information: {str(e)}")
 
     def _handle_load_docs(self, input_list: List[str]):
         """Handle the load-docs command"""

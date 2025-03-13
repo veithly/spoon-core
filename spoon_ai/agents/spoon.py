@@ -1,38 +1,29 @@
 import asyncio
+import datetime
 import json
 import logging
-from pathlib import Path
-from typing import Awaitable, Callable, Generator, List, Optional, AsyncGenerator, Dict, Any
-import datetime
 import os
 import uuid
+from pathlib import Path
+from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generator,
+                    List, Optional)
 
 from langchain.callbacks import AsyncIteratorCallbackHandler
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import AsyncCallbackHandler
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
-from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.documents import Document
 
+from spoon_ai.agents.rag import RetrievalMixin
 from utils.config_manager import ConfigManager
-from spoon_ai.retrieval.chroma import ChromaClient
-
-logging.getLogger("langchain").setLevel(logging.ERROR)
-logging.getLogger("langchain_openai").setLevel(logging.ERROR)
-logging.getLogger("openai").setLevel(logging.ERROR)
-logging.getLogger("requests").setLevel(logging.ERROR)
-logging.getLogger("urllib3").setLevel(logging.ERROR)
-logging.getLogger("httpx").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
-DEBUG = False
-def debug_log(message):
-    if DEBUG:
-        logger.info(f"DEBUG: {message}\n")
 
-class Agent:
+
+class SpoonAI(RetrievalMixin):
     def __init__(self, name: str):
         agent_config_path = Path('agents') / f'{name}.json'
         if not agent_config_path.exists():
@@ -55,10 +46,10 @@ class Agent:
         # Initialize chat history
         self.chat_history = []
         
-        # Initialize retrieval client
+        # Set up config directory for retrieval
         self.config_dir = Path.home() / ".config" / "spoonai"
         self.config_dir.mkdir(exist_ok=True)
-        self.retrieval_client = ChromaClient(str(self.config_dir))
+        # retrieval_client will be initialized by RetrievalMixin when needed
         
         self.chatbot = self._generate_chatbot()
     
@@ -94,34 +85,14 @@ class Agent:
         
         
     def perform_action(self, action_name: str, action_args: List[str], callback: Optional[Callable[[str], None]] = None):
+        """Perform an action with the given name and arguments"""
         if action_name == "chat":
             assert len(action_args) == 1, 'Usage: action chat "<message>"'
             return self._generate_response(action_args[0])
         else:
             raise ValueError(f"Unsupported action: {action_name}")
         
-    def add_documents(self, documents: List[Document]):
-        """Add documents to the retrieval system"""
-        if self.retrieval_client is None:
-            debug_log("Initializing retrieval client")
-            self.retrieval_client = ChromaClient(str(self.config_dir))
-        
-        self.retrieval_client.add_documents(documents)
-        debug_log(f"Added {len(documents)} documents to retrieval system for agent {self.name}")
-    
-    def retrieve_relevant_documents(self, query: str, k: int = 5) -> List[Document]:
-        """Retrieve relevant documents for a query"""
-        if self.retrieval_client is None:
-            debug_log("Initializing retrieval client")
-            self.retrieval_client = ChromaClient(str(self.config_dir))
-        
-        try:
-            docs = self.retrieval_client.query(query, k=k)
-            debug_log(f"Retrieved {len(docs)} documents for query: {query}...")
-            return docs
-        except Exception as e:
-            debug_log(f"Error retrieving documents: {e}")
-            return []
+    # RAG methods have been moved to RetrievalMixin
             
     async def astream_chat_response(self, message: str, callback: Optional[Callable[[str], Awaitable[None]]] = None) -> AsyncGenerator[str, None]:
         debug_log(f"Starting streaming response for message: {message[:30]}...")
@@ -141,14 +112,8 @@ class Agent:
             elif isinstance(self.chat_history, list):
                 chat_messages = self.chat_history
             
-            # Retrieve relevant documents
-            relevant_docs = self.retrieve_relevant_documents(message)
-            context_str = ""
-            debug_log(f"Retrieved {len(relevant_docs)} relevant documents")
-            if relevant_docs:
-                context_str = "\n\nRelevant context:\n"
-                for i, doc in enumerate(relevant_docs):
-                    context_str += f"[Document {i+1}]\n{doc.page_content}\n\n"
+            # Retrieve relevant documents using the mixin method
+            context_str, relevant_docs = self.get_context_from_query(message)
             
             for i in range(0, len(chat_messages) - 1, 2):
                 if i + 1 < len(chat_messages) and len(history_pairs) < history_limit:

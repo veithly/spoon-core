@@ -12,6 +12,11 @@
             "name": "retrieve",
             "description": "Retrieve information from the database",
             "parameters": {}
+        },
+        {
+            "name": "uniswap implementation",
+            "description": "Uniswap implementation",
+            "parameters": {}
         }
     ],
     "prompt_template": "You are Spoon AI, a helpful assistant. You worked for NEO blockchain.",

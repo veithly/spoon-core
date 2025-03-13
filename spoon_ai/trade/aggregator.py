@@ -42,6 +42,159 @@ class Aggregator:
     def get_native_token_address(self)->str:
         return "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
 
+    def get_token_info_by_address(self, token_address: str) -> Dict[str, Any]:
+        """
+        Get token information from contract address using CoinGecko API
+        """
+        try:
+            if token_address.lower() == self.get_native_token_address().lower():
+                # Handle native token
+                native_id_map = {
+                    "ethereum": "ethereum",
+                    "bsc": "binancecoin",
+                    "polygon": "matic-network",
+                    "avalanche": "avalanche-2",
+                    "fantom": "fantom"
+                }
+                
+                coin_id = native_id_map.get(self.network)
+                if coin_id:
+                    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+                    response = requests.get(url)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    return {
+                        "address": token_address,
+                        "name": data.get("name", "Native Token"),
+                        "symbol": data.get("symbol", "").upper(),
+                        "decimals": 18,
+                        "totalSupply": 0,
+                        "network": self.network,
+                        "chainId": self.chain_id,
+                        "price_usd": data.get("market_data", {}).get("current_price", {}).get("usd"),
+                        "image": data.get("image", {}).get("small")
+                    }
+                else:
+                    return {
+                        "address": token_address,
+                        "name": "Native Token",
+                        "symbol": self.network.upper(),
+                        "decimals": 18,
+                        "totalSupply": 0,
+                        "network": self.network,
+                        "chainId": self.chain_id
+                    }
+            
+            # For ERC20 tokens
+            # Convert network name to CoinGecko platform ID
+            platform_map = {
+                "ethereum": "ethereum",
+                "bsc": "binance-smart-chain",
+                "polygon": "polygon-pos",
+                "avalanche": "avalanche",
+                "fantom": "fantom"
+            }
+            
+            platform = platform_map.get(self.network, self.network)
+            
+            # Get token info from CoinGecko
+            url = f"https://api.coingecko.com/api/v3/coins/{platform}/contract/{token_address.lower()}"
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Get token decimals from contract if not provided by CoinGecko
+            decimals = 18  # Default
+            try:
+                token_address_checksum = Web3.to_checksum_address(token_address)
+                contract = self._web3.eth.contract(address=token_address_checksum, abi=ERC20_ABI)
+                decimals = contract.functions.decimals().call()
+            except Exception as e:
+                logger.warning(f"Could not get decimals from contract: {e}")
+            
+            return {
+                "address": token_address,
+                "name": data.get("name", ""),
+                "symbol": data.get("symbol", "").upper(),
+                "decimals": decimals,
+                "totalSupply": data.get("market_data", {}).get("total_supply"),
+                "network": self.network,
+                "chainId": self.chain_id,
+                "price_usd": data.get("market_data", {}).get("current_price", {}).get("usd"),
+                "market_cap": data.get("market_data", {}).get("market_cap", {}).get("usd"),
+                "image": data.get("image", {}).get("small")
+            }
+        except Exception as e:
+            logger.error(f"Error getting token info for {token_address}: {e}")
+            return None
+    
+    def get_token_info_by_symbol(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get token information from symbol using CoinGecko API
+        """
+        try:
+            # Check if it's a native token
+            native_symbols = {
+                "ethereum": "ETH",
+                "bsc": "BNB",
+                "polygon": "MATIC",
+                "avalanche": "AVAX",
+                "fantom": "FTM"
+            }
+            
+            if symbol.upper() == native_symbols.get(self.network, ""):
+                return self.get_token_info_by_address(self.get_native_token_address())
+            
+            if not hasattr(self, "coins"):
+                # Search for the token in CoinGecko
+                url = "https://api.coingecko.com/api/v3/coins/list"
+                response = requests.get(url)
+                response.raise_for_status()
+                self.coins = response.json()
+            
+            # Filter coins by symbol
+            matching_coins = [coin for coin in self.coins if coin.get("symbol", "").lower() == symbol.lower()]
+            
+            if not matching_coins:
+                logger.warning(f"No tokens found with symbol {symbol}")
+                return None
+            
+            # Get contract addresses for each matching coin
+            platform_map = {
+                "ethereum": "ethereum",
+                "bsc": "binance-smart-chain",
+                "polygon": "polygon-pos",
+                "avalanche": "avalanche",
+                "fantom": "fantom"
+            }
+            
+            
+            platform = platform_map.get(self.network, self.network)
+            
+            for coin in matching_coins:
+                coin_id = coin.get("id")
+                url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+                response = requests.get(url)
+                
+                if response.status_code != 200:
+                    continue
+                
+                data = response.json()
+                platforms = data.get("platforms", {})
+                
+                if platform in platforms and platforms[platform]:
+                    token_address = platforms[platform]
+                    return self.get_token_info_by_address(token_address)
+            
+            # If we couldn't find a token with matching symbol on the current network
+            logger.warning(f"No token with symbol {symbol} found on {self.network}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting token info for symbol {symbol}: {e}")
+            return None
+
     def get_balance(self, token_address: str = None) -> float:
         try:
             private_key = os.getenv("PRIVATE_KEY")
