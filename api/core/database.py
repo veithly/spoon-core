@@ -1,11 +1,14 @@
+from logging import getLogger
 from typing import AsyncGenerator
 
-from api.core.config import settings
-from loguru import logger
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
+
+from api.core.config import settings
+
+logger = getLogger("api")
 
 engine = create_async_engine(
     settings.DATABASE_URL,

@@ -1,12 +1,12 @@
 import asyncio
 import uuid
+from logging import getLogger
 from typing import AsyncIterable, Awaitable, List
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.status import HTTP_401_UNAUTHORIZED
@@ -18,6 +18,8 @@ from models.response import OpenAIStreamResponse
 from models.workflow import Workflow
 from spoon_ai.callbacks import StorageAsyncIteratorCallbackHandler
 from utils import ALGORITHM, SECRET_KEY
+
+logger = getLogger("api")
 
 router = APIRouter(prefix="/v1/chat")
 security = HTTPBearer()

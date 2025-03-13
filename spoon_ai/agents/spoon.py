@@ -21,7 +21,10 @@ from utils.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-
+DEBUG = False
+def debug_log(msg: str):
+    if DEBUG:
+        logger.info(f"DEBUG: {msg}\n")
 
 class SpoonAI(RetrievalMixin):
     def __init__(self, name: str):

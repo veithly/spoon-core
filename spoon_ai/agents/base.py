@@ -3,7 +3,7 @@ from abc import ABC
 from contextlib import asynccontextmanager
 from typing import Literal, Optional, List
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 
 from spoon_ai.chat import ChatBot, Memory
@@ -40,14 +40,16 @@ class BaseAgent(BaseModel, ABC):
         super().__init__(**kwargs)
         self.state = AgentState.IDLE
     
-    def add_message(self, role: Literal["user", "assistant"], content: str):
-        if role not in ["user", "assistant"]:
+    def add_message(self, role: Literal["user", "assistant", "tool"], content: str):
+        if role not in ["user", "assistant", "tool"]:
             raise ValueError(f"Invalid role: {role}")
         
         if role == "user":
             self.memory.add_message(HumanMessage(content=content))
-        else:
+        elif role == "assistant":
             self.memory.add_message(AIMessage(content=content))
+        elif role == "tool":
+            self.memory.add_message(ToolMessage(content=content))
     
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):

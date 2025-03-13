@@ -1,10 +1,13 @@
 import sys
+from logging import getLogger
 
 import uvicorn
-from api.routers import chat, models, token
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from loguru import logger
+
+from api.routers import chat, models, token
+
+logger = getLogger("api")
 
 app = FastAPI(docs_url=None, redoc_url=None)
 logger.add(sys.stdout, format="{time} {level} {message}", level="INFO")
