@@ -18,6 +18,7 @@ from langchain_openai import ChatOpenAI
 
 from spoon_ai.agents.rag import RetrievalMixin
 from utils.config_manager import ConfigManager
+from spoon_ai.agents.toolcall import ToolCallAgent
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ def debug_log(msg: str):
     if DEBUG:
         logger.info(f"DEBUG: {msg}\n")
 
-class SpoonAI(RetrievalMixin):
+class SpoonChatAI(RetrievalMixin):
     def __init__(self, name: str):
         agent_config_path = Path('agents') / f'{name}.json'
         if not agent_config_path.exists():
@@ -92,6 +93,8 @@ class SpoonAI(RetrievalMixin):
         if action_name == "chat":
             assert len(action_args) == 1, 'Usage: action chat "<message>"'
             return self._generate_response(action_args[0])
+        elif action_name == "act":
+            pass
         else:
             raise ValueError(f"Unsupported action: {action_name}")
         

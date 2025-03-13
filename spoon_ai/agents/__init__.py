@@ -1,1 +1,1 @@
-from .spoon import SpoonAI
+from .spoon_chat import SpoonAI

@@ -15,7 +15,7 @@ from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
-from spoon_ai.agents import SpoonAI, debug_log
+from spoon_ai.agents import SpoonChatAI, debug_log
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.trade.aggregator import Aggregator
 from utils.config_manager import ConfigManager
@@ -220,7 +220,7 @@ class SpoonAICLI:
     
     def  _load_agent(self, name: str):
         if name == "default":
-            self.agents[name] = SpoonAI(name)
+            self.agents[name] = SpoonChatAI(name)
             self.current_agent = self.agents[name]
             logger.info(f"Loaded agent: {self.current_agent.name}")
         else:

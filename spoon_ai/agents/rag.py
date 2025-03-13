@@ -1,7 +1,7 @@
 from typing import List, Optional
 from langchain_core.documents import Document
 
-from spoon_ai.agents.spoon import debug_log
+from spoon_ai.agents.spoon_chat import debug_log
 
 class RetrievalMixin:
     """Mixin class for retrieval-augmented generation functionality"""
