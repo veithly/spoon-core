@@ -1,7 +1,15 @@
 from typing import List, Optional
 from langchain_core.documents import Document
 
-from spoon_ai.agents.spoon_chat import debug_log
+from logging import getLogger
+
+logger = getLogger(__name__)
+
+DEBUG = True
+
+def debug_log(message):
+    if DEBUG:
+        logger.debug(message)
 
 class RetrievalMixin:
     """Mixin class for retrieval-augmented generation functionality"""

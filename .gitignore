@@ -2,3 +2,5 @@
 __pycache__
 .vscode
 chat_logs/*
+
+react_logs/*

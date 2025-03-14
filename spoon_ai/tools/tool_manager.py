@@ -2,22 +2,27 @@ import os
 from typing import Any, Dict, Iterator, List
 
 from openai import OpenAI
-from pinecone import Pinecone
+from pinecone.grpc import PineconeGRPC as Pinecone
+from pinecone import ServerlessSpec
 
 from spoon_ai.tools.base import BaseTool, ToolFailure, ToolResult
 
 
 class ToolManager:
-    def __init__(self, *tools: BaseTool):
+    def __init__(self, tools: List[BaseTool]):
         self.tools = tools
         self.tool_map = {tool.name: tool for tool in tools}
         self.indexed = False
-        self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-        index_name = "dex-tools"
-        if index_name not in self.pc.list_indexes():
-            self.pc.create_index(index_name, dimension=3072)
-        self.index = self.pc.Index(index_name)
-        self.embedding_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+    
+    def _lazy_init_pinecone(self):
+        if not hasattr(self, "pc"):
+            self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+            index_name = "dex-tools"
+            if index_name not in self.pc.list_indexes().names():
+                self.pc.create_index(index_name, dimension=3072, spec=ServerlessSpec(cloud="aws", region="us-east-1"))
+            self.index = self.pc.Index(index_name)
+            self.embedding_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
     def __getitem__(self, name: str) -> BaseTool:
         return self.tool_map[name]
@@ -61,6 +66,7 @@ class ToolManager:
         del self.tool_map[name]       
 
     def index_tools(self):
+        self._lazy_init_pinecone()
         vectors = []
         for tool in self.tools:
             embedding_vector = self.embedding_client.embeddings.create(
@@ -81,6 +87,8 @@ class ToolManager:
         self.indexed = True
         
     def query_tools(self, query: str, top_k: int = 5, rerank_k: int = 20) -> List[BaseTool]:
+        if not self.indexed:
+            self.index_tools()
         embedding_vector = self.embedding_client.embeddings.create(
             input=query,
             model="text-embedding-3-large"
@@ -92,17 +100,23 @@ class ToolManager:
             include_values=False,
             vector=embedding_vector.data[0].embedding
         )
+        print(results)
+        doc_to_tool = {}
+        for match in results["matches"]:
+            doc_to_tool[match["metadata"]["description"]] = match["id"]
         rerank_results = self.pc.inference.rerank(
             model="bge-reranker-v2-m3",
             query=query,
             documents=[match["metadata"]["description"] for match in results["matches"]],
             top_n=top_k
         )
-        ranked_results = [
-            self.tool_map[results["matches"][i]["id"]]
-            for i in rerank_results["results"][0]["matches"]
-        ]
-        return ranked_results
+        print("="* 30)
+        print(rerank_results)
+        print("="* 30)
+        result_tool_names = []
+        for doc in rerank_results.data:
+            result_tool_names.append(doc_to_tool[doc.document.text])
+        return result_tool_names
         
         
             

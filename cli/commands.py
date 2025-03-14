@@ -9,28 +9,18 @@ from pathlib import Path
 from typing import Callable, Dict, List
 
 from prompt_toolkit import PromptSession, print_formatted_text
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-from spoon_ai.agents import SpoonChatAI, debug_log
+from spoon_ai.agents import SpoonChatAI, SpoonReactAI
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.trade.aggregator import Aggregator
 from utils.config_manager import ConfigManager
 
-# from termcolor import colored
-# class ColoredFormatter(logging.Formatter):
-#     COLORS = {
-#         'DEBUG': 'cyan',
-#         'INFO': 'green',
-#         'WARNING': 'yellow',
-#         'ERROR': 'red',
-#         'CRITICAL': 'bold_red'}
-#     def format(self, record):
-#         level_color = super().format(record)
-#         return colored(level_color, self.COLORS[record.levelname])
+
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
 logging.getLogger("langchain").setLevel(logging.ERROR)
@@ -223,6 +213,10 @@ class SpoonAICLI:
             self.agents[name] = SpoonChatAI(name)
             self.current_agent = self.agents[name]
             logger.info(f"Loaded agent: {self.current_agent.name}")
+        elif name == "react":
+            self.agents[name] = SpoonReactAI()
+            self.current_agent = self.agents[name]
+            logger.info(f"Loaded agent: {self.current_agent.name}")
         else:
             logger.error(f"Agent {name} not found")
     
@@ -290,6 +284,12 @@ class SpoonAICLI:
                     self._start_interactive_chat()
             except Exception as e:
                 logger.error(f"Error during action: {e}")
+        elif action_name == "react":
+            # try:
+            #     self._start_interactive_react()
+            # except Exception as e:
+            #     logger.error(f"Error during action: {e}")
+            self._start_interactive_react()
         elif action_name == "new":
             self._handle_new_chat([])
         elif action_name == "list":
@@ -549,6 +549,98 @@ class SpoonAICLI:
             )
             print("="*50 + "\n")
         
+    def _start_interactive_react(self):
+        """Start an interactive react session with the current agent."""
+        # Check if current agent is a ReActAgent
+        from spoon_ai.agents.react import ReActAgent
+        if not isinstance(self.current_agent, ReActAgent):
+            logger.warning(f"Current agent {self.current_agent.name} is not a ReActAgent. Switching to chat mode.")
+            self._start_interactive_chat()
+            return
+        
+        # Create a new prompt session for react
+        react_style = Style.from_dict({
+            'agent': 'ansicyan bold',
+            'user': 'ansigreen',
+            'system': 'ansigray',
+            'header': 'ansiyellow bold',
+            'thinking': 'ansiyellow',
+            'info': 'ansiblue',
+        })
+        
+        # Create a react log file
+        react_log_dir = Path('react_logs')
+        react_log_dir.mkdir(exist_ok=True)
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        react_log_file = react_log_dir / f"react_{self.current_agent.name}_{timestamp}.txt"
+        
+        # Display welcome message
+        logger.info("="*80)
+        logger.info(f"Starting react session with {self.current_agent.name}")
+        logger.info("📝 Type your message and press Enter to send.")
+        logger.info("🔄 Press Ctrl+C or Ctrl+D to exit react mode and return to main CLI.")
+        logger.info(f"📋 React log will be saved to: {react_log_file}")
+        logger.info("⚠️ Note: This session will not save chat history.")
+        logger.info("="*80 + "\n")
+        
+        # Function to save react to log file
+        def save_react_to_log():
+            with open(react_log_file, 'w') as f:
+                f.write(f"React session with {self.current_agent.name}\n")
+                f.write(f"Started at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                
+                # Get message list
+                react_messages = []
+                if hasattr(self.current_agent, 'memory') and hasattr(self.current_agent.memory, 'messages'):
+                    react_messages = self.current_agent.memory.messages
+                
+                for message in react_messages:
+                    if isinstance(message, HumanMessage):
+                        f.write(f"You: {message.content}\n\n")
+                    elif isinstance(message, AIMessage):
+                        f.write(f"{self.current_agent.name}: {message.content}\n\n")
+                    elif isinstance(message, ToolMessage):
+                        f.write(f"Tool: {message.content}\n\n")
+                
+                f.write(f"\nReact session ended at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
+        # Start react loop
+        try:
+            while True:
+                try:
+                    # Get user input
+                    user_message = self.session.prompt(
+                        PromptHTML("<user>You</user> > "),
+                        style=self.style,
+                    ).strip()
+                    
+                    if not user_message:
+                        continue
+                    
+                    # Add to memory
+                    self.current_agent.add_message("user", user_message)
+                    
+                    # Get response from agent
+                    print_formatted_text(PromptHTML(f"<thinking>{self.current_agent.name} is thinking...</thinking>"), style=react_style)
+                    
+                    # Run the ReAct agent's step method
+                    result = asyncio.run(self.current_agent.step())
+                    
+                    # Display the result
+                    print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {result}"), style=react_style)
+                    
+                except (KeyboardInterrupt, EOFError):
+                    logger.info("\nExiting react mode...")
+                    break
+        finally:
+            # Save react log when exiting
+            save_react_to_log()
+            print_formatted_text(
+                PromptHTML(f"<info>React log saved to: {react_log_file}</info>"),
+                style=react_style
+            )
+            print("="*50 + "\n")
+
     def run(self):
         self._load_default_agent()
         

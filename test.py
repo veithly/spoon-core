@@ -1,7 +1,15 @@
+from spoon_ai.tools.tool_manager import ToolManager
 from spoon_ai.tools.dex.wallet_analysis import WalletAnalysis
 from spoon_ai.tools.dex.token_holders import TokenHolders
 from spoon_ai.tools.dex.trading_history import TradingHistory
+from spoon_ai.tools.dex.uniswap_liquidity import UniswapLiquidity
+from spoon_ai.tools.dex.predict_price import PredictPrice
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(TradingHistory().execute("0xCf512E9097B417b8Dd1b2e664aa7ceA92AEf7221"))
+    tool_manager = ToolManager([WalletAnalysis(), TokenHolders(), TradingHistory(), UniswapLiquidity(), PredictPrice()])
+    tool_manager.index_tools()
+    print(tool_manager.query_tools("how many holders does this token have?", top_k=1, rerank_k=3))
+    
+    
+    

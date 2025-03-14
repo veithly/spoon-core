@@ -1,1 +1,1 @@
-from .toolcall import TOOLCALL_SYSTEM_PROMPT
+from .toolcall import SYSTEM_PROMPT, NEXT_STEP_PROMPT

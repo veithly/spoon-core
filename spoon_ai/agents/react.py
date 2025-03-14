@@ -11,7 +11,6 @@ class ReActAgent(BaseAgent):
     async def act(self) -> str:
         raise NotImplementedError("Subclasses must implement this method")
     
-    @abstractmethod
     async def step(self) -> str:
         should_act = await self.think()
         if not should_act:

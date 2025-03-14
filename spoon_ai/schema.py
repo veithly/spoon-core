@@ -27,6 +27,8 @@ class ToolChoice(str, Enum):
     NONE = "none"
     AUTO = "auto"
     REQUIRED = "required"
+    
+    
 
 TOOL_CHOICE_VALUES = tuple(choice.value for choice in ToolChoice)
 TOOL_CHOICE_TYPE = Literal[TOOL_CHOICE_VALUES] # type: ignore

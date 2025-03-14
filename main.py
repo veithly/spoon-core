@@ -8,7 +8,7 @@ logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 
-async def main():
+def main():
     parser = argparse.ArgumentParser(description="SpoonAI CLI")
     parser.add_argument('--server', action='store_true', help='Start the server')
     parser.add_argument('--host', default='0.0.0.0', help='Server host')
@@ -23,5 +23,5 @@ async def main():
         cli.run()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
         

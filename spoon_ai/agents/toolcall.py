@@ -11,6 +11,7 @@ from spoon_ai.prompts.toolcall import \
 from spoon_ai.prompts.toolcall import SYSTEM_PROMPT as TOOLCALL_SYSTEM_PROMPT
 from spoon_ai.schema import TOOL_CHOICE_TYPE, AgentState, ToolCall, ToolChoice
 from spoon_ai.tools import Terminate, ToolManager
+
 logger = getLogger("spoon_ai")
 
 class ToolCallAgent(ReActAgent):
@@ -34,7 +35,7 @@ class ToolCallAgent(ReActAgent):
         
         response = await self.llm.ask_tool(
             messages=self.memory.messages,
-            system_msgs=[SystemMessage(content=self.system_prompt)] if self.system_prompt else None,
+            system_msg=self.system_prompt,
             tools=self.avaliable_tools.to_params(),
             tool_choice=self.tool_choices,
         )
@@ -42,7 +43,7 @@ class ToolCallAgent(ReActAgent):
         self.tool_calls = response.tool_calls
         
         logger.info(f"{self.name}'s thoughts: {response.content}")
-        logger.info(f"{self.name} selected {len(self.tool_calls) if self.tool_calls else 0} tools")
+        logger.info(f"{self.name} selected {len(self.tool_calls) if self.tool_calls else 0} tools {self.tool_calls}")
         
         try:
             if self.tool_choices == ToolChoice.NONE:
@@ -83,7 +84,7 @@ class ToolCallAgent(ReActAgent):
             return "Error: Invalid tool call"
         
         name = tool_call.function.name
-        if name not in self.avaliable_tools.tool_names:
+        if name not in self.avaliable_tools.tool_map:
             return f"Error: Tool {name} not found"
         
         try:
@@ -96,7 +97,7 @@ class ToolCallAgent(ReActAgent):
                 else f"cmd {name} execution without any output"
             )
             
-            await self._handle_special_tool(name, result,)
+            self._handle_special_tool(name, result,)
             return observation
         
         except Exception as e:
@@ -104,13 +105,15 @@ class ToolCallAgent(ReActAgent):
             return f"Error: {e}"
             
         
-    async def _handle_special_tool(self, name: str, result:Any, **kwargs):
+    def _handle_special_tool(self, name: str, result:Any, **kwargs):
         if not self._is_special_tool(name):
             return
         if self._should_finish_execution(name, result, **kwargs):
             self.state = AgentState.FINISHED
         return
     
-    async def _is_special_tool(self, name: str) -> bool:
+    def _is_special_tool(self, name: str) -> bool:
         return name.lower() in [n.lower() for n in self.special_tool_names]
     
+    def _should_finish_execution(self, name: str, result: Any, **kwargs) -> bool:
+        return True
