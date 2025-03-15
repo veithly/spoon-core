@@ -12,13 +12,15 @@ from langchain.callbacks import AsyncIteratorCallbackHandler
 from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
 from spoon_ai.agents.rag import RetrievalMixin
 from utils.config_manager import ConfigManager
+from utils.utils import to_langchain_messages
 from spoon_ai.agents.toolcall import ToolCallAgent
+from spoon_ai.schema import Role, Message
+
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ class SpoonChatAI(RetrievalMixin):
         debug_log(f"Starting streaming response for message: {message[:30]}...")
         
         try:
-            system_message = SystemMessage(content=self.prompt_template)
+            system_message = Message(role=Role.SYSTEM, content=self.prompt_template)
             messages = [system_message]
             
             # Add chat history
@@ -131,15 +133,15 @@ class SpoonChatAI(RetrievalMixin):
             debug_log(f"Added {len(history_pairs)} history pairs to context")
             
             for user_msg, assistant_msg in history_pairs:
-                messages.append(HumanMessage(content=user_msg['content']))
-                messages.append(SystemMessage(content=f"Assistant: {assistant_msg['content']}"))
+                messages.append(Message(role=Role.USER, content=user_msg['content']))
+                messages.append(Message(role=Role.ASSISTANT, content=assistant_msg['content']))
             
             # Add context from retrieved documents if available
             if context_str:
                 message_with_context = f"{message}\n{context_str}"
-                messages.append(HumanMessage(content=message_with_context))
+                messages.append(Message(role=Role.USER, content=message_with_context))
             else:
-                messages.append(HumanMessage(content=message))
+                messages.append(Message(role=Role.USER, content=message))
             
             debug_log("Creating callback handler for streaming")
             callback_handler = AsyncIteratorCallbackHandler()
@@ -151,7 +153,8 @@ class SpoonChatAI(RetrievalMixin):
             )
             
             debug_log("Starting LLM task")
-            task = asyncio.create_task(streaming_llm.ainvoke(messages))
+            langchain_messages = to_langchain_messages(messages)
+            task = asyncio.create_task(streaming_llm.ainvoke(langchain_messages))
             
             chunk_count = 0
             has_yielded = False
@@ -202,7 +205,7 @@ class SpoonChatAI(RetrievalMixin):
                 await callback(error_message)
         
     def _generate_response(self, message: str) -> str:
-        system_message = SystemMessage(content=self.prompt_template)
+        system_message = Message(role=Role.SYSTEM, content=self.prompt_template)
         messages = [system_message]
         
         history_limit = 10
@@ -221,13 +224,15 @@ class SpoonChatAI(RetrievalMixin):
                     history_pairs.append((user_msg, assistant_msg))
         
         for user_msg, assistant_msg in history_pairs:
-            messages.append(HumanMessage(content=user_msg['content']))
-            messages.append(SystemMessage(content=f"Assistant: {assistant_msg['content']}"))
+            messages.append(Message(role=Role.USER, content=user_msg['content']))
+            messages.append(Message(role=Role.ASSISTANT, content=assistant_msg['content']))
         
         # Add current message
-        messages.append(HumanMessage(content=message))
+        messages.append(Message(role=Role.USER, content=message))
+        from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
         
-        res = self.chatbot.invoke(messages)
+        langchain_messages = to_langchain_messages(messages)
+        res = self.chatbot.invoke(langchain_messages)
         return res.content
         
     def load_chat_history(self):

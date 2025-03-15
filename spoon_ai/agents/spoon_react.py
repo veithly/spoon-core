@@ -18,7 +18,8 @@ class SpoonReactAI(ToolCallAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
     
     max_steps: int = 10
+    tool_choice: str = "auto"
     
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([Terminate(), PredictPrice(), TokenHolders(), TradingHistory(), UniswapLiquidity(), WalletAnalysis()]))
     special_tools: List[str] = Field(default=["terminate"])
-    llm: ChatBot = Field(default_factory=lambda: ChatBot(model_name="gpt-4.5-preview"))
+    llm: ChatBot = Field(default_factory=lambda: ChatBot())

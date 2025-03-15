@@ -1,13 +1,17 @@
 import logging
+import uuid
+import json
+import datetime
+from pathlib import Path
 from abc import ABC
 from contextlib import asynccontextmanager
 from typing import Literal, Optional, List
 
-from langchain_core.messages import ToolMessage, HumanMessage, AIMessage
+from spoon_ai.schema import Message, Role
 from pydantic import BaseModel, Field
 
 from spoon_ai.chat import ChatBot, Memory
-from spoon_ai.schema import AgentState
+from spoon_ai.schema import AgentState, ToolCall
 
 DEBUG = False
 def debug_log(message):
@@ -40,16 +44,19 @@ class BaseAgent(BaseModel, ABC):
         super().__init__(**kwargs)
         self.state = AgentState.IDLE
     
-    def add_message(self, role: Literal["user", "assistant", "tool"], content: str):
+    def add_message(self, role: Literal["user", "assistant", "tool"], content: str, tool_call_id: Optional[str] = None, tool_calls: Optional[List[ToolCall]] = None, tool_name: Optional[str] = None):
         if role not in ["user", "assistant", "tool"]:
             raise ValueError(f"Invalid role: {role}")
         
         if role == "user":
-            self.memory.add_message(HumanMessage(content=content))
+            self.memory.add_message(Message(role=Role.USER, content=content))
         elif role == "assistant":
-            self.memory.add_message(AIMessage(content=content))
+            if tool_calls:
+                self.memory.add_message(Message(role=Role.ASSISTANT, content=content, tool_calls=[{"id": toolcall.id, "type": "function", "function": toolcall.function.model_dump()} for toolcall in tool_calls]))
+            else:
+                self.memory.add_message(Message(role=Role.ASSISTANT, content=content))
         elif role == "tool":
-            self.memory.add_message(ToolMessage(content=content))
+            self.memory.add_message(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
     
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):
@@ -73,8 +80,7 @@ class BaseAgent(BaseModel, ABC):
         self.state = AgentState.RUNNING
         
         if request is not None:
-            self.memory.add_message("user", request)
-        
+            self.memory.add_message(Message(role=Role.USER, content=request))
         results: List[str] = []
         async with self.state_context(AgentState.RUNNING):
             while (
@@ -89,10 +95,9 @@ class BaseAgent(BaseModel, ABC):
                     self.handle_struck_state()
                 
                 results.append(f"Step {self.current_step}: {step_result}")
+                logger.info(f"Step {self.current_step}: {step_result}")
             
             if self.current_step >= self.max_steps:
-                self.current_step = 0
-                self.state = AgentState.IDLE
                 results.append(f"Step {self.current_step}: Stuck in loop. Resetting state.")
                 
         return "\n".join(results) if results else "No results"
@@ -111,7 +116,7 @@ class BaseAgent(BaseModel, ABC):
         duplicate_count = sum(
             1
             for msg in reversed(self.memory.get_messages()[:-1])
-            if isinstance(msg, AIMessage) and msg.content == last_message.content
+            if msg.role == Role.ASSISTANT and msg.content == last_message.content
         )
         return duplicate_count >= 2
     
@@ -121,4 +126,39 @@ class BaseAgent(BaseModel, ABC):
         self.next_step_prompt = f"{struck_prompt}\n\n{self.next_step_prompt}"
         logger.warning(f"Added struck prompt: {struck_prompt}")
     
-    
+    def save_chat_history(self):
+        history_dir = Path('chat_logs')
+        history_dir.mkdir(exist_ok=True)
+        
+        history_file = history_dir / f'{self.name}_history.json'
+        
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        if isinstance(self.chat_history, list):
+            save_data = {
+                'metadata': {
+                    'agent_name': self.name,
+                    'created_at': now,
+                    'updated_at': now
+                },
+                'messages': self.chat_history
+            }
+        elif isinstance(self.chat_history, dict) and 'metadata' in self.chat_history:
+            save_data = self.chat_history
+            save_data['metadata']['updated_at'] = now
+        else:
+            save_data = {
+                'metadata': {
+                    'agent_name': self.name,
+                    'created_at': now,
+                    'updated_at': now
+                },
+                'messages': []
+            }
+        
+        try:
+            with open(history_file, 'w', encoding='utf-8') as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            debug_log(f"Saved chat history with {len(save_data.get('messages', []))} messages")
+        except Exception as e:
+            debug_log(f"Error saving chat history: {e}")

@@ -2,8 +2,8 @@ import json
 from logging import getLogger
 from typing import Any, List
 
-from langchain_core.messages import SystemMessage
 from pydantic import Field
+from termcolor import colored
 
 from spoon_ai.agents.react import ReActAgent
 from spoon_ai.prompts.toolcall import \
@@ -42,8 +42,9 @@ class ToolCallAgent(ReActAgent):
 
         self.tool_calls = response.tool_calls
         
-        logger.info(f"{self.name}'s thoughts: {response.content}")
-        logger.info(f"{self.name} selected {len(self.tool_calls) if self.tool_calls else 0} tools {self.tool_calls}")
+        logger.info(colored(f"🤔 {self.name}'s thoughts: {response.content}", "cyan"))
+        tool_count = len(self.tool_calls) if self.tool_calls else 0
+        logger.info(colored(f"🛠️ {self.name} selected {tool_count} tools: {self.tool_calls}", "green" if tool_count else "yellow"))
         
         try:
             if self.tool_choices == ToolChoice.NONE:
@@ -54,13 +55,16 @@ class ToolCallAgent(ReActAgent):
                     self.add_message("assistant", response.content)
                     return True
                 return False
-            elif self.tool_choices == ToolChoice.REQUIRED and not self.tool_calls:
+            self.add_message("assistant", response.content, tool_calls=self.tool_calls)
+            if self.tool_choices == ToolChoice.REQUIRED and not self.tool_calls:
                 return True
-            elif self.tool_choices == ToolChoice.AUTO and not self.tool_calls:
+            if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:
                 return bool(response.content)
             return bool(self.tool_calls)
         except Exception as e:
             logger.error(f"{self.name} failed to think: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.add_message("assistant", f"Error encountered while thinking: {e}")
             return False
         
@@ -68,15 +72,14 @@ class ToolCallAgent(ReActAgent):
         if not self.tool_calls:
             if self.tool_choices == ToolChoice.REQUIRED:
                 raise ValueError("No tools to call")
-            return self.messages[-1].content or "No response from assistant"
+            return self.memory.messages[-1].content or "No response from assistant"
         
         results = []
         for tool_call in self.tool_calls:
             result = await self.execute_tool(tool_call)
             logger.info(f"Tool {tool_call.function.name} executed with result: {result}")
-            self.add_message("tool", result)
+            self.add_message("tool", result, tool_call_id=tool_call.id)
             results.append(result)
-            
         return "\n\n".join(results)
         
     async def execute_tool(self, tool_call: ToolCall) -> str:
@@ -97,7 +100,7 @@ class ToolCallAgent(ReActAgent):
                 else f"cmd {name} execution without any output"
             )
             
-            self._handle_special_tool(name, result,)
+            self._handle_special_tool(name, result)
             return observation
         
         except Exception as e:
@@ -117,3 +120,9 @@ class ToolCallAgent(ReActAgent):
     
     def _should_finish_execution(self, name: str, result: Any, **kwargs) -> bool:
         return True
+    
+    def clear(self):
+        self.memory.clear()
+        self.tool_calls = []
+        self.state = AgentState.IDLE
+        self.current_step = 0

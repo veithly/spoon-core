@@ -5,6 +5,7 @@ import logging
 import os
 import shlex
 import sys
+import traceback
 from pathlib import Path
 from typing import Callable, Dict, List
 
@@ -13,13 +14,12 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from spoon_ai.agents import SpoonChatAI, SpoonReactAI
 from spoon_ai.retrieval.document_loader import DocumentLoader
+from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
 from utils.config_manager import ConfigManager
-
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
@@ -29,6 +29,9 @@ logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
+from spoon_ai.schema import AgentState
+from spoon_ai.social_media.telegram import TelegramClient
+
 # handler = logging.StreamHandler()
 # handler.setFormatter(ColoredFormatter())
 # logger.addHandler(handler)
@@ -178,6 +181,14 @@ class SpoonAICLI:
             handler=self._handle_load_docs,
             aliases=["docs"]
         ))
+        
+        # Telegram Command
+        self.add_command(SpoonCommand(
+            name="telegram",
+            description="Start the Telegram client",
+            handler=self._handle_telegram_run,
+            aliases=["tg"]
+        ))
     
     def add_command(self, command: SpoonCommand):
         self.commands[command.name] = command
@@ -226,6 +237,8 @@ class SpoonAICLI:
             logger.info(f"  {agent.name}: {agent.description}")
 
     def _load_default_agent(self):
+        
+        self._load_agent("react")
         self._load_agent("default")
     
     def _set_prompt_toolkit(self):
@@ -249,19 +262,23 @@ class SpoonAICLI:
             history=FileHistory(history_file),
         )
         
-    def _handle_input(self, input_text: str):
+    async def _handle_input(self, input_text: str):
         try:
             input_list = shlex.split(input_text)
             command_name = input_list[0]
             command = self.commands.get(command_name)
             if command:
-                command.handler(input_list[1:] if len(input_list) > 1 else [])
+                if asyncio.iscoroutinefunction(command.handler):
+                    await command.handler(input_list[1:] if len(input_list) > 1 else [])
+                else:
+                    command.handler(input_list[1:] if len(input_list) > 1 else [])
             else:
                 logger.error(f"Command {command_name} not found")
         except Exception as e:
             logger.error(f"Error: {e}")
+            logger.error(traceback.format_exc())
         
-    def _handle_action(self, input_list: List[str]):
+    async def _handle_action(self, input_list: List[str]):
         if not self.current_agent:
             logger.error("No agent loaded")
             return
@@ -281,15 +298,12 @@ class SpoonAICLI:
                     logger.info(res)
                 else:
                     # Start interactive chat mode
-                    self._start_interactive_chat()
+                    await self._start_interactive_chat()
             except Exception as e:
                 logger.error(f"Error during action: {e}")
+                logger.error(traceback.format_exc())
         elif action_name == "react":
-            # try:
-            #     self._start_interactive_react()
-            # except Exception as e:
-            #     logger.error(f"Error during action: {e}")
-            self._start_interactive_react()
+            await self._start_interactive_react()
         elif action_name == "new":
             self._handle_new_chat([])
         elif action_name == "list":
@@ -302,7 +316,7 @@ class SpoonAICLI:
         else:
             self.current_agent.perform_action(action_name, action_args)
 
-    def _start_interactive_chat(self):
+    async def _start_interactive_chat(self):
         """Start an interactive chat session with the current agent."""
         # Initialize chat history if not exists
         if not hasattr(self.current_agent, 'chat_history'):
@@ -383,11 +397,12 @@ class SpoonAICLI:
             while True:
                 try:
                     # Get user input
-                    user_message = self.session.prompt(
+                    user_message = await self.session.prompt_async(
                         PromptHTML("<user>You</user> > "),
                         style=self.style,
-                    ).strip()
+                    )
                     
+                    user_message = user_message.strip()
                     if not user_message:
                         continue
                     
@@ -465,7 +480,7 @@ class SpoonAICLI:
                         
                         # Run the streaming function
                         cli_debug_log("Running stream_response function")
-                        response = asyncio.run(stream_response())
+                        response = await stream_response()
                         cli_debug_log(f"Stream response completed, got response of length {len(response)}")
                         
                         # Add to history if we got a response
@@ -549,13 +564,13 @@ class SpoonAICLI:
             )
             print("="*50 + "\n")
         
-    def _start_interactive_react(self):
+    async def _start_interactive_react(self):
         """Start an interactive react session with the current agent."""
         # Check if current agent is a ReActAgent
         from spoon_ai.agents.react import ReActAgent
         if not isinstance(self.current_agent, ReActAgent):
             logger.warning(f"Current agent {self.current_agent.name} is not a ReActAgent. Switching to chat mode.")
-            self._start_interactive_chat()
+            await self._start_interactive_chat()
             return
         
         # Create a new prompt session for react
@@ -595,11 +610,11 @@ class SpoonAICLI:
                     react_messages = self.current_agent.memory.messages
                 
                 for message in react_messages:
-                    if isinstance(message, HumanMessage):
+                    if message.role == Role.USER:
                         f.write(f"You: {message.content}\n\n")
-                    elif isinstance(message, AIMessage):
+                    elif message.role == Role.ASSISTANT:
                         f.write(f"{self.current_agent.name}: {message.content}\n\n")
-                    elif isinstance(message, ToolMessage):
+                    elif message.role == Role.TOOL:
                         f.write(f"Tool: {message.content}\n\n")
                 
                 f.write(f"\nReact session ended at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -618,16 +633,20 @@ class SpoonAICLI:
                         continue
                     
                     # Add to memory
-                    self.current_agent.add_message("user", user_message)
+                    # self.current_agent.add_message("user", user_message)
                     
                     # Get response from agent
                     print_formatted_text(PromptHTML(f"<thinking>{self.current_agent.name} is thinking...</thinking>"), style=react_style)
                     
+                    self.current_agent.state = AgentState.IDLE
+                    
                     # Run the ReAct agent's step method
-                    result = asyncio.run(self.current_agent.step())
+                    result = await self.current_agent.run(user_message)
                     
                     # Display the result
                     print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {result}"), style=react_style)
+                    
+                    self.current_agent.clear()
                     
                 except (KeyboardInterrupt, EOFError):
                     logger.info("\nExiting react mode...")
@@ -641,20 +660,21 @@ class SpoonAICLI:
             )
             print("="*50 + "\n")
 
-    def run(self):
+    async def run(self):
         self._load_default_agent()
         
         while True:
             try:
-                input_text = self.session.prompt(
+                input_text = await (self.session.prompt_async(
                     self._get_prompt(),
                     style=self.style,
-                ).strip()
+                ))
+                input_text = input_text.strip()
                 
                 if not input_text:
                     continue
                 
-                self._handle_input(input_text)
+                await self._handle_input(input_text)
             except KeyboardInterrupt:
                 continue
             except EOFError:
@@ -1061,4 +1081,7 @@ class SpoonAICLI:
         elif len(input_list) == 0:
             self.current_agent.delete_documents()
             
-            
+    async def _handle_telegram_run(self, input_list: List[str]):
+        telegram = TelegramClient(self.agents["react"])
+        asyncio.create_task(telegram.run())
+        print_formatted_text(PromptHTML("<green>Telegram client started</green>"))
