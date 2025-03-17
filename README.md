@@ -215,3 +215,212 @@ The ReAct Agent workflow includes the following key steps:
 This cycle repeats continuously until the task is completed or the preset goal is achieved.
 
 Through the ReAct Agent, SpoonAI can handle complex tasks that require deep thinking and multi-step actions, providing users with more intelligent and autonomous problem-solving capabilities.
+
+## Agent Usage and Customization Guide
+
+SpoonAI offers two ways to use Agents:
+1. Using predefined Agents - Simple declaration and execution
+2. Custom Agents - Creating your own tools and logic
+
+### Using Predefined Agents
+
+SpoonAI comes with several predefined Agents, such as SpoonChatAI and SpoonReactAI. Using these Agents is very simple and requires just a few lines of code:
+
+```python
+from spoon_ai.agents import SpoonChatAI, SpoonReactAI
+from spoon_ai.chat import ChatBot
+
+# Create a Chat Agent
+chat_agent = SpoonChatAI(llm=ChatBot())
+
+# Run the Agent and get a response
+response = await chat_agent.run("Hello, please introduce yourself")
+print(response)
+
+# Create a ReAct Agent
+react_agent = SpoonReactAI(llm=ChatBot())
+
+# Run the ReAct Agent and get a response
+response = await react_agent.run("Analyze the transaction history of this wallet address: 0x123...")
+print(response)
+```
+
+Predefined Agents are already configured with appropriate system prompts and tools, ready to use. You can also customize some parameters when creating them:
+
+```python
+# Create a ReAct Agent with custom parameters
+custom_react = SpoonReactAI(
+    llm=ChatBot(model="gpt-4"),  # Specify the model to use
+    max_steps=15,                # Set the maximum number of steps
+    system_prompt="Custom system prompt"  # Override the default system prompt
+)
+```
+
+### Custom Agents
+
+If predefined Agents don't meet your needs, you can create your own. SpoonAI provides a flexible framework to support custom Agents.
+
+#### 1. Creating Custom Tools
+
+First, you need to create custom tools. Each tool should inherit from the `BaseTool` class:
+
+```python
+from spoon_ai.tools.base import BaseTool
+
+class MyCustomTool(BaseTool):
+    name: str = "my_custom_tool"
+    description: str = "This is a custom tool for performing specific tasks"
+    parameters: dict = {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "Description of the first parameter"
+            },
+            "param2": {
+                "type": "integer",
+                "description": "Description of the second parameter"
+            }
+        },
+        "required": ["param1"]
+    }
+
+    async def execute(self, param1: str, param2: int = 0) -> str:
+        """Implement the tool's specific logic"""
+        # Implement your tool logic here
+        result = f"Processing parameters: {param1}, {param2}"
+        return result
+```
+
+Tool definitions include three main parts:
+- `name`: The unique name of the tool
+- `description`: A detailed description of the tool (AI will decide when to use it based on this)
+- `parameters`: JSON Schema definition of the tool parameters
+- `execute()`: Method implementing the tool's specific logic
+
+#### 2. Creating Custom Agents
+
+There are two ways to create custom Agents:
+
+**Method 1: Inheriting from an existing Agent class**
+
+```python
+from spoon_ai.agents import ToolCallAgent
+from spoon_ai.tools import ToolManager
+from pydantic import Field
+
+class MyCustomAgent(ToolCallAgent):
+    name: str = "my_custom_agent"
+    description: str = "This is my custom Agent"
+    
+    system_prompt: str = """You are an AI assistant specialized in performing specific tasks.
+    You can use the provided tools to complete tasks."""
+    
+    next_step_prompt: str = "What should be the next step?"
+    
+    max_steps: int = 8
+    
+    # Define available tools
+    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
+        MyCustomTool(),
+        # Add other tools...
+    ]))
+```
+
+**Method 2: Directly using ToolCallAgent and configuring tools**
+
+```python
+from spoon_ai.agents import ToolCallAgent
+from spoon_ai.tools import ToolManager
+from spoon_ai.chat import ChatBot
+
+# Create a tool manager
+tool_manager = ToolManager([
+    MyCustomTool(),
+    AnotherTool(),
+    # Add more tools...
+])
+
+# Create an Agent
+my_agent = ToolCallAgent(
+    name="my_agent",
+    description="Custom configured Agent",
+    llm=ChatBot(model="gpt-4"),
+    avaliable_tools=tool_manager,
+    system_prompt="Custom system prompt",
+    max_steps=12
+)
+```
+
+#### 3. Running Custom Agents
+
+After creating an Agent, you can run it just like predefined Agents:
+
+```python
+# Run the custom Agent
+response = await my_agent.run("Perform a specific task")
+print(response)
+```
+
+### Advanced Usage: Tool Combination and Indexing
+
+SpoonAI supports dynamic tool combination and semantic indexing, allowing Agents to more intelligently select appropriate tools:
+
+```python
+from spoon_ai.tools import ToolManager
+
+# Create multiple tools
+tools = [
+    MyCustomTool(),
+    AnotherTool(),
+    ThirdTool(),
+    # More tools...
+]
+
+# Create a tool manager
+tool_manager = ToolManager(tools)
+
+# Create a semantic index for tools (requires OpenAI API key)
+tool_manager.index_tools()
+
+# Find the most relevant tools based on a query
+relevant_tools = tool_manager.query_tools(
+    query="I need to analyze this data", 
+    top_k=3  # Return the top 3 most relevant tools
+)
+
+# Create a new Agent with the found tools
+from spoon_ai.agents import ToolCallAgent
+from spoon_ai.chat import ChatBot
+
+specialized_agent = ToolCallAgent(
+    name="specialized_agent",
+    llm=ChatBot(),
+    avaliable_tools=ToolManager(relevant_tools)
+)
+
+# Run the specialized Agent
+response = await specialized_agent.run("Analyze this dataset")
+```
+
+### Best Practices
+
+1. **Tool Design**:
+   - Each tool should have a clear, single responsibility
+   - Provide detailed descriptions to help AI understand when to use the tool
+   - Parameters should have clear types and descriptions
+
+2. **System Prompts**:
+   - Provide clear guidance and constraints for the Agent
+   - Explain the task's goals and expected behavior
+   - Explain how to use the available tools
+
+3. **Error Handling**:
+   - Tools should gracefully handle errors and return useful error messages
+   - Use the `ToolFailure` class to return error results
+
+4. **Step Limitations**:
+   - Set reasonable `max_steps` values to avoid infinite loops
+   - Complex tasks may require more steps, simple tasks fewer
+
+By following these guidelines, you can create powerful and flexible custom Agents to meet the needs of various complex tasks.

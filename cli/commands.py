@@ -624,10 +624,12 @@ class SpoonAICLI:
             while True:
                 try:
                     # Get user input
-                    user_message = self.session.prompt(
+                    user_message = await self.session.prompt_async(
                         PromptHTML("<user>You</user> > "),
                         style=self.style,
-                    ).strip()
+                    )
+                    
+                    user_message = user_message.strip()
                     
                     if not user_message:
                         continue

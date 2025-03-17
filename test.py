@@ -9,7 +9,10 @@ from spoon_ai.tools.dex.predict_price import PredictPrice
 if __name__ == "__main__":
     tool_manager = ToolManager([WalletAnalysis(), TokenHolders(), TradingHistory(), UniswapLiquidity(), PredictPrice()])
     tool_manager.index_tools()
-    print(tool_manager.query_tools("how many holders does this token have?", top_k=1, rerank_k=3))
+    
+    query = "xxxxx"
+    
+    print(tool_manager.query_tools(query, top_k=20, rerank_k=5))
     
     
     
