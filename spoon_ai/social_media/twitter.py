@@ -213,3 +213,39 @@ class TwitterClient:
         
         logger.info(f"Retrieved {len(replies)} replies")
         return replies
+
+    def send(self, message: str, tags: Optional[List[str]] = None, **kwargs) -> bool:
+        """
+        发送Twitter通知消息
+        
+        这个方法专门用于监控系统的通知功能，它将消息作为推文发布
+        
+        Args:
+            message: 通知消息内容
+            tags: 要附加的标签列表
+            **kwargs: 其他参数
+        
+        Returns:
+            bool: 是否发送成功
+        """
+        try:
+            # 检查消息长度并截断
+            max_length = 280
+            if len(message) > max_length:
+                message = message[:max_length-3] + "..."
+            
+            # 添加标签
+            if tags is None:
+                tags = kwargs.get("tags", ["#CryptoAlert", "#TradingAlert"])
+            
+            # 如果消息中没有标签且有空间，添加它们
+            if all(tag not in message for tag in tags) and len(message) + sum(len(tag) + 1 for tag in tags) <= max_length:
+                message += " " + " ".join(tags)
+            
+            # 发送推文
+            self.post_tweet(message)
+            logger.info("Twitter notification sent successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send Twitter notification: {str(e)}")
+            return False
