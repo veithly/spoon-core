@@ -52,3 +52,7 @@ class Message(BaseModel):
 
 TOOL_CHOICE_VALUES = tuple(choice.value for choice in ToolChoice)
 TOOL_CHOICE_TYPE = Literal[TOOL_CHOICE_VALUES] # type: ignore
+
+class LLMResponse(BaseModel):
+    content: str
+    tool_calls: List[Any] = Field(default_factory=list)

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 import json
@@ -35,6 +36,8 @@ class BaseAgent(BaseModel, ABC):
     
     max_steps: int = Field(default=10, description="The maximum number of steps the agent can take")
     current_step: int = Field(default=0, description="The current step of the agent")
+
+    output_queue: asyncio.Queue = Field(default_factory=asyncio.Queue, description="The queue to store the output of the agent")
     
     class Config:
         arbitrary_types_allowed = True
@@ -52,7 +55,7 @@ class BaseAgent(BaseModel, ABC):
             self.memory.add_message(Message(role=Role.USER, content=content))
         elif role == "assistant":
             if tool_calls:
-                self.memory.add_message(Message(role=Role.ASSISTANT, content=content, tool_calls=[{"id": toolcall.id, "type": "function", "function": toolcall.function.model_dump()} for toolcall in tool_calls]))
+                self.memory.add_message(Message(role=Role.ASSISTANT, content=content, tool_calls=[{"id": toolcall.id, "type": "function", "function": toolcall.function} for toolcall in tool_calls]))
             else:
                 self.memory.add_message(Message(role=Role.ASSISTANT, content=content))
         elif role == "tool":

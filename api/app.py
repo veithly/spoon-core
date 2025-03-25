@@ -1,20 +1,16 @@
 import sys
-from logging import getLogger
+from loguru import logger
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
-from api.routers import chat, models, token
-
-logger = getLogger("api")
+from api.routers import chat
 
 app = FastAPI(docs_url=None, redoc_url=None)
 logger.add(sys.stdout, format="{time} {level} {message}", level="INFO")
 
-app.include_router(models.router)
 app.include_router(chat.router)
-app.include_router(token.router)
 
 @app.get("/health")
 async def health_check():
