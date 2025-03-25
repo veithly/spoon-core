@@ -69,4 +69,4 @@ if __name__ == "__main__":
     port = int(os.getenv("MONITORING_PORT", "8080"))
     
     logger.info(f"Starting monitoring service on {host}:{port}")
-    uvicorn.run("spoon_ai.monitoring.standalone:app", host=host, port=port, reload=True)
+    uvicorn.run("spoon_ai.monitoring.main:app", host=host, port=port, reload=True)

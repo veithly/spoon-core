@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-from ..core.tasks import MonitoringTaskManager
+from ..core.tasks import MonitoringTaskManager, TaskStatus
 
 router = APIRouter(
     prefix="/monitoring",
@@ -23,13 +23,20 @@ class MonitoringTaskCreate(BaseModel):
     comparator: str = Field(..., description="比较运算符: >, <, =, >=, <=")
     name: Optional[str] = Field(None, description="警报名称")
     check_interval_minutes: int = Field(5, description="检查间隔（分钟）")
+    expires_in_hours: int = Field(24, description="任务过期时间（小时）")
     notification_channels: List[str] = Field(["telegram"], description="通知渠道")
     notification_params: Dict[str, Any] = Field({}, description="通知渠道的额外参数")
+
+class TaskExtendRequest(BaseModel):
+    """延长任务有效期请求模型"""
+    hours: int = Field(..., description="延长的小时数")
 
 class MonitoringTaskResponse(BaseModel):
     """监控任务响应模型"""
     task_id: str
     created_at: str
+    expires_at: str
+    status: str
     config: Dict[str, Any]
 
 class MonitoringChannelsResponse(BaseModel):
@@ -67,6 +74,33 @@ async def delete_monitoring_task(task_id: str):
     if not success:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
     return {"status": "success", "message": f"Task {task_id} deleted"}
+
+@router.post("/tasks/{task_id}/pause")
+async def pause_monitoring_task(task_id: str):
+    """暂停监控任务"""
+    success = task_manager.pause_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return {"status": "success", "message": f"Task {task_id} paused"}
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_monitoring_task(task_id: str):
+    """恢复监控任务"""
+    success = task_manager.resume_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found or expired")
+    return {"status": "success", "message": f"Task {task_id} resumed"}
+
+@router.post("/tasks/{task_id}/extend", response_model=Dict[str, Any])
+async def extend_monitoring_task(task_id: str, request: TaskExtendRequest):
+    """延长监控任务有效期"""
+    try:
+        result = task_manager.extend_task(task_id, request.hours)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to extend task: {str(e)}")
 
 @router.get("/channels", response_model=MonitoringChannelsResponse)
 async def get_notification_channels():
