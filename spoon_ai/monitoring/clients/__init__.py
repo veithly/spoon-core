@@ -1,1 +1,1 @@
-"""API客户端模块"""
+"""API client module"""

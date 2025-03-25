@@ -9,7 +9,7 @@ from .base import CEXClient
 logger = logging.getLogger(__name__)
 
 class BinanceClient(CEXClient):
-    """Binance API客户端"""
+    """Binance API client"""
     
     BASE_URL = "https://api.binance.com"
     
@@ -22,7 +22,7 @@ class BinanceClient(CEXClient):
             self.session.headers.update({"X-MBX-APIKEY": api_key})
     
     def get_ticker_price(self, symbol: str) -> Dict[str, Any]:
-        """获取单个交易对价格"""
+        """Get single trading pair price"""
         endpoint = f"{self.BASE_URL}/api/v3/ticker/price"
         params = {"symbol": symbol}
         
@@ -35,7 +35,7 @@ class BinanceClient(CEXClient):
             raise
             
     def get_ticker_24h(self, symbol: str) -> Dict[str, Any]:
-        """获取24小时价格变动统计"""
+        """Get 24-hour price change statistics"""
         endpoint = f"{self.BASE_URL}/api/v3/ticker/24hr"
         params = {"symbol": symbol}
         
@@ -48,7 +48,7 @@ class BinanceClient(CEXClient):
             raise
     
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[List]:
-        """获取K线数据"""
+        """Get K-line data"""
         endpoint = f"{self.BASE_URL}/api/v3/klines"
         params = {
             "symbol": symbol,
@@ -65,7 +65,7 @@ class BinanceClient(CEXClient):
             raise
             
     def get_server_time(self) -> int:
-        """获取服务器时间"""
+        """Get server time"""
         endpoint = f"{self.BASE_URL}/api/v3/time"
         
         try:

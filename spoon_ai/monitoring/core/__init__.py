@@ -1,1 +1,1 @@
-"""监控核心功能模块"""
+"""Monitoring core functionality module"""

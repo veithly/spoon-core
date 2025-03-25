@@ -6,36 +6,36 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger(__name__)
 
 class DataClient(ABC):
-    """数据客户端抽象基类"""
+    """Abstract base class for data clients"""
     
     @abstractmethod
     def get_ticker_price(self, symbol: str) -> Dict[str, Any]:
-        """获取交易对价格"""
+        """Get trading pair price"""
         pass
     
     @abstractmethod
     def get_ticker_24h(self, symbol: str) -> Dict[str, Any]:
-        """获取24小时统计数据"""
+        """Get 24-hour statistics"""
         pass
     
     @abstractmethod
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[Any]:
-        """获取K线数据"""
+        """Get K-line data"""
         pass
     
     @classmethod
     def get_client(cls, market: str, provider: str) -> 'DataClient':
-        """工厂方法：根据市场和提供者创建适当的客户端"""
-        # CEX客户端
+        """Factory method: create appropriate client based on market and provider"""
+        # CEX client
         if market.lower() == "cex":
             from .cex import get_cex_client
             return get_cex_client(provider)
             
-        # DEX客户端
+        # DEX client
         elif market.lower() == "dex":
             from .dex import get_dex_client
             return get_dex_client(provider)
             
-        # 其他市场类型
+        # Other market types
         else:
             raise ValueError(f"Unsupported market type: {market}")

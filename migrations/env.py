@@ -24,9 +24,12 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 
 from models.base.base import Base
-from models.base.model import ModelTable, SessionStateTable
+from models.base.tools import ToolTable
 
 target_metadata = Base.metadata
+
+database_url = os.getenv("DATABASE_URL")
+config.set_main_option("sqlalchemy.url", database_url)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

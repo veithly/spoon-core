@@ -1,9 +1,9 @@
 """
-加密货币监控模块
-提供加密货币价格和指标的监控、警报和通知功能
+Cryptocurrency Monitoring Module
+Provides cryptocurrency price and metrics monitoring, alerts and notification functionality
 """
 
 from .core.tasks import MonitoringTaskManager
 
-# 导出主要类
+# Export main classes
 __all__ = ['MonitoringTaskManager']

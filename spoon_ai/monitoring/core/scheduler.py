@@ -7,7 +7,7 @@ from typing import Dict, Any, Callable
 logger = logging.getLogger(__name__)
 
 class MonitoringScheduler:
-    """监控任务调度器，单例模式实现"""
+    """Monitoring task scheduler, implemented as a singleton"""
     
     _instance = None
     
@@ -20,7 +20,7 @@ class MonitoringScheduler:
         return cls._instance
     
     def start(self):
-        """启动调度器在后台线程中运行"""
+        """Start the scheduler to run in a background thread"""
         if self.running:
             return
             
@@ -31,13 +31,13 @@ class MonitoringScheduler:
         logger.info("Monitoring scheduler started")
     
     def _run_scheduler(self):
-        """运行调度器循环"""
+        """Run the scheduler loop"""
         while self.running:
             schedule.run_pending()
             time.sleep(1)
     
     def stop(self):
-        """停止调度器"""
+        """Stop the scheduler"""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
@@ -45,11 +45,11 @@ class MonitoringScheduler:
         
     def add_job(self, job_id: str, task_func: Callable, 
                 interval_minutes: int, *args, **kwargs) -> str:
-        """添加定时监控任务"""
-        # 取消已存在的同名任务
+        """Add a scheduled monitoring task"""
+        # Cancel existing task with the same name
         self.remove_job(job_id)
         
-        # 添加新任务
+        # Add new task
         schedule.every(interval_minutes).minutes.do(task_func, *args, **kwargs).tag(job_id)
         self.jobs[job_id] = {
             "function": task_func.__name__,
@@ -63,7 +63,7 @@ class MonitoringScheduler:
         return job_id
     
     def remove_job(self, job_id: str) -> bool:
-        """移除定时任务"""
+        """Remove a scheduled task"""
         if job_id in self.jobs:
             schedule.clear(job_id)
             del self.jobs[job_id]
@@ -72,22 +72,22 @@ class MonitoringScheduler:
         return False
     
     def get_jobs(self) -> Dict[str, Any]:
-        """获取所有任务"""
+        """Get all tasks"""
         return self.jobs
     
     def get_job(self, job_id: str) -> Dict[str, Any]:
-        """获取指定任务信息"""
+        """Get information for a specific task"""
         return self.jobs.get(job_id)
         
     def run_job_once(self, job_id: str) -> bool:
-        """立即执行一次任务，用于测试"""
+        """Execute a task immediately once, for testing"""
         if job_id not in self.jobs:
             return False
             
         job_info = self.jobs[job_id]
         task_func = job_info.get("function")
         
-        # 查找具有该名称的函数
+        # Find function with that name
         for job in schedule.jobs:
             if hasattr(job, "job_func") and job.tags and job_id in job.tags:
                 job.job_func()

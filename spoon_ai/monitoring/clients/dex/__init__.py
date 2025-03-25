@@ -3,25 +3,25 @@ from typing import Dict
 from .base import DEXClient
 from .uniswap import UniswapClient
 
-# 注册支持的DEX提供者
+# Register supported DEX providers
 DEX_PROVIDERS = {
     "uni": UniswapClient,
     "uniswap": UniswapClient,
-    # 添加更多提供者...
+    # Add more providers...
 }
 
 def get_dex_client(provider: str) -> DEXClient:
     """
-    根据提供者名称获取相应的DEX客户端
+    Get appropriate DEX client based on provider name
     
     Args:
-        provider: 提供者代码 (例如 'uni' 表示 Uniswap)
+        provider: Provider code (e.g., 'uni' for Uniswap)
         
     Returns:
-        DEXClient: 相应的交易所客户端实例
+        DEXClient: Corresponding exchange client instance
     
     Raises:
-        ValueError: 如果提供者不支持
+        ValueError: If provider is not supported
     """
     provider_lower = provider.lower()
     if provider_lower in DEX_PROVIDERS:

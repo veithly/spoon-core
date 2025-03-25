@@ -1,1 +1,1 @@
-"""通知发送模块"""
+"""Notification delivery module"""

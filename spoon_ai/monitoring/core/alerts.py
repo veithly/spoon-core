@@ -10,7 +10,7 @@ from ..notifiers.notification import NotificationManager
 logger = logging.getLogger(__name__)
 
 class Comparator(str, Enum):
-    """比较运算符枚举"""
+    """Comparison operator enumeration"""
     GREATER_THAN = ">"
     LESS_THAN = "<"
     EQUAL = "="
@@ -18,28 +18,28 @@ class Comparator(str, Enum):
     LESS_EQUAL = "<="
 
 class Metric(str, Enum):
-    """监控指标枚举"""
+    """Monitoring metric enumeration"""
     PRICE = "price"
     VOLUME = "volume"
     PRICE_CHANGE = "price_change"
     PRICE_CHANGE_PERCENT = "price_change_percent"
 
 class AlertManager:
-    """警报管理器，处理指标监控和通知发送"""
+    """Alert manager, handles metric monitoring and notification sending"""
     
     def __init__(self):
         self.notification = NotificationManager()
-        self.clients_cache = {}  # 缓存创建的客户端
+        self.clients_cache = {}  # Cache created clients
         
     def _get_client(self, market: str, provider: str) -> DataClient:
-        """获取数据客户端，带缓存"""
+        """Get data client, with caching"""
         cache_key = f"{market}:{provider}"
         if cache_key not in self.clients_cache:
             self.clients_cache[cache_key] = DataClient.get_client(market, provider)
         return self.clients_cache[cache_key]
         
     def check_condition(self, value: float, threshold: float, comparator: Comparator) -> bool:
-        """检查条件是否满足"""
+        """Check if condition is met"""
         if comparator == Comparator.GREATER_THAN:
             return value > threshold
         elif comparator == Comparator.LESS_THAN:
@@ -53,14 +53,14 @@ class AlertManager:
         return False
     
     def get_metric_value(self, market: str, provider: str, symbol: str, metric: Metric) -> float:
-        """获取指标的当前值"""
+        """Get current value of the metric"""
         client = self._get_client(market, provider)
         
         if metric == Metric.PRICE:
             data = client.get_ticker_price(symbol)
             return float(data["price"])
         
-        # 需要24小时统计数据的指标
+        # Metrics requiring 24h statistics
         elif metric in [Metric.VOLUME, Metric.PRICE_CHANGE, Metric.PRICE_CHANGE_PERCENT]:
             data = client.get_ticker_24h(symbol)
             
@@ -74,7 +74,7 @@ class AlertManager:
         raise ValueError(f"Unsupported metric: {metric}")
     
     def check_alert(self, alert_config: Dict[str, Any], test_mode: bool = False) -> bool:
-        """检查警报条件是否触发"""
+        """Check if alert condition is triggered"""
         try:
             market = alert_config.get("market", "cex")
             provider = alert_config["provider"]
@@ -90,14 +90,14 @@ class AlertManager:
             if is_triggered:
                 logger.info(f"Alert triggered: {provider}/{symbol} {metric} {current_value} {comparator} {threshold}")
                 
-                # 准备通知内容
+                # Prepare notification content
                 message = self._format_alert_message(
                     market, provider, symbol, metric, current_value, comparator, threshold, 
                     alert_config.get("name", "Crypto Alert"),
                     test_mode
                 )
                 
-                # 发送通知
+                # Send notification
                 channels = alert_config.get("notification_channels", ["telegram"])
                 for channel in channels:
                     notification_params = alert_config.get("notification_params", {})
@@ -113,7 +113,7 @@ class AlertManager:
                              metric: Metric, value: float, comparator: Comparator, 
                              threshold: float, alert_name: str,
                              test_mode: bool = False) -> str:
-        """格式化警报消息"""
+        """Format alert message"""
         status_emoji = "🧪" if test_mode else "🚨"
         test_prefix = "[TEST] " if test_mode else ""
         
@@ -128,9 +128,9 @@ class AlertManager:
         )
         
     def monitor_task(self, alert_config: Dict[str, Any]) -> None:
-        """用于调度器执行的监控任务"""
+        """Monitoring task for scheduler execution"""
         self.check_alert(alert_config)
         
     def test_notification(self, alert_config: Dict[str, Any]) -> bool:
-        """测试通知功能，忽略条件直接发送"""
+        """Test notification functionality, ignores condition and sends directly"""
         return self.check_alert(alert_config, test_mode=True)

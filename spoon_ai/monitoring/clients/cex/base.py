@@ -8,24 +8,24 @@ from ..base import DataClient
 logger = logging.getLogger(__name__)
 
 class CEXClient(DataClient):
-    """中心化交易所客户端基类"""
+    """Centralized exchange client base class"""
     
     @abstractmethod
     def get_ticker_price(self, symbol: str) -> Dict[str, Any]:
-        """获取交易对价格"""
+        """Get trading pair price"""
         pass
     
     @abstractmethod
     def get_ticker_24h(self, symbol: str) -> Dict[str, Any]:
-        """获取24小时统计数据"""
+        """Get 24-hour statistics"""
         pass
     
     @abstractmethod
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[Any]:
-        """获取K线数据"""
+        """Get K-line data"""
         pass
     
     @abstractmethod
     def get_server_time(self) -> int:
-        """获取服务器时间"""
+        """Get server time"""
         pass

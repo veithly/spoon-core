@@ -8,25 +8,25 @@ from .base import DEXClient
 logger = logging.getLogger(__name__)
 
 class UniswapClient(DEXClient):
-    """Uniswap API客户端 (示例实现)"""
+    """Uniswap API client (example implementation)"""
     
     def __init__(self, rpc_url: Optional[str] = None):
         self.rpc_url = rpc_url or "https://eth-mainnet.g.alchemy.com/v2/demo"
-        # 在实际实现中，您可能会使用web3.py或特定的Uniswap SDK
+        # In an actual implementation, you might use web3.py or a specific Uniswap SDK
     
     def get_ticker_price(self, symbol: str) -> Dict[str, Any]:
-        """获取交易对价格
+        """Get trading pair price
         
-        在Uniswap中，symbol应该是形如 "TOKEN0-TOKEN1" 的格式，
-        例如 "ETH-USDC" 表示ETH/USDC交易对
+        In Uniswap, symbol should be in the format "TOKEN0-TOKEN1",
+        e.g., "ETH-USDC" represents the ETH/USDC trading pair
         """
-        # 这里是示例实现，实际情况下您需要调用Uniswap的API或合约
+        # This is an example implementation, in practice you would call Uniswap's API or contract
         logger.info(f"Getting Uniswap price for {symbol}")
         tokens = symbol.split("-")
         if len(tokens) != 2:
             raise ValueError(f"Invalid symbol format for Uniswap: {symbol}. Expected format: TOKEN0-TOKEN1")
         
-        # 模拟返回数据
+        # Simulated return data
         return {
             "price": "1999.75",
             "pair": symbol,
@@ -34,8 +34,8 @@ class UniswapClient(DEXClient):
         }
             
     def get_ticker_24h(self, symbol: str) -> Dict[str, Any]:
-        """获取24小时价格变动统计"""
-        # 模拟返回数据
+        """Get 24-hour price change statistics"""
+        # Simulated return data
         return {
             "price": "1999.75",
             "volume": "158923456.75",
@@ -46,6 +46,6 @@ class UniswapClient(DEXClient):
         }
     
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[List]:
-        """获取K线数据"""
-        # 模拟返回数据，返回一个空列表或模拟数据
+        """Get K-line data"""
+        # Simulated return data, returns an empty list or mock data
         return []

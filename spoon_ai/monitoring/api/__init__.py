@@ -1,1 +1,1 @@
-"""监控模块的API路由"""
+"""API routes for the monitoring module"""

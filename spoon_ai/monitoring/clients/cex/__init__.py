@@ -3,25 +3,25 @@ from typing import Dict
 from .base import CEXClient
 from .binance import BinanceClient
 
-# 注册支持的CEX提供者
+# Register supported CEX providers
 CEX_PROVIDERS = {
     "bn": BinanceClient,
     "binance": BinanceClient,
-    # 添加更多提供者...
+    # Add more providers...
 }
 
 def get_cex_client(provider: str) -> CEXClient:
     """
-    根据提供者名称获取相应的CEX客户端
+    Get appropriate CEX client based on provider name
     
     Args:
-        provider: 提供者代码 (例如 'bn' 表示 Binance)
+        provider: Provider code (e.g., 'bn' for Binance)
         
     Returns:
-        CEXClient: 相应的交易所客户端实例
+        CEXClient: Corresponding exchange client instance
     
     Raises:
-        ValueError: 如果提供者不支持
+        ValueError: If provider is not supported
     """
     provider_lower = provider.lower()
     if provider_lower in CEX_PROVIDERS:

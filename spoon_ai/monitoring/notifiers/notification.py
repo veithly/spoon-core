@@ -7,21 +7,21 @@ import inspect
 logger = logging.getLogger(__name__)
 
 class NotificationManager:
-    """通知管理器，管理多个通知渠道，调用social_media目录中的通知类"""
+    """Notification manager, manages multiple notification channels, calls notification classes in the social_media directory"""
     
     def __init__(self):
         self.channels = {}
         self._load_channels()
     
     def _load_channels(self):
-        """加载所有可用的通知渠道"""
-        # 加载Telegram
+        """Load all available notification channels"""
+        # Load Telegram
         try:
             from spoon_ai.social_media.telegram import TelegramClient
             from spoon_ai.agents.toolcall import ToolCallAgent
             
             class NotificationAgent(ToolCallAgent):
-                """简化的Agent，仅用于发送通知"""
+                """Simplified Agent, only used for sending notifications"""
                 def __init__(self):
                     pass
                 
@@ -53,7 +53,7 @@ class NotificationManager:
         except Exception as e:
             logger.warning(f"Failed to register Telegram channel: {str(e)}")
         
-        # 加载Twitter
+        # Load Twitter
         try:
             from spoon_ai.social_media.twitter import TwitterClient
             self.channels["twitter"] = {
@@ -63,7 +63,7 @@ class NotificationManager:
         except Exception as e:
             logger.warning(f"Failed to register Twitter channel: {str(e)}")
         
-        # 加载Email
+        # Load Email
         try:
             from spoon_ai.social_media.email import EmailNotifier
             self.channels["email"] = {
@@ -74,11 +74,11 @@ class NotificationManager:
             logger.warning(f"Failed to register Email channel: {str(e)}")
     
     async def _run_async_method(self, method, *args, **kwargs):
-        """运行异步方法并等待结果"""
+        """Run async method and wait for results"""
         return await method(*args, **kwargs)
         
     def send(self, channel: str, message: str, **kwargs) -> bool:
-        """通过指定渠道发送通知"""
+        """Send notification through specified channel"""
         if channel not in self.channels:
             logger.error(f"Notification channel not available: {channel}")
             return False
@@ -90,21 +90,21 @@ class NotificationManager:
             instance = self.channels[channel]["instance"]
             logger.info(f"Using {channel} instance: {type(instance).__name__}")
             
-            # 记录参数
+            # Log parameters
             safe_kwargs = kwargs.copy()
             if "password" in safe_kwargs:
-                safe_kwargs["password"] = "******"  # 隐藏密码
+                safe_kwargs["password"] = "******"  # Hide password
             logger.info(f"Notification params: {safe_kwargs}")
             
-            # 根据不同渠道调用不同的方法
+            # Call different methods based on channel
             if channel == "telegram":
-                # Telegram使用异步的send_proactive_message方法
+                # Telegram uses async send_proactive_message method
                 chat_id = kwargs.get("chat_id")
                 method = instance.send_proactive_message
                 
-                # 检查是否需要传递chat_id
+                # Check if chat_id needs to be passed
                 if chat_id:
-                    # 运行异步方法
+                    # Run async method
                     logger.info(f"Sending Telegram message with chat_id: {chat_id}")
                     loop = asyncio.get_event_loop()
                     if not loop.is_running():
@@ -124,11 +124,11 @@ class NotificationManager:
                 logger.info(f"Telegram notification sent successfully")
                 return True
             else:
-                # Twitter和Email使用同步的send方法
+                # Twitter and Email use synchronous send method
                 method = instance.send
                 logger.info(f"Calling {type(instance).__name__}.send method")
                 
-                # 记录发送的消息摘要
+                # Log message summary
                 msg_preview = message[:100] + "..." if len(message) > 100 else message
                 logger.info(f"Message preview: {msg_preview}")
                 
@@ -138,26 +138,26 @@ class NotificationManager:
                     
         except Exception as e:
             logger.error(f"Failed to send notification via {channel}: {str(e)}")
-            # 打印完整的错误堆栈
+            # Print full error stack
             import traceback
             logger.error(traceback.format_exc())
             return False
     
     def get_available_channels(self) -> List[str]:
-        """获取所有可用的通知渠道"""
+        """Get all available notification channels"""
         return list(self.channels.keys())
 
     def send_to_all(self, message: str, channels: Optional[List[str]] = None, **kwargs) -> Dict[str, bool]:
         """
-        向多个渠道发送相同的通知
+        Send the same notification to multiple channels
         
         Args:
-            message: 通知内容
-            channels: 要使用的渠道列表，如果为None则使用所有可用渠道
-            **kwargs: 渠道特定的参数
+            message: Notification content
+            channels: List of channels to use, if None, use all available channels
+            **kwargs: Channel-specific parameters
         
         Returns:
-            Dict[str, bool]: 每个渠道的发送结果
+            Dict[str, bool]: Send result for each channel
         """
         if channels is None:
             channels = self.get_available_channels()
