@@ -55,7 +55,6 @@ class MonitoringTaskManager:
             task_id=task_id,
             alert_config=config
         )
-        
         # 添加过期检查任务
         expiry_task_id = f"{task_id}_expiry"
         self.scheduler.add_job(
@@ -65,7 +64,7 @@ class MonitoringTaskManager:
             task_id=task_id
         )
         
-        # 返回任务信息
+        self._task_wrapper(task_id, config)
         return {
             "task_id": task_id,
             "created_at": datetime.now().isoformat(),
