@@ -46,6 +46,7 @@ class ChatBot:
         self.model_name = model_name
         self.api_key = api_key
         self.llm_config = llm_config
+        self.output_index = 0
         
         if llm_provider == "openai":
             self.llm = AsyncOpenAI()
@@ -56,7 +57,7 @@ class ChatBot:
         else:
             raise ValueError(f"Invalid LLM provider: {llm_provider}")
     
-    async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None) -> str:
+    async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
         formatted_messages = [] if system_msg is None else [{"role": "system", "content": system_msg}]
         for message in messages:
             if isinstance(message, dict):
@@ -80,7 +81,7 @@ class ChatBot:
             return response.content[0].text
     
     # @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=60))
-    async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, **kwargs):
+    async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
         if tool_choice not in ["auto", "none", "required"]:
             raise ValueError(f"Invalid tool choice: {tool_choice}")
         if tools is None:
@@ -129,6 +130,8 @@ class ChatBot:
                             continue
                         if chunk.type == "content_block_start":
                             buffer_type = chunk.content_block.type
+                            if output_queue:
+                                    output_queue.put_nowait({"type": "start", "content_block": chunk.content_block.model_dump(), "index": self.output_index})
                             if buffer_type == "tool_use":
                                 current_tool = {
                                     "id": chunk.content_block.id,
@@ -137,12 +140,17 @@ class ChatBot:
                                         "arguments": {}
                                     }
                                 }
+                                
                                 continue
                         if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
                             buffer += chunk.delta.text
+                            if output_queue:
+                                output_queue.put_nowait({"type": "text_delta", "delta": chunk.delta.text, "index": self.output_index})
                             continue
                         if chunk.type == "content_block_delta" and chunk.delta.type == "input_json_delta":
                             buffer += chunk.delta.partial_json
+                            if output_queue:
+                                output_queue.put_nowait({"type": "input_json_delta", "delta": chunk.delta.partial_json, "index": self.output_index})
 
                         if chunk.type == "content_block_stop":
                             content += buffer
@@ -153,6 +161,9 @@ class ChatBot:
                             buffer = ""
                             buffer_type = ""
                             current_tool = None
+                            if output_queue:
+                                output_queue.put_nowait({"type": "stop", "content_block": chunk.content_block.model_dump(), "index": self.output_index})
+                            self.output_index += 1
                 return LLMResponse(content=content, tool_calls=tool_calls)
         except Exception as e:
             logger.error(f"Error during tool call: {e}")
