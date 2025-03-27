@@ -3,6 +3,8 @@ import re
 from my_agent import MyInfoAgent
 from spoon_ai.chat import ChatBot
 from spoon_ai.agents.base import AgentState
+from asserts import AgentTestAssertions
+
 
 # FIXTURE: Create Agent and reset it after each test
 @pytest.fixture
@@ -98,9 +100,4 @@ async def test_my_info_agent_queries(agent, query, expected_phrases):
     response = await agent.run(query)
     print(f"Response:\n{response}")
 
-    assert response is not None, "Response should not be None"
-    assert isinstance(response, str), "Response should be a string"
-    assert len(response.strip()) > 0, "Response should not be empty"
-
-    for phrase in expected_phrases:
-        assert re.search(re.escape(phrase), response, re.IGNORECASE), f"Expected phrase '{phrase}' not found."
+    AgentTestAssertions.assert_keywords_in_response(response,query,expected_phrases)

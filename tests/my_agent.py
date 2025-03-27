@@ -10,7 +10,7 @@ from pydantic import Field
 import datetime
 
 
-# ---------------------------- 2. GitHub Commit Count Tool ----------------------------
+# ---------------------------- 1. GitHub Commit Count Tool ----------------------------
 class GitHubCommitStatsTool(BaseTool):
     name: str = "github_commits"
     description: str = "Get number of commits for a GitHub repo in a date range."
@@ -46,7 +46,7 @@ class GitHubCommitStatsTool(BaseTool):
         return f"Total commits in {repo} ({branch}) since {start_of_month[:10]}: {len(commits)}"
 
 
-# ---------------------------- 4. Currency Exchange Tool ----------------------------
+# ---------------------------- 2. Currency Exchange Tool ----------------------------
 class ExchangeRateTool(BaseTool):
     """Currency Exchange Rate Tool"""
     name: str = "exchange_rate"
@@ -93,7 +93,7 @@ class ExchangeRateTool(BaseTool):
                 return f"{amount} {from_currency} = {converted} {to_currency} (Rate: {rate})"
 
 
-# ---------------------------- 4. Smart Weather Tool ----------------------------
+# ---------------------------- 3. Smart Weather Tool ----------------------------
 class SmartWeatherTool(BaseTool):
     """Smart Weather Tool with outfit and pollution suggestions"""
     name: str = "smart_weather"
@@ -194,7 +194,7 @@ class SmartWeatherTool(BaseTool):
         )
 
 
-# ---------------------------- 5. Agent Definition ----------------------------
+# ---------------------------- 4. Agent Definition ----------------------------
 class MyInfoAgent(ToolCallAgent):
     """A custom agent that can get GitHub commits, fetch news, and convert currency. and Get weather and get air quality"""
     name: str = "my_info_agent"
@@ -211,6 +211,7 @@ class MyInfoAgent(ToolCallAgent):
     """
 
     next_step_prompt: str = "What should be the next step?"
+    # Based on the previous tool output, what should we do now?
     max_steps: int = 5
 
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
