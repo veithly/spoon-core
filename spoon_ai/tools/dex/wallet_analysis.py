@@ -1,7 +1,7 @@
-from .base import DexBaseTool
+from .base import BitqueryTool
 
 
-class WalletAnalysis(DexBaseTool):
+class WalletAnalysis(BitqueryTool):
     name: str = "wallet_analysis"
     description: str = "Returns the balance updates of a wallet, which amount is greater than 100"
     parameters: dict = {

@@ -11,6 +11,12 @@ from .dex.price_data import GetTokenPriceTool, Get24hStatsTool, GetKlineDataTool
 from .dex.price_alerts import PriceThresholdAlertTool, LpRangeCheckTool, SuddenPriceIncreaseTool
 from .dex.lending_rates import LendingRateMonitorTool
 
+# Add import for LstArbitrageTool from dex
+from .dex.lst_arbitrage import LstArbitrageTool
+
+# Add import for TokenTransfer from token_execute
+from .token_execute.token_transfer import TokenTransfer
+
 __all__ = [
     "ToolManager", 
     "BaseTool", 
@@ -26,5 +32,8 @@ __all__ = [
     "PriceThresholdAlertTool",
     "LpRangeCheckTool",
     "SuddenPriceIncreaseTool",
-    "LendingRateMonitorTool"
+    "LendingRateMonitorTool",
+    # Add LstArbitrageTool and TokenTransfer to __all__
+    "LstArbitrageTool",
+    "TokenTransfer"
 ]

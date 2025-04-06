@@ -11,7 +11,7 @@ import os
 
 @dataclass
 class SwapStep:
-    """交换步骤详情"""
+    """Swap step details"""
     type: str
     from_token: str
     to_token: str
@@ -24,7 +24,7 @@ class SwapStep:
 
 @dataclass
 class SwapPath:
-    """交换路径结果"""
+    """Swap path result"""
     from_token: str
     to_token: str
     input_amount: float
@@ -41,7 +41,7 @@ class SwapPath:
     is_profitable: bool = False
 
 class TokenInfo(TypedDict):
-    """代币信息结构"""
+    """Token information structure"""
     address: str
     is_native: bool
     decimals: int
@@ -57,8 +57,8 @@ class TokenInfo(TypedDict):
 
 class LstArbitrageTool(DexBaseTool):
     name: str = "lst_arbitrage_tool"
-    description: str = "分析不同LST（流动性质押代币）之间的套利机会，包括ETH与LST之间及LST与LST之间"
-    # 声明缓存和状态变量为Pydantic字段
+    description: str = "Analyze arbitrage opportunities between different LSTs (Liquid Staking Tokens), including between ETH and LSTs, and between different LSTs"
+    # Declare cache and state variables as Pydantic fields
     price_cache: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     staking_rate_cache: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     market_stats_cache: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -70,31 +70,31 @@ class LstArbitrageTool(DexBaseTool):
         "properties": {
             "from_token": {
                 "type": "string",
-                "description": "起始代币(ETH, stETH, rETH, cbETH等)，如不指定则分析所有可能组合"
+                "description": "Source token (ETH, stETH, rETH, cbETH, etc.), if not specified, all possible combinations will be analyzed"
             },
             "to_token": {
                 "type": "string",
-                "description": "目标代币(ETH, stETH, rETH, cbETH等)，如不指定则分析所有可能组合"
+                "description": "Target token (ETH, stETH, rETH, cbETH, etc.), if not specified, all possible combinations will be analyzed"
             },
             "amount": {
                 "type": "number",
-                "description": "要分析的代币数量，默认为1.0"
+                "description": "Token amount to analyze, default is 1.0"
             },
             "find_all_routes": {
                 "type": "boolean",
-                "description": "是否查找所有可能的套利路径，默认为false"
+                "description": "Whether to find all possible arbitrage paths, default is false"
             },
             "risk_preference": {
                 "type": "number",
-                "description": "风险偏好系数，决定选择套利路径时的收益阈值，默认为5.0(百分比)"
+                "description": "Risk preference coefficient, determines the profit threshold when selecting arbitrage paths, default is 5.0 (percentage)"
             }
         }
     }
     
-    # 使用变量化的GraphQL查询，统一风格
-    graph_template: str = ""  # 不使用全局模板
+    # Use variable GraphQL queries, unified style
+    graph_template: str = ""  # Not using global template
     
-    # 查询LST价格的GraphQL查询 - 新版 EVM API
+    # Query LST price GraphQL - New EVM API
     lst_price_query: str = """
 query ($baseAddress: String!, $quoteAddress: String!) {
   EVM(network: eth) {
@@ -135,7 +135,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
 }
 """
 
-    # 查询LST质押率的GraphQL查询 - 新版 EVM API
+    # Query LST staking rate GraphQL - New EVM API
     lst_staking_rate_query: str = """
 query ($protocolAddress: String!) {
   EVM(network: eth) {
@@ -176,7 +176,7 @@ query ($protocolAddress: String!) {
     }
     """
 
-    # 查询市场统计数据的GraphQL查询 - 新版 EVM API
+    # Query market statistics GraphQL - New EVM API
     market_stats_query: str = """
 query ($tokenAddress: String!) {
   EVM(network: eth) {
@@ -204,7 +204,7 @@ query ($tokenAddress: String!) {
 }
 """
 
-    # 查询DEX流动性信息的GraphQL查询 - 新版 EVM API
+    # Query DEX liquidity information GraphQL - New EVM API
     liquidity_query: str = """
 query ($baseAddress: String!, $quoteAddress: String!) {
   EVM(network: eth) {
@@ -227,10 +227,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
 }
 """
 
-    # 支持的代币列表
+    # Supported token list
     supported_tokens: ClassVar[Dict[str, TokenInfo]] = {
         "ETH": {
-            "address": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",  # 使用特殊地址表示ETH
+            "address": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",  # Special address for ETH
             "is_native": True,
             "decimals": 18,
             "coingecko_id": "ethereum"
@@ -248,7 +248,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "staking_rate_function": "getPooledEthByShares",
             "unstaking_function": "withdraw",
             "chain": "ethereum",
-            "unstaking_time": 7 * 24 * 60 * 60,  # 7天
+            "unstaking_time": 7 * 24 * 60 * 60,  # 7 days
             "unstaking_fee": 0.001,  # 0.1%
             "is_native": False,
             "decimals": 18,
@@ -261,7 +261,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "staking_rate_function": "getExchangeRate",
             "unstaking_function": "burn",
             "chain": "ethereum",
-            "unstaking_time": 24 * 60 * 60,  # 1天
+            "unstaking_time": 24 * 60 * 60,  # 1 day
             "unstaking_fee": 0.0005,  # 0.05%
             "is_native": False,
             "decimals": 18,
@@ -274,7 +274,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "staking_rate_function": "exchangeRate",
             "unstaking_function": "redeem",
             "chain": "ethereum",
-            "unstaking_time": 3 * 24 * 60 * 60,  # 3天
+            "unstaking_time": 3 * 24 * 60 * 60,  # 3 days
             "unstaking_fee": 0.0025,  # 0.25%
             "is_native": False,
             "decimals": 18,
@@ -287,7 +287,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "staking_rate_function": "pricePerShare",
             "unstaking_function": "redeem",
             "chain": "ethereum",
-            "unstaking_time": 14 * 24 * 60 * 60,  # 14天
+            "unstaking_time": 14 * 24 * 60 * 60,  # 14 days
             "unstaking_fee": 0.002,  # 0.2%
             "is_native": False,
             "decimals": 18,
@@ -300,17 +300,17 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "staking_rate_function": "stEthPerToken",
             "related_to": "stETH",
             "chain": "ethereum",
-            "unstaking_time": 7 * 24 * 60 * 60,  # 同stETH
-            "unstaking_fee": 0.001,  # 同stETH
+            "unstaking_time": 7 * 24 * 60 * 60,  # Same as stETH
+            "unstaking_fee": 0.001,  # Same as stETH
             "is_native": False,
             "decimals": 18,
             "coingecko_id": "wrapped-steth"
         }
     }
     
-    # 交易路径配置
+    # Trading path configuration
     trade_paths: ClassVar[Dict[str, Dict[str, Dict[str, Any]]]] = {
-        # ETH到LST的路径
+        # ETH to LST paths
         "ETH_TO_LST": {
             "stETH": {
                 "protocol": "Lido",
@@ -331,104 +331,110 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "fee": 0.0025  # 0.25%
             }
         },
-        # LST到ETH的路径
+        # LST to ETH paths
         "LST_TO_ETH": {
             "stETH": {
                 "protocol": "Lido",
                 "contract": "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
                 "function": "withdraw",
                 "fee": 0.001,  # 0.1%
-                "delay": 7 * 24 * 60 * 60  # 7天
+                "delay": 7 * 24 * 60 * 60  # 7 days
             },
             "rETH": {
                 "protocol": "Rocket Pool",
                 "contract": "0xae78736Cd615f374D3085123A210448E74Fc6393",
                 "function": "burn",
                 "fee": 0.0005,  # 0.05%
-                "delay": 24 * 60 * 60  # 1天
+                "delay": 24 * 60 * 60  # 1 day
             },
             "cbETH": {
                 "protocol": "Coinbase",
                 "contract": "0xBe9895146f7AF43049ca1c1AE358B0541Ea49704",
                 "function": "redeem",
                 "fee": 0.0025,  # 0.25%
-                "delay": 3 * 24 * 60 * 60  # 3天
+                "delay": 3 * 24 * 60 * 60  # 3 days
             }
         }
     }
     
-    # 配置参数
+    # Configuration parameters
     config: Dict[str, Any] = Field(default={
-        "risk_preference": 5.0,  # 默认风险偏好系数，5%
-        "time_value_factor": 0.1,  # 时间价值系数，每天0.1%
-        "cache_ttl": 300,  # 缓存有效期，秒
-        "default_slippage": 0.001,  # 默认基础滑点
-        "max_slippage": 0.02,  # 最大滑点限制
-        "daily_yield": 0.0001,  # 默认日收益率，用于机会成本计算
-        "daily_volatility": 0.02,  # 默认日波动率，用于机会成本计算
-        "min_profit_threshold": 0.0001,  # 最小有效利润阈值
+        "risk_preference": 5.0,  # Default risk preference coefficient, 5%
+        "time_value_factor": 0.1,  # Time value coefficient, 0.1% per day
+        "cache_ttl": 300,  # Cache time-to-live in seconds
+        "default_slippage": 0.001,  # Default base slippage
+        "max_slippage": 0.02,  # Maximum slippage limit
+        "daily_yield": 0.0001,  # Default daily yield for opportunity cost calculation
+        "daily_volatility": 0.02,  # Default daily volatility for opportunity cost calculation
+        "min_profit_threshold": 0.0001,  # Minimum valid profit threshold
     })
     
-    # 初始化配置
+    # Initialize configuration
     def __init__(self, **data):
-        # 设置默认配置
-        self.config : {
-            "cache_ttl": 300,  # 缓存生存时间，默认5分钟(300秒)
-            "min_profit_threshold": 0.0,  # 最小利润阈值
-            "eth_price_usd": 3000,  # ETH/USD汇率
-            # 其他默认配置...
-        }
-        
+        # First call super().__init__ to initialize Pydantic model
         super().__init__(**data)
         
-        # 覆盖默认配置
+        # fetch eth price
+        def get_eth_price():
+            # get eth price from coingecko
+            try:
+                response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd")
+                return response.json()["ethereum"]["usd"]
+            except Exception as e:
+                return 3000
+
+        # Extend config with additional values if needed
+        self.config.setdefault("eth_price_usd", get_eth_price())
+        
+        # Override default configuration
         if "config" in data and isinstance(data["config"], dict):
             for key, value in data["config"].items():
-                self.config[key] = value  # 更新所有键，不只是已存在的
+                self.config[key] = value  # Update all keys, not just existing ones
 
     async def execute_query(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        执行GraphQL查询并处理响应（异步版本）
+        Execute GraphQL query and handle response (async version)
         
         Args:
-            query: GraphQL查询字符串
-            variables: 查询变量
+            query: GraphQL query string
+            variables: Query variables
             
         Returns:
-            dict: 查询结果
+            dict: Query result
         """
-        # 构建GraphQL请求
+        # Build GraphQL request
         if variables:
             payload = {"query": query, "variables": variables}
         else:
             payload = {"query": query}
         
-        # 使用同步方法获取认证头
+        # Use synchronous method to get authentication headers
         try:
             headers = self.oAuth()
             
-            # 直接使用同步请求（简化问题定位）
+            # Use synchronous request (simplify problem location)
             response = requests.post(self.bitquery_endpoint, json=payload, headers=headers)
             if response.status_code != 200:
-                raise Exception(f"GraphQL API错误: {response.status_code}, {response.text}")
+                raise Exception(f"GraphQL API error: {response.status_code}, {response.text}")
             
             return response.json()
         
         except Exception as e:
-            raise Exception(f"GraphQL查询执行异常: {str(e)}")
+            raise Exception(f"GraphQL query execution error: {str(e)}")
+
     async def get_current_gas_price(self) -> float:
-        """获取当前gas价格，返回Gwei单位的浮点数"""
-        # 检查缓存
+        """Get current gas price, return float value in Gwei unit"""
+        # Check cache
         if hasattr(self, 'last_gas_price_check') and hasattr(self, 'current_gas_price'):
             if self.last_gas_price_check and self.current_gas_price:
-                # 如果在过去1分钟内检查过，直接使用缓存的值
+                # If checked within last minute, use cached value
                 if datetime.now().timestamp() - self.last_gas_price_check < 60:
                     return self.current_gas_price
         
-        # 默认gas价格（Gwei单位）
+        # Default gas price (in Gwei)
         default_gas_price = 20.0
         
-        # 定义简化的查询
+        # Define simplified query
         gas_price_query = """
         query {
         EVM(network: eth) {
@@ -445,57 +451,57 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
         """
         
-        # 查询最新交易的gas价格
+        # Query latest transaction gas prices
         try:
-            print("正在执行 GraphQL 查询获取 gas 价格...")
+            print("Executing GraphQL query to get gas price...")
             
             response = await self.execute_query(gas_price_query)
             
-            # 检查响应完整性
+            # Check response integrity
             if 'data' not in response or not response['data']:
-                raise Exception("API 响应中缺少有效数据")
+                raise Exception("Missing valid data in API response")
             
-            # 解析数据
+            # Parse data
             evm_data = response['data'].get('EVM')
             if not evm_data:
-                raise Exception("API 响应中缺少 'EVM' 字段")
+                raise Exception("Missing 'EVM' field in API response")
                 
             transactions = evm_data.get('Transactions')
             if not transactions or len(transactions) == 0:
-                raise Exception("API 响应中没有交易数据")
+                raise Exception("No transaction data in API response")
             
-            # 收集所有交易的gas价格信息
+            # Collect gas price information from all transactions
             gas_prices_gwei = []
             
-            print("解析交易Gas价格:")
+            print("Parsing transaction gas prices:")
             for tx_data in transactions:
                 tx = tx_data.get('Transaction')
                 if not tx:
                     continue
                     
-                # 获取GasPrice
+                # Get GasPrice
                 if 'GasPrice' in tx and tx['GasPrice']:
                     try:
-                        # 直接将字符串解析为浮点数
+                        # Parse string directly to float
                         gas_price_eth = float(tx['GasPrice'])
                         
-                        # 转换为Gwei (1 ETH = 10^9 Gwei)
+                        # Convert to Gwei (1 ETH = 10^9 Gwei)
                         gas_price_gwei = gas_price_eth * 1e9
                         
-                        # 输出调试信息
-                        print(f"  交易GasPrice: {tx['GasPrice']} ETH = {gas_price_gwei:.2f} Gwei")
+                        # Print debug info
+                        print(f"  Transaction GasPrice: {tx['GasPrice']} ETH = {gas_price_gwei:.2f} Gwei")
                         
                         gas_prices_gwei.append(gas_price_gwei)
                     except (ValueError, TypeError) as e:
-                        print(f"  解析GasPrice出错: {str(e)}")
+                        print(f"  Error parsing GasPrice: {str(e)}")
             
-            # 如果没有获取到任何有效的gas价格
+            # If no valid gas prices obtained
             if not gas_prices_gwei:
-                raise Exception("未能从交易中获取有效的gas价格")
+                raise Exception("Could not get valid gas prices from transactions")
             
-            print(f"收集到 {len(gas_prices_gwei)} 个有效Gas价格值")
+            print(f"Collected {len(gas_prices_gwei)} valid gas price values")
                 
-            # 计算平均gas价格(使用中位数)
+            # Calculate average gas price (using median)
             gas_prices_gwei.sort()
             if len(gas_prices_gwei) % 2 == 0:
                 mid1 = gas_prices_gwei[len(gas_prices_gwei)//2]
@@ -504,44 +510,44 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             else:
                 median_gas_price_gwei = gas_prices_gwei[len(gas_prices_gwei)//2]
             
-            # 也计算平均值作为参考
+            # Also calculate mean for reference
             avg_gas_price_gwei = sum(gas_prices_gwei) / len(gas_prices_gwei)
             
-            print(f"Gas价格统计: 平均值={avg_gas_price_gwei:.2f} Gwei, 中位数={median_gas_price_gwei:.2f} Gwei")
+            print(f"Gas price statistics: Mean={avg_gas_price_gwei:.2f} Gwei, Median={median_gas_price_gwei:.2f} Gwei")
             
-            # 使用中位数作为基础费用
+            # Use median as base fee
             base_fee_gwei = median_gas_price_gwei
             
-            # 验证合理性 (0.5 Gwei ~ 500 Gwei范围)
+            # Validate reasonability (0.5 Gwei ~ 500 Gwei range)
             if base_fee_gwei < 0.5 or base_fee_gwei > 500.0:
-                print(f"计算的Gas价格 {base_fee_gwei:.2f} Gwei 不在合理范围内，使用默认值")
+                print(f"Calculated gas price {base_fee_gwei:.2f} Gwei is not in reasonable range, using default value")
                 gas_price_gwei = default_gas_price
             else:
                 gas_price_gwei = base_fee_gwei
-                print(f"使用API返回的Gas价格: {gas_price_gwei:.2f} Gwei")
+                print(f"Using API returned gas price: {gas_price_gwei:.2f} Gwei")
                 
-            # 增加15%的安全边际，确保交易能快速被确认
+            # Add 15% safety margin to ensure quick confirmation
             gas_price_gwei = gas_price_gwei * 1.15
             
-            # 确保不低于最小合理值
+            # Ensure not below minimum reasonable value
             gas_price_gwei = max(gas_price_gwei, 1.0)
             
-            # 打印最终使用的价格
-            print(f"最终Gas价格: {gas_price_gwei:.2f} Gwei (含15%安全边际)")
+            # Print final price used
+            print(f"Final gas price: {gas_price_gwei:.2f} Gwei (including 15% safety margin)")
             
-            # 更新缓存
+            # Update cache
             self.current_gas_price = gas_price_gwei
             self.last_gas_price_check = datetime.now().timestamp()
             
             return gas_price_gwei
             
         except Exception as e:
-            print(f"获取gas价格错误: {str(e)}")
+            print(f"Error getting gas price: {str(e)}")
             
-            # 如果API调用失败，使用默认值
-            print("由于API错误，使用默认gas价格")
+            # If API call fails, use default value
+            print("Using default gas price due to API error")
             
-            # 如果未初始化，设置缓存属性
+            # If not initialized, set cache properties
             if not hasattr(self, 'current_gas_price'):
                 self.current_gas_price = default_gas_price
             if not hasattr(self, 'last_gas_price_check'):
@@ -551,18 +557,18 @@ query ($baseAddress: String!, $quoteAddress: String!) {
     
     async def get_market_statistics(self, token: str) -> Dict[str, Any]:
         """
-        获取代币的市场统计数据(波动性、收益率等)
+        Get token market statistics (volatility, yield, etc.)
         
         Args:
-            token: 代币符号
+            token: Token symbol
             
         Returns:
-            dict: 市场统计数据
+            dict: Market statistics data
         """
-        # 检查缓存
+        # Check cache
         if token in self.market_stats_cache:
             cache_entry = self.market_stats_cache[token]
-            # 检查缓存是否过期
+            # Check if cache is expired
             if datetime.now().timestamp() - cache_entry["timestamp"] < self.config["cache_ttl"]:
                 return cache_entry["data"]
         
@@ -571,23 +577,23 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             return {
                 "daily_volatility": self.config["daily_volatility"],
                 "daily_yield": self.config["daily_yield"],
-                "source": "默认参数"
+                "source": "Default parameters"
             }
         
         token_address = token_info['address']
-        # 处理ETH特殊情况
+        # Handle ETH special case
         if token == "ETH":
             token_address = self.supported_tokens["WETH"]["address"]
         
         try:
-            # 构建查询
+            # Build query
             variables = {"tokenAddress": token_address}
             response = await self.execute_query(self.market_stats_query, variables)
             
             if 'data' in response and 'EVM' in response['data'] and 'DEXTrades' in response['data']['EVM']:
                 trades = response['data']['EVM']['DEXTrades']
                 if trades:
-                    # 从交易中提取价格和波动性数据
+                    # Extract price and volatility data from trades
                     prices = []
                     for trade in trades:
                         if 'Trade' in trade and 'Buy' in trade['Trade'] and 'Sell' in trade['Trade']:
@@ -597,7 +603,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                                 price = buy_amount / sell_amount
                                 prices.append(price)
                     
-                    # 计算波动性
+                    # Calculate volatility
                     if prices and len(prices) > 5:
                         avg_price = sum(prices) / len(prices)
                         squared_diffs = [(p - avg_price) ** 2 for p in prices]
@@ -606,7 +612,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     else:
                         volatility = self.config["daily_volatility"]
                     
-                    # 计算收益率（简化）
+                    # Calculate yield (simplified)
                     if prices and len(prices) > 5:
                         first_prices = prices[-5:]
                         last_prices = prices[:5]
@@ -615,7 +621,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         
                         if first_avg > 0:
                             daily_change = (last_avg - first_avg) / first_avg / len(trades)
-                            daily_yield = max(0, daily_change)  # 只考虑正收益
+                            daily_yield = max(0, daily_change)  # Only consider positive yield
                         else:
                             daily_yield = self.config["daily_yield"]
                     else:
@@ -625,10 +631,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "token": token,
                         "daily_volatility": volatility,
                         "daily_yield": daily_yield,
-                        "source": "Bitquery市场数据"
+                        "source": "Bitquery market data"
                     }
                     
-                    # 更新缓存
+                    # Update cache
                     self.market_stats_cache[token] = {
                         "data": result,
                         "timestamp": datetime.now().timestamp()
@@ -637,17 +643,17 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     return result
         
         except Exception as e:
-            print(f"获取市场统计数据失败: {str(e)}")
+            print(f"Failed to get market statistics: {str(e)}")
         
-        # 返回默认值
+        # Return default values
         result = {
             "token": token,
             "daily_volatility": self.config["daily_volatility"],
             "daily_yield": self.config["daily_yield"],
-            "source": "默认参数"
+            "source": "Default parameters"
         }
         
-        # 更新缓存
+        # Update cache
         self.market_stats_cache[token] = {
             "data": result,
             "timestamp": datetime.now().timestamp()
@@ -657,22 +663,22 @@ query ($baseAddress: String!, $quoteAddress: String!) {
     
     async def get_token_liquidity(self, from_token: str, to_token: str) -> Dict[str, Any]:
         """
-        获取代币对的流动性信息
+        Get token pair liquidity information
         
         Args:
-            from_token: 源代币符号
-            to_token: 目标代币符号
+            from_token: Source token symbol
+            to_token: Target token symbol
             
         Returns:
-            dict: 流动性信息
+            dict: Liquidity information
         """
-        # 检查缓存
+        # Check cache
         cache_key = f"{from_token}_{to_token}"
         if hasattr(self, 'liquidity_cache') and cache_key in self.liquidity_cache:
             cache_entry = self.liquidity_cache[cache_key]
-            # 检查缓存是否过期
-            # 获取缓存TTL，如果不存在则使用默认值
-            cache_ttl = getattr(self, 'config', {}).get("cache_ttl", 300)  # 默认5分钟
+            # Check if cache is expired
+            # Get cache TTL, use default if not exists
+            cache_ttl = getattr(self, 'config', {}).get("cache_ttl", 300)  # Default 5 minutes
             if datetime.now().timestamp() - cache_entry["timestamp"] < cache_ttl:
                 return cache_entry["data"]
         
@@ -683,15 +689,15 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             default_result = {
                 "from_token": from_token,
                 "to_token": to_token,
-                "liquidity_score": 500,  # 默认中等流动性
+                "liquidity_score": 500,  # Default medium liquidity
                 "exchange": "Unknown DEX",
                 "trade_count": 0,
                 "trade_amount_usd": 0,
                 "unique_addresses": 0,
-                "source": "默认参数(不支持的代币)"
+                "source": "Default parameters (unsupported token)"
             }
             
-            # 更新缓存
+            # Update cache
             self.liquidity_cache[cache_key] = {
                 "data": default_result,
                 "timestamp": datetime.now().timestamp()
@@ -702,13 +708,13 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         from_address = from_info['address']
         to_address = to_info['address']
         
-        # 处理ETH特殊情况
+        # Handle ETH special case
         if from_token == "ETH":
             from_address = self.supported_tokens["WETH"]["address"]
         if to_token == "ETH":
             to_address = self.supported_tokens["WETH"]["address"]
         
-        # 再次修正查询 - 移除USD字段
+        # Modify query again - remove USD field
         liquidity_query = """
         query ($baseAddress: String!, $quoteAddress: String!) {
         EVM(network: eth) {
@@ -743,10 +749,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
         """
         
-        print(f"查询{from_token}/{to_token}的流动性数据...")
+        print(f"Querying liquidity data for {from_token}/{to_token}...")
         
         try:
-            # 构建查询
+            # Build query
             variables = {
                 "baseAddress": from_address,
                 "quoteAddress": to_address
@@ -754,26 +760,26 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             
             response = await self.execute_query(liquidity_query, variables)
             
-            # 调试打印
-            #print(f"流动性查询API响应: {json.dumps(response, indent=2)}")
+            # Debug print
+            #print(f"Liquidity query API response: {json.dumps(response, indent=2)}")
             
             if response and 'data' in response and response['data'] and 'EVM' in response['data']:
-                # 检查DEXTrades是否存在且不为空
+                # Check if DEXTrades exists and is not empty
                 dex_trades = response['data']['EVM'].get('DEXTrades', [])
                 
                 if dex_trades and len(dex_trades) > 0:
-                    # 计算交易统计信息
+                    # Calculate trade statistics
                     trade_count = len(dex_trades)
                     unique_protocols = set()
                     total_volume = 0.0
                     
                     for trade in dex_trades:
-                        # 提取交易所名称
+                        # Extract exchange name
                         if ('Trade' in trade and 'Dex' in trade['Trade'] and 
                             'ProtocolName' in trade['Trade']['Dex']):
                             unique_protocols.add(trade['Trade']['Dex']['ProtocolName'])
                         
-                        # 累计交易量（以base token计）
+                        # Accumulate trading volume (in base token)
                         if ('Trade' in trade and 'Buy' in trade['Trade'] and 
                             'Amount' in trade['Trade']['Buy']):
                             try:
@@ -782,13 +788,13 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                             except (ValueError, TypeError):
                                 pass
                     
-                    # 获取主要交易所
+                    # Get main exchange
                     exchange_name = "Unknown DEX"
                     if unique_protocols:
-                        exchange_name = list(unique_protocols)[0]  # 使用第一个协议
+                        exchange_name = list(unique_protocols)[0]  # Use first protocol
                     
-                    # 使用交易数量和交易量计算流动性评分
-                    # 由于没有USD值，我们将交易量乘以100作为权重
+                    # Calculate liquidity score using trade count and volume
+                    # Since we don't have USD value, multiply volume by 100 as weight
                     liquidity_score = min(1000, trade_count*50 + total_volume*100 + len(unique_protocols)*50)
                     
                     result = {
@@ -797,12 +803,12 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "liquidity_score": liquidity_score,
                         "exchange": exchange_name,
                         "trade_count": trade_count,
-                        "trade_volume": total_volume,  # 以base token计的交易量
+                        "trade_volume": total_volume,  # Trading volume in base token
                         "unique_protocols": len(unique_protocols),
-                        "source": "Bitquery流动性数据"
+                        "source": "Bitquery liquidity data"
                     }
                     
-                    # 更新缓存
+                    # Update cache
                     self.liquidity_cache[cache_key] = {
                         "data": result,
                         "timestamp": datetime.now().timestamp()
@@ -810,18 +816,18 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     
                     return result
                 else:
-                    print(f"未找到{from_token}/{to_token}的DEX交易数据")
+                    print(f"No DEX trade data found for {from_token}/{to_token}")
             else:
-                error_msg = "API响应结构不符合预期"
+                error_msg = "API response structure not as expected"
                 if 'errors' in response:
                     error_detail = str(response.get('errors', ''))
                     error_msg += f": {error_detail}"
                 print(f"{error_msg}")
         
         except Exception as e:
-            print(f"获取{from_token}/{to_token}流动性数据失败: {str(e)}")
+            print(f"Failed to get liquidity data for {from_token}/{to_token}: {str(e)}")
         
-        # 返回默认值
+        # Return default values
         default_liquidity = {
             "ETH_stETH": 900,
             "ETH_rETH": 700,
@@ -831,7 +837,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "rETH_cbETH": 200
         }
         
-        # 尝试从默认映射获取
+        # Try to get from default mapping
         liquidity_score = default_liquidity.get(f"{from_token}_{to_token}", 
                         default_liquidity.get(f"{to_token}_{from_token}", 500))
         
@@ -843,10 +849,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "trade_count": 0,
             "trade_volume": 0.0,
             "unique_protocols": 0,
-            "source": "默认参数(API查询失败)"
+            "source": "Default parameters (API query failed)"
         }
         
-        # 更新缓存
+        # Update cache
         self.liquidity_cache[cache_key] = {
             "data": result,
             "timestamp": datetime.now().timestamp()
@@ -856,36 +862,36 @@ query ($baseAddress: String!, $quoteAddress: String!) {
     
     async def calculate_slippage(self, from_token: str, to_token: str, amount: float) -> float:
         """
-        根据代币对和交易量计算预期滑点
+        Calculate expected slippage based on token pair and trade volume
         
         Args:
-            from_token: 源代币
-            to_token: 目标代币
-            amount: 交易量
+            from_token: Source token
+            to_token: Target token
+            amount: Trade volume
             
         Returns:
-            float: 预期滑点(百分比小数)
+            float: Expected slippage (decimal percentage)
         """
-        # 获取代币对流动性数据
+        # Get token pair liquidity data
         liquidity_data = await self.get_token_liquidity(from_token, to_token)
         liquidity_score = liquidity_data.get("liquidity_score", 500)
         
-        # 基础滑点
+        # Base slippage
         base_slippage = self.config["default_slippage"]
         
-        # 流动性因子
+        # Liquidity factor
         liquidity_factor = max(100, liquidity_score)
         
-        # 交易量影响
+        # Volume impact
         volume_impact = min(self.config["max_slippage"], amount / liquidity_factor)
         
-        # 对于特定的交易所调整滑点
+        # Adjust slippage for specific exchanges
         exchange = liquidity_data.get("exchange", "").lower()
         
         exchange_factors = {
             "uniswap": 1.0,
             "sushiswap": 1.2,
-            "curve": 0.5,  # Curve通常滑点较小
+            "curve": 0.5,  # Curve usually has lower slippage
             "balancer": 0.8
         }
         
@@ -895,66 +901,66 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 exchange_factor = factor
                 break
         
-        # 计算最终滑点
+        # Calculate final slippage
         slippage = (base_slippage + volume_impact) * exchange_factor
         
-        # 确保滑点在合理范围内
+        # Ensure slippage is within reasonable range
         return min(self.config["max_slippage"], max(base_slippage, slippage))
     
     async def calculate_opportunity_cost(self, delay_days: float, token: str) -> float:
         """
-        计算持有代币的机会成本
+        Calculate opportunity cost of holding tokens
         
         Args:
-            delay_days: 延迟天数
-            token: 代币符号
+            delay_days: Number of days delayed
+            token: Token symbol
             
         Returns:
-            float: 机会成本(百分比小数)
+            float: Opportunity cost (decimal percentage)
         """
-        # 获取市场统计数据
+        # Get market statistics
         market_data = await self.get_market_statistics(token)
         
-        # 从市场数据中获取日波动性和收益率
+        # Get daily volatility and yield from market data
         daily_volatility = market_data.get("daily_volatility", self.config["daily_volatility"])
         daily_yield = market_data.get("daily_yield", self.config["daily_yield"])
         
-        # 波动性风险（持有时间越长，风险越大）
+        # Volatility risk (longer holding time, higher risk)
         volatility_cost = delay_days * daily_volatility * 0.5
         
-        # 收益损失（无法参与其他投资机会的损失）
+        # Yield loss (loss from not participating in other investment opportunities)
         yield_cost = delay_days * daily_yield
         
-        # 总机会成本
+        # Total opportunity cost
         return volatility_cost + yield_cost
     
     async def calculate_gas_cost(self, operation_type: str) -> Dict[str, float]:
         """
-        计算gas成本
+        Calculate gas cost
         
         Args:
-            operation_type: 操作类型（swap, stake, unstake等）
+            operation_type: Operation type (swap, stake, unstake, etc.)
             
         Returns:
-            dict: gas成本信息
+            dict: Gas cost information
         """
-        # 不同操作类型的大致gas消耗
+        # Approximate gas consumption for different operation types
         gas_limits = {
-            "swap": 150000,      # 普通DEX交换
-            "stake": 200000,     # 质押
-            "unstake": 250000,   # 解质押
-            "approve": 50000,    # 代币授权
+            "swap": 150000,      # Regular DEX swap
+            "stake": 200000,     # Staking
+            "unstake": 250000,   # Unstaking
+            "approve": 50000,    # Token approval
         }
         
-        gas_limit = gas_limits.get(operation_type, 200000)  # 默认20万gas
+        gas_limit = gas_limits.get(operation_type, 200000)  # Default 200k gas
         
-        # 获取当前gas价格
+        # Get current gas price
         gas_price_gwei = await self.get_current_gas_price()
         
-        # 计算ETH成本
+        # Calculate ETH cost
         gas_cost_eth = (gas_limit * gas_price_gwei * 10**-9)
         
-        # 获取ETH价格（美元）- 使用ETH/USDT对 (适配新EVM API)
+        # Get ETH price (USD) - Use ETH/USDT pair (adapt to new EVM API)
         eth_price_query = """
         query {
           EVM(network: eth) {
@@ -979,7 +985,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         try:
             response = await self.execute_query(eth_price_query)
             
-            # 处理新的API结构
+            # Handle new API structure
             if ('data' in response and 'EVM' in response['data'] and 
                 'DEXTrades' in response['data']['EVM'] and response['data']['EVM']['DEXTrades']):
                 
@@ -989,10 +995,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 
                 eth_price_usd = usdt_amount / eth_amount
             else:
-                # 默认ETH价格（如果API调用失败）
+                # Default ETH price (if API call fails)
                 eth_price_usd = 2500.0
             
-            # 计算美元成本
+            # Calculate USD cost
             gas_cost_usd = gas_cost_eth * eth_price_usd
             
             return {
@@ -1002,7 +1008,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "gas_cost_usd": gas_cost_usd
             }
         except Exception as e:
-            # 使用默认ETH价格
+            # Use default ETH price
             eth_price_usd = 2500.0
             gas_cost_usd = gas_cost_eth * eth_price_usd
             
@@ -1014,14 +1020,14 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "error": str(e)
             }
     async def get_token_exchange_data(self, from_token: str, to_token: str) -> Dict[str, Any]:
-        """获取两个代币之间的兑换数据(通过DEX交易)"""
-        # 检查缓存
+        """Get exchange data between two tokens (via DEX trades)"""
+        # Check cache
         cache_key = f"{from_token}_{to_token}"
         if hasattr(self, 'price_cache') and cache_key in self.price_cache:
             cache_entry = self.price_cache[cache_key]
-            # 检查缓存是否过期
-            # 获取缓存TTL，如果不存在则使用默认值
-            cache_ttl = getattr(self, 'config', {}).get("cache_ttl", 300)  # 默认5分钟
+            # Check if cache is expired
+            # Get cache TTL, use default if not exists
+            cache_ttl = getattr(self, 'config', {}).get("cache_ttl", 300)  # Default 5 minutes
             if datetime.now().timestamp() - cache_entry["timestamp"] < cache_ttl:
                 return cache_entry["data"]
         
@@ -1029,21 +1035,45 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         to_info = self.supported_tokens.get(to_token)
         
         if not from_info or not to_info:
-            raise Exception(f"不支持的代币对: {from_token}/{to_token}")
+            raise Exception(f"Unsupported token pair: {from_token}/{to_token}")
+        
+        # Special handling for ETH and WETH trading
+        is_eth_weth_pair = (from_token == "ETH" and to_token == "WETH") or (from_token == "WETH" and to_token == "ETH")
+        if is_eth_weth_pair:
+            result = {
+                "from_token": from_token,
+                "to_token": to_token,
+                "price": 1.0,  # ETH and WETH always 1:1
+                "inverse_price": 1.0,
+                "timestamp": datetime.now().isoformat(),
+                "block_height": 0,
+                "transaction_hash": "",
+                "trade_amount_usd": 0.0,
+                "exchange": "ETH/WETH Direct",
+                "source": "Direct ETH/WETH conversion"
+            }
+            
+            # Update cache
+            self.price_cache[cache_key] = {
+                "data": result,
+                "timestamp": datetime.now().timestamp()
+            }
+            
+            return result
         
         from_address = from_info['address']
         to_address = to_info['address']
         
-        # 处理ETH特殊情况
+        # Handle ETH special case
         if from_token == "ETH":
             from_address = self.supported_tokens["WETH"]["address"]
         if to_token == "ETH":
             to_address = self.supported_tokens["WETH"]["address"]
         
-        # 调试信息
-        print(f"查询代币交换数据: {from_token}({from_address}) → {to_token}({to_address})")
+        # Debug info
+        print(f"Querying token exchange data: {from_token}({from_address}) → {to_token}({to_address})")
         
-        # 简化的查询 - 只使用基本字段
+        # Simplified query - use only basic fields
         query = """
         query ($baseAddress: String!, $quoteAddress: String!) {
         EVM(network: eth) {
@@ -1078,35 +1108,53 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
         """
         
-        # 构建查询变量
+        # Build query variables
         variables = {
             "baseAddress": from_address,
             "quoteAddress": to_address
         }
         
         try:
-            # 执行查询
+            # Execute query
             response = await self.execute_query(query, variables)
             
-            # 打印完整响应以便调试
-            #print(f"API响应: {json.dumps(response, indent=2)}")
-            
-            # 解析响应
+            # Parse response
             if 'data' in response and 'EVM' in response['data'] and 'DEXTrades' in response['data']['EVM']:
                 trades = response['data']['EVM']['DEXTrades']
                 
-                # 检查是否有交易数据
+                # Check if there is trade data
                 if not trades or len(trades) == 0:
-                    print(f"未找到{from_token}和{to_token}之间的交易数据，使用默认值")
+                    print(f"No trade data found between {from_token} and {to_token}, using default values")
                     
-                    # 使用预设默认值
+                    # Use preset default values based on staking rates and market data for each LST
                     default_rates = {
+                        # Default exchange rates from ETH to LSTs
                         "ETH_stETH": 1.01,    # 1 ETH = 1.01 stETH
                         "ETH_rETH": 0.96,     # 1 ETH = 0.96 rETH
                         "ETH_cbETH": 0.98,    # 1 ETH = 0.98 cbETH
+                        "ETH_wstETH": 1.01,   # 1 ETH = 1.01 wstETH
+                        "ETH_sfrxETH": 1.02,  # 1 ETH = 1.02 sfrxETH
+                        
+                        # Default exchange rates between LSTs
                         "stETH_rETH": 0.95,   # 1 stETH = 0.95 rETH
                         "stETH_cbETH": 0.97,  # 1 stETH = 0.97 cbETH
-                        "rETH_cbETH": 1.02    # 1 rETH = 1.02 cbETH
+                        "stETH_wstETH": 1.0,  # 1 stETH = 1.0 wstETH
+                        "stETH_sfrxETH": 1.01,# 1 stETH = 1.01 sfrxETH
+                        
+                        "rETH_stETH": 1.05,   # 1 rETH = 1.05 stETH
+                        "rETH_cbETH": 1.02,   # 1 rETH = 1.02 cbETH
+                        "rETH_wstETH": 1.05,  # 1 rETH = 1.05 wstETH
+                        "rETH_sfrxETH": 1.06, # 1 rETH = 1.06 sfrxETH
+                        
+                        "cbETH_stETH": 1.03,  # 1 cbETH = 1.03 stETH
+                        "cbETH_rETH": 0.98,   # 1 cbETH = 0.98 rETH
+                        "cbETH_wstETH": 1.03, # 1 cbETH = 1.03 wstETH
+                        "cbETH_sfrxETH": 1.04,# 1 cbETH = 1.04 sfrxETH
+                        
+                        "wstETH_stETH": 1.0,  # 1 wstETH = 1.0 stETH
+                        "wstETH_rETH": 0.95,  # 1 wstETH = 0.95 rETH
+                        "wstETH_cbETH": 0.97, # 1 wstETH = 0.97 cbETH
+                        "wstETH_sfrxETH": 1.01,# 1 wstETH = 1.01 sfrxETH,
                     }
                     
                     key = f"{from_token}_{to_token}"
@@ -1117,6 +1165,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     elif reverse_key in default_rates:
                         price = 1.0 / default_rates[reverse_key]
                     else:
+                        # If preset default value can't be found, use 1:1
                         price = 1.0
                     
                     result = {
@@ -1129,10 +1178,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "transaction_hash": "",
                         "trade_amount_usd": 0.0,
                         "exchange": "Default",
-                        "source": "默认值(无API数据)"
+                        "source": "Default values (no API data)"
                     }
                     
-                    # 更新缓存
+                    # Update cache
                     self.price_cache[cache_key] = {
                         "data": result,
                         "timestamp": datetime.now().timestamp()
@@ -1140,31 +1189,31 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     
                     return result
                 
-                # 有交易数据，解析第一条
+                # Has trade data, parse first one
                 latest_trade = trades[0]
                 
                 if 'Trade' in latest_trade:
                     trade = latest_trade['Trade']
                     
-                    # 确保必要的字段存在
+                    # Ensure necessary fields exist
                     if ('Buy' not in trade or 'Amount' not in trade['Buy'] or
                         'Sell' not in trade or 'Amount' not in trade['Sell']):
-                        raise Exception(f"交易数据格式不正确: {trade}")
+                        raise Exception(f"Invalid trade data format: {trade}")
                     
-                    # 提取金额
+                    # Extract amounts
                     buy_amount = float(trade['Buy']['Amount'])
                     sell_amount = float(trade['Sell']['Amount'])
                     
-                    # 计算价格比率
+                    # Calculate price ratio
                     price = buy_amount / sell_amount
                     inverse_price = sell_amount / buy_amount
                     
-                    # 提取其他信息
+                    # Extract other information
                     block_number = latest_trade['Block']['Number']
                     block_time = latest_trade['Block']['Time']
                     exchange_name = trade['Dex']['ProtocolName']
                     
-                    # 构建结果对象 - 没有交易哈希字段
+                    # Build result object - no transaction hash field
                     result = {
                         "from_token": from_token,
                         "to_token": to_token,
@@ -1172,13 +1221,13 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "inverse_price": inverse_price,
                         "timestamp": block_time,
                         "block_height": block_number,
-                        "transaction_hash": "",  # 无法从API获取
-                        "trade_amount_usd": 0.0,  # USD金额数据可能不可用
+                        "transaction_hash": "",  # Not available from API
+                        "trade_amount_usd": 0.0,  # USD amount data may not be available
                         "exchange": exchange_name,
-                        "source": "Bitquery DEX数据"
+                        "source": "Bitquery DEX data"
                     }
                     
-                    # 更新缓存
+                    # Update cache
                     self.price_cache[cache_key] = {
                         "data": result,
                         "timestamp": datetime.now().timestamp()
@@ -1186,15 +1235,15 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     
                     return result
                 else:
-                    raise Exception(f"交易数据结构不正确: {latest_trade}")
+                    raise Exception(f"Invalid trade data structure: {latest_trade}")
             else:
-                error_msg = "API返回结构不符合预期"
+                error_msg = "API response structure not as expected"
                 if 'errors' in response:
                     error_detail = str(response.get('errors', ''))
                     error_msg += f": {error_detail}"
-                print(f"{error_msg}，使用默认值")
+                print(f"{error_msg}, using default values")
                 
-                # 使用默认值
+                # Use default values
                 default_price = 1.0
                 if from_token == "ETH" and to_token == "stETH":
                     default_price = 1.01
@@ -1211,10 +1260,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     "transaction_hash": "",
                     "trade_amount_usd": 0.0,
                     "exchange": "Default",
-                    "source": "默认值(API结构错误)"
+                    "source": "Default values (API structure error)"
                 }
                 
-                # 更新缓存
+                # Update cache
                 self.price_cache[cache_key] = {
                     "data": result,
                     "timestamp": datetime.now().timestamp()
@@ -1223,9 +1272,9 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 return result
         
         except Exception as e:
-            print(f"获取交易数据失败: {str(e)}，使用默认值")
+            print(f"Failed to get trade data: {str(e)}, using default values")
             
-            # 使用默认值
+            # Use default values
             default_price = 1.0
             if from_token == "ETH" and to_token == "stETH":
                 default_price = 1.01
@@ -1242,10 +1291,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "transaction_hash": "",
                 "trade_amount_usd": 0.0,
                 "exchange": "Default",
-                "source": f"默认值(错误: {str(e)})"
+                "source": f"Default values (Error: {str(e)})"
             }
             
-            # 更新缓存
+            # Update cache
             self.price_cache[cache_key] = {
                 "data": result,
                 "timestamp": datetime.now().timestamp()
@@ -1255,29 +1304,29 @@ query ($baseAddress: String!, $quoteAddress: String!) {
     
     async def get_staking_rate(self, token: str) -> Dict[str, Any]:
         """
-        获取LST代币的质押率(ETH:LST)
+        Get LST token staking rate (ETH:LST)
         
         Args:
-            token: LST代币符号
+            token: LST token symbol
             
         Returns:
-            dict: 包含质押率信息的字典
+            dict: Dictionary containing staking rate information
         """
-        # 检查缓存
+        # Check cache
         if token in self.staking_rate_cache:
             cache_entry = self.staking_rate_cache[token]
-            # 检查缓存是否过期
+            # Check if cache is expired
             if datetime.now().timestamp() - cache_entry["timestamp"] < self.config["cache_ttl"]:
                 return cache_entry["data"]
         
         token_info = self.supported_tokens.get(token)
         
-        # 如果是ETH或不是LST代币，返回1:1的比率
+        # If it's ETH or not an LST token, return 1:1 ratio
         if not token_info or token == "ETH" or token == "WETH" or 'protocol_address' not in token_info:
             result = {
                 "token": token,
                 "staking_rate": 1.0,
-                "source": "默认值"
+                "source": "Default value"
             }
             self.staking_rate_cache[token] = {
                 "data": result,
@@ -1287,23 +1336,23 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         
         protocol_address = token_info['protocol_address']
         
-        # 构建查询变量
+        # Build query variables
         variables = {
             "protocolAddress": protocol_address
         }
         
-        # 执行查询
+        # Execute query
         response = await self.execute_query(self.lst_staking_rate_query, variables)
         
-        # 解析响应 - 适应新的EVM API结构
+        # Parse response - adapt to new EVM API structure
         if 'data' in response and 'EVM' in response['data'] and 'SmartContractCalls' in response['data']['EVM']:
             contract_calls = response['data']['EVM']['SmartContractCalls']
             if not contract_calls:
-                raise Exception(f"没有找到{token}的质押率数据")
+                raise Exception(f"No staking rate data found for {token}")
                 
             latest_call = contract_calls[0]
             
-            # 尝试提取质押率
+            # Try to extract staking rate
             staking_rate = None
             staking_rate_function = token_info.get('staking_rate_function')
             
@@ -1314,27 +1363,27 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         break
             
             if staking_rate is None:
-                # 如果无法从参数中提取质押率，使用默认值
+                # If unable to extract staking rate from parameters, use default values
                 if token == "stETH":
-                    staking_rate = 1.03  # 假设 1 stETH ≈ 1.03 ETH
+                    staking_rate = 1.03  # Assume 1 stETH ≈ 1.03 ETH
                 elif token == "rETH":
-                    staking_rate = 1.04  # 假设 1 rETH ≈ 1.04 ETH
+                    staking_rate = 1.04  # Assume 1 rETH ≈ 1.04 ETH
                 elif token == "cbETH":
-                    staking_rate = 1.02  # 假设 1 cbETH ≈ 1.02 ETH
+                    staking_rate = 1.02  # Assume 1 cbETH ≈ 1.02 ETH
                 else:
-                    staking_rate = 1.0  # 默认1:1比率
+                    staking_rate = 1.0  # Default 1:1 ratio
             
-            # 构建结果
+            # Build result
             result = {
                 "token": token,
                 "staking_rate": staking_rate,
                 "timestamp": latest_call['Block']['Time'],
                 "block_height": latest_call['Block']['Number'],
                 "transaction_hash": latest_call['Transaction']['Hash'],
-                "source": "Bitquery合约数据"
+                "source": "Bitquery contract data"
             }
             
-            # 更新缓存
+            # Update cache
             self.staking_rate_cache[token] = {
                 "data": result,
                 "timestamp": datetime.now().timestamp()
@@ -1342,7 +1391,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             
             return result
         else:
-            # 如果API调用失败，使用默认值
+            # If API call fails, use default values
             default_rates = {
                 "stETH": 1.03,
                 "rETH": 1.04,
@@ -1356,10 +1405,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             result = {
                 "token": token,
                 "staking_rate": staking_rate,
-                "source": "默认值(API失败)"
+                "source": "Default values (API failed)"
             }
             
-            # 更新缓存
+            # Update cache
             self.staking_rate_cache[token] = {
                 "data": result,
                 "timestamp": datetime.now().timestamp()
@@ -1368,27 +1417,27 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             return result
     async def calculate_direct_swap(self, from_token: str, to_token: str, amount: float) -> SwapPath:
         """
-        计算直接在DEX上交换两个代币的结果
+        Calculate the result of directly swapping two tokens on DEX
         
         Args:
-            from_token: 源代币
-            to_token: 目标代币
-            amount: 源代币数量
+            from_token: Source token
+            to_token: Target token
+            amount: Source token amount
             
         Returns:
-            SwapPath: 包含交换结果信息的对象
+            SwapPath: Object containing swap result information
         """
-        # 检查是否是ETH/WETH的互换
+        # Check if it's ETH/WETH swap
         is_eth_weth_swap = (from_token == "ETH" and to_token == "WETH") or (from_token == "WETH" and to_token == "ETH")
         
-        # 获取交换价格
+        # Get exchange rate
         exchange_data = await self.get_token_exchange_data(from_token, to_token)
         
-        # 从交易数据确定DEX和费用
-        dex_fee = 0.003  # 默认0.3% (Uniswap V2/V3标准)
+        # Determine DEX and fees from trade data
+        dex_fee = 0.003  # Default 0.3% (Uniswap V2/V3 standard)
         dex_name = exchange_data.get("exchange", "Unknown DEX")
         
-        # 根据DEX调整费用
+        # Adjust fees based on DEX
         dex_fees = {
             "uniswap": 0.003,  # 0.3%
             "sushiswap": 0.003,  # 0.3%
@@ -1397,7 +1446,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             "dodo": 0.001  # 0.1%
         }
         
-        # 对于ETH/WETH互换，不收取DEX费用
+        # For ETH/WETH swaps, no DEX fee
         if is_eth_weth_swap:
             dex_fee = 0.0
             dex_name = "ETH/WETH Direct"
@@ -1407,20 +1456,20 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     dex_fee = fee
                     break
         
-        # 获取交易gas成本
-        # ETH/WETH互换的gas成本较低
+        # Get transaction gas cost
+        # ETH/WETH swaps have lower gas cost
         if is_eth_weth_swap:
-            # 使用wrap/unwrap的较低gas成本
+            # Use lower gas cost for wrap/unwrap
             gas_cost = await self.calculate_gas_cost("wrap_eth" if from_token == "ETH" else "unwrap_eth")
         else:
             gas_cost = await self.calculate_gas_cost("swap")
         
-        # 使用简单的内部滑点计算，避免调用可能存在参数问题的方法
-        # ETH/WETH互换不存在滑点
+        # Use simple internal slippage calculation, avoid calling method that might have parameter issues
+        # No slippage for ETH/WETH swaps
         if is_eth_weth_swap:
             slippage = 0.0
         else:
-            # 使用预定义的滑点表
+            # Use predefined slippage table
             token_pair = f"{from_token}_{to_token}"
             default_slippages = {
                 "ETH_stETH": 0.001,   # 0.1%
@@ -1431,12 +1480,12 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "rETH_cbETH": 0.008   # 0.8%
             }
             
-            # 尝试直接获取滑点，如果不存在则检查反向交易对，最后使用默认值
+            # Try to get slippage directly, if not exists check reverse pair, finally use default
             slippage = default_slippages.get(token_pair, 
                     default_slippages.get(f"{to_token}_{from_token}", 0.005))
             
-            # 根据交易量调整滑点
-            # 交易量越大，滑点越大
+            # Adjust slippage based on volume
+            # Higher volume, higher slippage
             volume_multiplier = 1.0
             if amount > 100:
                 volume_multiplier = 1.5
@@ -1445,17 +1494,17 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             
             slippage = slippage * volume_multiplier
         
-        # 计算实际收到的代币数量
+        # Calculate actual received token amount
         received_amount = amount * exchange_data['price'] * (1 - dex_fee) * (1 - slippage)
         
-        # 计算净收益（考虑gas成本）
+        # Calculate net profit (considering gas cost)
         eth_price_in_to_token = 1.0
         if to_token != "ETH":
             try:
                 eth_to_token_data = await self.get_token_exchange_data("ETH", to_token)
                 eth_price_in_to_token = eth_to_token_data.get("price", 1.0)
             except Exception:
-                # 如果无法获取ETH到目标代币的汇率，使用默认值
+                # If unable to get ETH to target token rate, use default value
                 eth_price_in_to_token = 1.0
         
         gas_cost_in_to_token = gas_cost["gas_cost_eth"] * eth_price_in_to_token
@@ -1486,43 +1535,43 @@ query ($baseAddress: String!, $quoteAddress: String!) {
     
     async def calculate_staking_unstaking(self, from_token: str, to_token: str, amount: float) -> SwapPath:
         """
-        计算通过质押和解质押路径的交换结果
+        Calculate exchange result through staking and unstaking path
         
         Args:
-            from_token: 源代币
-            to_token: 目标代币
-            amount: 源代币数量
+            from_token: Source token
+            to_token: Target token
+            amount: Source token amount
             
         Returns:
-            SwapPath: 包含交换结果信息的对象
+            SwapPath: Object containing exchange result information
         """
         from_info = self.supported_tokens.get(from_token)
         to_info = self.supported_tokens.get(to_token)
         
         if not from_info or not to_info:
-            raise Exception(f"不支持的代币对: {from_token}/{to_token}")
+            raise Exception(f"Unsupported token pair: {from_token}/{to_token}")
         
-        # ETH -> LST (质押)
+        # ETH -> LST (staking)
         if from_token == "ETH" and to_token in self.trade_paths["ETH_TO_LST"]:
             path_info = self.trade_paths["ETH_TO_LST"][to_token]
             staking_fee = path_info.get("fee", 0.001)
             
-            # 获取质押率
+            # Get staking rate
             staking_data = await self.get_staking_rate(to_token)
-            staking_rate = 1.0 / staking_data["staking_rate"]  # ETH->LST的比率
+            staking_rate = 1.0 / staking_data["staking_rate"]  # ETH->LST ratio
             
-            # 获取gas成本
+            # Get gas cost
             gas_cost = await self.calculate_gas_cost("stake")
             
             received_amount = amount * staking_rate * (1 - staking_fee)
             
-            # 计算净收益（考虑gas成本）
+            # Calculate net profit (considering gas cost)
             eth_price_in_to_token = 1.0
             try:
                 eth_to_token_data = await self.get_token_exchange_data("ETH", to_token)
                 eth_price_in_to_token = eth_to_token_data.get("price", 1.0)
             except Exception:
-                # 如果无法获取ETH到目标代币的汇率，使用默认值
+                # If unable to get ETH to target token rate, use default value
                 eth_price_in_to_token = 1.0
             
             gas_cost_in_to_token = gas_cost["gas_cost_eth"] * eth_price_in_to_token
@@ -1551,28 +1600,28 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 gas_cost_usd=gas_cost["gas_cost_usd"]
             )
             
-        # LST -> ETH (解质押)
+        # LST -> ETH (unstaking)
         elif from_token in self.trade_paths["LST_TO_ETH"] and to_token == "ETH":
             path_info = self.trade_paths["LST_TO_ETH"][from_token]
             unstaking_fee = path_info.get("fee", 0.001)
-            unstaking_delay = path_info.get("delay", 7 * 24 * 60 * 60)  # 默认7天
+            unstaking_delay = path_info.get("delay", 7 * 24 * 60 * 60)  # Default 7 days
             
-            # 获取质押率
+            # Get staking rate
             staking_data = await self.get_staking_rate(from_token)
-            staking_rate = staking_data["staking_rate"]  # LST->ETH的比率
+            staking_rate = staking_data["staking_rate"]  # LST->ETH ratio
             
-            # 获取gas成本
+            # Get gas cost
             gas_cost = await self.calculate_gas_cost("unstake")
             
             received_amount = amount * staking_rate * (1 - unstaking_fee)
             
-            # 计算延迟天数
+            # Calculate delay days
             delay_days = unstaking_delay / (24 * 60 * 60)
             
-            # 计算机会成本
+            # Calculate opportunity cost
             opportunity_cost_percent = await self.calculate_opportunity_cost(delay_days, from_token)
             
-            # 计算净收益（考虑gas成本和时间价值）
+            # Calculate net profit (considering gas cost and time value)
             net_received_amount = received_amount * (1 - opportunity_cost_percent) - gas_cost["gas_cost_eth"]
             
             swap_step = SwapStep(
@@ -1599,9 +1648,9 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 gas_cost_usd=gas_cost["gas_cost_usd"]
             )
         
-        # LST -> LST (需要通过ETH中转)
+        # LST -> LST (needs to go through ETH)
         elif from_token in self.trade_paths["LST_TO_ETH"] and to_token in self.trade_paths["ETH_TO_LST"]:
-            # 第一步：LST -> ETH
+            # Step 1: LST -> ETH
             unstake_path = self.trade_paths["LST_TO_ETH"][from_token]
             unstaking_fee = unstake_path.get("fee", 0.001)
             unstaking_delay = unstake_path.get("delay", 7 * 24 * 60 * 60)
@@ -1609,40 +1658,40 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             from_staking_data = await self.get_staking_rate(from_token)
             from_staking_rate = from_staking_data["staking_rate"]
             
-            # 获取第一步gas成本
+            # Get gas cost for first step
             gas_cost_1 = await self.calculate_gas_cost("unstake")
             
             intermediate_amount = amount * from_staking_rate * (1 - unstaking_fee)
             
-            # 第二步：ETH -> LST
+            # Step 2: ETH -> LST
             stake_path = self.trade_paths["ETH_TO_LST"][to_token]
             staking_fee = stake_path.get("fee", 0.001)
             
             to_staking_data = await self.get_staking_rate(to_token)
             to_staking_rate = 1.0 / to_staking_data["staking_rate"]
             
-            # 获取第二步gas成本
+            # Get gas cost for second step
             gas_cost_2 = await self.calculate_gas_cost("stake")
             
-            # 计算延迟天数
+            # Calculate delay days
             delay_days = unstaking_delay / (24 * 60 * 60)
             
-            # 计算机会成本
+            # Calculate opportunity cost
             opportunity_cost_percent = await self.calculate_opportunity_cost(delay_days, from_token)
             
-            # 考虑第一步的gas成本
+            # Consider first step gas cost
             intermediate_amount = intermediate_amount - gas_cost_1["gas_cost_eth"]
             
-            # 考虑延迟的机会成本
+            # Consider delay opportunity cost
             intermediate_amount_after_delay = intermediate_amount * (1 - opportunity_cost_percent)
             
-            # 考虑第二步
+            # Consider second step
             final_amount = intermediate_amount_after_delay * to_staking_rate * (1 - staking_fee)
             
-            # 考虑第二步的gas成本
+            # Consider second step gas cost
             net_final_amount = final_amount - gas_cost_2["gas_cost_eth"]
             
-            # 计算总gas成本（ETH和USD）
+            # Calculate total gas cost (ETH and USD)
             total_gas_cost_eth = gas_cost_1["gas_cost_eth"] + gas_cost_2["gas_cost_eth"]
             total_gas_cost_usd = gas_cost_1["gas_cost_usd"] + gas_cost_2["gas_cost_usd"]
             
@@ -1681,16 +1730,15 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             )
         
         else:
-            raise Exception(f"没有可用的质押/解质押路径: {from_token} -> {to_token}")
+            raise Exception(f"No available staking/unstaking path: {from_token} -> {to_token}")
     
-    # 后续方法保持不变...
     async def analyze_arbitrage_path(self, from_token: str, to_token: str, amount: float, risk_preference: float = None) -> Dict[str, Any]:
-        """分析两个代币之间的套利路径"""
-        # 使用传入的风险偏好或默认值
+        """Analyze arbitrage paths between two tokens"""
+        # Use provided risk preference or default value
         if risk_preference is None:
             risk_preference = self.config["risk_preference"]
         
-        # 计算直接交换路径
+        # Calculate direct swap path
         try:
             direct_swap = await self.calculate_direct_swap(from_token, to_token, amount)
             direct_swap_dict = direct_swap.__dict__
@@ -1700,11 +1748,11 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "from_token": from_token,
                 "to_token": to_token,
                 "input_amount": amount,
-                "error": f"直接交换失败: {str(e)}"
+                "error": f"Direct swap failed: {str(e)}"
             }
             has_direct_swap = False
         
-        # 计算质押/解质押路径
+        # Calculate staking/unstaking path
         try:
             staking_path = await self.calculate_staking_unstaking(from_token, to_token, amount)
             staking_path_dict = staking_path.__dict__
@@ -1714,45 +1762,45 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 "from_token": from_token,
                 "to_token": to_token,
                 "input_amount": amount,
-                "error": f"质押/解质押路径失败: {str(e)}"
+                "error": f"Staking/unstaking path failed: {str(e)}"
             }
             has_staking_path = False
         
-        # 如果两种路径都失败，则返回错误
+        # If both paths fail, return error
         if not has_direct_swap and not has_staking_path:
             return {
                 "from_token": from_token,
                 "to_token": to_token,
                 "amount": amount,
-                "error": "没有可用的交换路径"
+                "error": "No available exchange paths"
             }
         
-        # 计算年化收益率
+        # Calculate annualized yield
         results = []
         
         if has_direct_swap:
-            # 使用净收益（考虑gas成本）
+            # Use net profit (considering gas cost)
             direct_swap_profit = direct_swap.net_output_amount - amount
             direct_swap_profit_percent = (direct_swap_profit / amount) * 100
             
-            # 直接交换通常是即时的，所以年化收益率就是交易收益率
+            # Direct swap is usually immediate, so annual yield equals trade yield
             direct_swap_dict["profit"] = direct_swap_profit
             direct_swap_dict["profit_percent"] = direct_swap_profit_percent
-            direct_swap_dict["annual_profit_percent"] = direct_swap_profit_percent  # 即时交易，不需要年化
+            direct_swap_dict["annual_profit_percent"] = direct_swap_profit_percent  # Immediate trade, no annualization needed
             direct_swap_dict["is_profitable"] = direct_swap_profit > self.config["min_profit_threshold"]
             
-            # 转换SwapStep对象为字典
+            # Convert SwapStep objects to dictionaries
             if "steps" in direct_swap_dict and isinstance(direct_swap_dict["steps"], list):
                 direct_swap_dict["steps"] = [step.__dict__ for step in direct_swap_dict["steps"]]
             
             results.append(direct_swap_dict)
         
         if has_staking_path:
-            # 使用净收益（考虑gas成本和时间价值）
+            # Use net profit (considering gas cost and time value)
             staking_profit = staking_path.net_output_amount - amount
             staking_profit_percent = (staking_profit / amount) * 100
             
-            # 对于需要等待的解质押路径，计算年化收益率
+            # For unstaking paths that require waiting, calculate annualized yield
             unstaking_time_days = 0
             for step in staking_path.steps:
                 if step.type == "unstake" and step.delay_days:
@@ -1762,7 +1810,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             if unstaking_time_days > 0:
                 annual_profit_percent = staking_profit_percent * (365 / unstaking_time_days)
             else:
-                annual_profit_percent = staking_profit_percent  # 如果是即时交易，不需要年化
+                annual_profit_percent = staking_profit_percent  # If immediate trade, no annualization needed
             
             staking_path_dict["profit"] = staking_profit
             staking_path_dict["profit_percent"] = staking_profit_percent
@@ -1770,17 +1818,17 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             staking_path_dict["unstaking_time_days"] = unstaking_time_days
             staking_path_dict["is_profitable"] = staking_profit > self.config["min_profit_threshold"]
             
-            # 转换SwapStep对象为字典
+            # Convert SwapStep objects to dictionaries
             if "steps" in staking_path_dict and isinstance(staking_path_dict["steps"], list):
                 staking_path_dict["steps"] = [step.__dict__ for step in staking_path_dict["steps"]]
             
             results.append(staking_path_dict)
         
-        # 找出最佳路径
+        # Find the best path
         profitable_results = [r for r in results if r.get('is_profitable', False)]
         
         if not profitable_results:
-            # 如果没有盈利路径，选择损失最小的
+            # If no profitable paths, choose the one with minimal loss
             if results:
                 best_path = max(results, key=lambda x: x.get('profit_percent', -float('inf')))
             else:
@@ -1788,14 +1836,14 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     "from_token": from_token,
                     "to_token": to_token,
                     "amount": amount,
-                    "error": "没有可用的交换路径"
+                    "error": "No available exchange paths"
                 }
         else:
-            # 找出最佳路径
+            # Find the best path
             if len(profitable_results) == 1:
                 best_path = profitable_results[0]
             else:
-                # 比较直接交换和解质押路径
+                # Compare direct swap and staking/unstaking paths
                 direct_paths = [r for r in profitable_results if r['route_type'] == 'direct_swap']
                 staking_paths = [r for r in profitable_results if r['route_type'] in ['staking', 'unstaking', 'unstake_then_stake']]
                 
@@ -1803,10 +1851,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     direct_path = direct_paths[0]
                     staking_path = max(staking_paths, key=lambda x: x['annual_profit_percent'])
                     
-                    # 计算时间价值调整
+                    # Calculate time value adjustment
                     time_value_adjustment = staking_path.get('unstaking_time_days', 0) * self.config["time_value_factor"]
                     
-                    # 考虑风险偏好和时间价值
+                    # Consider risk preference and time value
                     if staking_path['annual_profit_percent'] > direct_path['annual_profit_percent'] + risk_preference + time_value_adjustment:
                         best_path = staking_path
                     else:
@@ -1816,7 +1864,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 else:
                     best_path = max(staking_paths, key=lambda x: x['annual_profit_percent'])
         
-        # 添加当前时间戳和市场条件
+        # Add current timestamp and market conditions
         try:
             gas_price = await self.get_current_gas_price()
         except:
@@ -1835,27 +1883,27 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
     
     async def find_circular_arbitrage(self, start_token: str, amount: float) -> Dict[str, Any]:
-        """寻找循环套利机会"""
-        # 此方法代码保持不变，因为它调用其他已更新的方法
-        # 获取所有支持的代币
+        """Find circular arbitrage opportunities"""
+        # This method's code remains unchanged as it calls other updated methods
+        # Get all supported tokens
         tokens = list(self.supported_tokens.keys())
         
-        # 如果起始代币不在列表中，返回错误
+        # If start token not in list, return error
         if start_token not in tokens:
             return {
                 "start_token": start_token,
-                "error": "不支持的代币"
+                "error": "Unsupported token"
             }
         
-        # 找出所有可能的二级路径
+        # Find all possible two-hop paths
         two_hop_paths = []
         for intermediate_token in tokens:
             if intermediate_token != start_token:
                 try:
-                    # 分析 start_token -> intermediate_token -> start_token 路径
+                    # Analyze start_token -> intermediate_token -> start_token path
                     first_hop = await self.calculate_direct_swap(start_token, intermediate_token, amount)
                     
-                    # 使用净产出考虑gas
+                    # Use net output considering gas
                     intermediate_amount = first_hop.net_output_amount
                     second_hop = await self.calculate_direct_swap(intermediate_token, start_token, intermediate_amount)
                     
@@ -1877,27 +1925,27 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                             ]
                         })
                 except Exception as e:
-                    # 记录错误但继续处理
-                    print(f"二级路径分析失败 {start_token}->{intermediate_token}: {str(e)}")
+                    # Log error but continue processing
+                    print(f"Two-hop path analysis failed {start_token}->{intermediate_token}: {str(e)}")
         
-        # 找出可能有价值的中间代币（根据二级路径结果）
+        # Find potentially valuable intermediate tokens (based on two-hop results)
         potential_tokens = set()
         for path in two_hop_paths:
             intermediate_token = path["path"][1]
             potential_tokens.add(intermediate_token)
         
-        # 如果没有有价值的中间代币，使用几个主要的LST代币
+        # If no valuable intermediate tokens, use some major LST tokens
         if not potential_tokens:
             potential_tokens = set(["stETH", "rETH", "cbETH", "WETH"])
         
-        # 找出所有可能的三级路径
+        # Find all possible three-hop paths
         three_hop_paths = []
         for intermediate1 in potential_tokens:
             if intermediate1 != start_token:
                 for intermediate2 in potential_tokens:
                     if intermediate2 != start_token and intermediate2 != intermediate1:
                         try:
-                            # 分析 start_token -> intermediate1 -> intermediate2 -> start_token 路径
+                            # Analyze start_token -> intermediate1 -> intermediate2 -> start_token path
                             first_hop = await self.calculate_direct_swap(start_token, intermediate1, amount)
                             
                             intermediate1_amount = first_hop.net_output_amount
@@ -1936,13 +1984,13 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                                     ]
                                 })
                         except Exception as e:
-                            # 记录错误但继续处理
-                            print(f"三级路径分析失败 {start_token}->{intermediate1}->{intermediate2}: {str(e)}")
+                            # Log error but continue processing
+                            print(f"Three-hop path analysis failed {start_token}->{intermediate1}->{intermediate2}: {str(e)}")
         
-        # 合并所有路径并按利润排序
+        # Merge all paths and sort by profit
         all_paths = sorted(two_hop_paths + three_hop_paths, key=lambda x: x['profit_percent'], reverse=True)
         
-        # 添加当前时间戳和市场条件
+        # Add current timestamp and market conditions
         current_time = datetime.now().isoformat()
         try:
             gas_price = await self.get_current_gas_price()
@@ -1959,15 +2007,15 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
     
     async def execute(self, **params):
-        """执行LST套利分析"""
-        # 此方法代码保持不变，因为它调用其他已更新的方法
+        """Execute LST arbitrage analysis"""
+        # This method's code remains unchanged as it calls other updated methods
         from_token = params.get('from_token')
         to_token = params.get('to_token')
         amount = params.get('amount', 1.0)
         find_all_routes = params.get('find_all_routes', False)
         risk_preference = params.get('risk_preference', self.config["risk_preference"])
         
-        # 确保amount是数字
+        # Ensure amount is a number
         try:
             amount = float(amount)
         except (ValueError, TypeError):
@@ -1980,14 +2028,14 @@ query ($baseAddress: String!, $quoteAddress: String!) {
         }
         
         try:
-            # 获取当前gas价格
+            # Get current gas price
             gas_price = await self.get_current_gas_price()
             results["current_gas_price_gwei"] = gas_price
         except Exception as e:
-            # 如果获取gas价格失败，不应该影响整个分析
-            print(f"获取gas价格失败: {str(e)}")
+            # If getting gas price fails, should not affect entire analysis
+            print(f"Failed to get gas price: {str(e)}")
         
-        # 如果指定了 from_token 和 to_token，分析特定路径
+        # If from_token and to_token specified, analyze specific path
         if from_token and to_token:
             try:
                 arbitrage_analysis = await self.analyze_arbitrage_path(from_token, to_token, amount, risk_preference)
@@ -1997,10 +2045,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     "from_token": from_token,
                     "to_token": to_token,
                     "amount": amount,
-                    "error": f"分析失败: {str(e)}"
+                    "error": f"Analysis failed: {str(e)}"
                 }
             
-            # 如果请求查找循环套利，则额外分析
+            # If requested to find circular arbitrage, analyze additionally
             if find_all_routes:
                 try:
                     circular_analysis = await self.find_circular_arbitrage(from_token, amount)
@@ -2008,12 +2056,12 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 except Exception as e:
                     results["circular_arbitrage"] = {
                         "start_token": from_token,
-                        "error": f"循环套利分析失败: {str(e)}"
+                        "error": f"Circular arbitrage analysis failed: {str(e)}"
                     }
             
             return results
         
-        # 如果只指定了 from_token，分析从该代币到其他所有代币的路径
+        # If only from_token specified, analyze paths from this token to all other tokens
         elif from_token:
             all_analyses = []
             tokens = [t for t in self.supported_tokens.keys() if t != from_token]
@@ -2027,10 +2075,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "from_token": from_token,
                         "to_token": token,
                         "amount": amount,
-                        "error": f"分析失败: {str(e)}"
+                        "error": f"Analysis failed: {str(e)}"
                     })
             
-            # 找出最佳路径
+            # Find best path
             profitable_analyses = [a for a in all_analyses if 'best_path' in a and a['best_path'].get('is_profitable', False)]
             
             if profitable_analyses:
@@ -2038,7 +2086,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             else:
                 best_analysis = None
             
-            # 如果请求查找循环套利，则额外分析
+            # If requested to find circular arbitrage, analyze additionally
             if find_all_routes:
                 try:
                     circular_analysis = await self.find_circular_arbitrage(from_token, amount)
@@ -2046,7 +2094,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                 except Exception as e:
                     results["circular_arbitrage"] = {
                         "start_token": from_token,
-                        "error": f"循环套利分析失败: {str(e)}"
+                        "error": f"Circular arbitrage analysis failed: {str(e)}"
                     }
             
             results["from_token"] = from_token
@@ -2055,13 +2103,13 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             
             return results
         
-        # 如果都没指定，分析所有可能的组合中最佳的套利机会
+        # If none specified, analyze best arbitrage opportunities among all possible combinations
         else:
-            # 优化: 只分析主要代币对减少API调用
+            # Optimization: only analyze main token pairs to reduce API calls
             main_tokens = ["ETH", "stETH", "rETH", "cbETH"]
             all_pairs = []
             
-            # 生成关键代币对
+            # Generate key token pairs
             for from_token in main_tokens:
                 for to_token in main_tokens:
                     if from_token != to_token:
@@ -2078,10 +2126,10 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                         "from_token": from_token,
                         "to_token": to_token,
                         "amount": amount,
-                        "error": f"分析失败: {str(e)}"
+                        "error": f"Analysis failed: {str(e)}"
                     })
             
-            # 找出最佳套利机会
+            # Find best arbitrage opportunity
             profitable_analyses = [a for a in all_analyses if 'best_path' in a and a['best_path'].get('is_profitable', False)]
             
             if profitable_analyses:
@@ -2089,7 +2137,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             else:
                 best_analysis = None
             
-            # 查找最佳循环套利机会
+            # Find best circular arbitrage opportunity
             circular_results = []
             
             for token in main_tokens:
@@ -2098,7 +2146,7 @@ query ($baseAddress: String!, $quoteAddress: String!) {
                     if circular_analysis.get('best_opportunity'):
                         circular_results.append(circular_analysis)
                 except Exception as e:
-                    print(f"{token}循环套利分析失败: {str(e)}")
+                    print(f"{token} circular arbitrage analysis failed: {str(e)}")
             
             best_circular = max(circular_results, key=lambda x: x['best_opportunity']['profit_percent']) if circular_results else None
             
@@ -2106,12 +2154,12 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             results["best_direct_analysis"] = best_analysis
             results["best_circular_arbitrage"] = best_circular
             
-            # 综合比较直接套利和循环套利
+            # Compare direct arbitrage and circular arbitrage
             if best_analysis and best_circular:
                 direct_profit_percent = best_analysis['best_path']['annual_profit_percent']
                 circular_profit_percent = best_circular['best_opportunity']['profit_percent']
                 
-                # 考虑风险偏好
+                # Consider risk preference
                 if circular_profit_percent > direct_profit_percent + risk_preference:
                     results["overall_best_strategy"] = {
                         "type": "circular",
@@ -2136,8 +2184,32 @@ query ($baseAddress: String!, $quoteAddress: String!) {
             return results
 
     def get_cache_ttl(self):
-        """安全获取缓存TTL值"""
-        default_ttl = 300  # 默认5分钟
+        """Safely get cache TTL value"""
+        default_ttl = 300  # Default 5 minutes
         if not hasattr(self, 'config') or not isinstance(self.config, dict):
             return default_ttl
         return self.config.get("cache_ttl", default_ttl)
+
+    def update_config(self, new_config: Dict[str, Any]) -> None:
+        """
+        Update tool configuration parameters
+        
+        Args:
+            new_config: Dictionary with new configuration parameters
+        """
+        if not hasattr(self, 'config'):
+            self.config = {}
+        
+        # Update configuration
+        for key, value in new_config.items():
+            self.config[key] = value
+            
+        # Clear caches
+        self.price_cache.clear()
+        self.staking_rate_cache.clear()
+        self.market_stats_cache.clear()
+        self.liquidity_cache.clear()
+        self.last_gas_price_check = None
+        self.current_gas_price = None
+        
+        print(f"Configuration updated: {new_config}")

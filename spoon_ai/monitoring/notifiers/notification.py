@@ -2,7 +2,6 @@
 import logging
 from typing import Dict, Any, List, Optional
 import asyncio
-import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,9 @@ class NotificationManager:
             }
             logger.info("Registered Telegram notification channel")
         except Exception as e:
+            import traceback
             logger.warning(f"Failed to register Telegram channel: {str(e)}")
+            logger.warning(traceback.format_exc())
         
         # Load Twitter
         try:

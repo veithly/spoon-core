@@ -9,6 +9,7 @@ from anthropic import AsyncAnthropic
 from httpx import AsyncClient
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+import asyncio
 
 logger = getLogger(__name__)
 

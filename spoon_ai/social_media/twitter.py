@@ -1,6 +1,6 @@
 import os
 from logging import getLogger
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -216,33 +216,33 @@ class TwitterClient:
 
     def send(self, message: str, tags: Optional[List[str]] = None, **kwargs) -> bool:
         """
-        发送Twitter通知消息
+        Send Twitter notification message
         
-        这个方法专门用于监控系统的通知功能，它将消息作为推文发布
+        This method is specifically for the notification function of the monitoring system, it publishes the message as a tweet
         
         Args:
-            message: 通知消息内容
-            tags: 要附加的标签列表
-            **kwargs: 其他参数
+            message: Notification message content
+            tags: List of tags to append
+            **kwargs: Other parameters
         
         Returns:
-            bool: 是否发送成功
+            bool: Whether the sending was successful
         """
         try:
-            # 检查消息长度并截断
+            # Check message length and truncate if necessary
             max_length = 280
             if len(message) > max_length:
                 message = message[:max_length-3] + "..."
             
-            # 添加标签
+            # Add tags
             if tags is None:
                 tags = kwargs.get("tags", ["#CryptoAlert", "#TradingAlert"])
             
-            # 如果消息中没有标签且有空间，添加它们
+            # If tags are not in the message and there's space, add them
             if all(tag not in message for tag in tags) and len(message) + sum(len(tag) + 1 for tag in tags) <= max_length:
                 message += " " + " ".join(tags)
             
-            # 发送推文
+            # Post the tweet
             self.post_tweet(message)
             logger.info("Twitter notification sent successfully")
             return True

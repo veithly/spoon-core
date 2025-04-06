@@ -37,7 +37,7 @@ app.add_middleware(
 )
 
 # Import and register API routes
-from .api.routes import router as monitoring_router
+from spoon_ai.monitoring.api.routes import router as monitoring_router
 app.include_router(monitoring_router)
 
 # Add health check endpoint
@@ -46,7 +46,7 @@ async def health_check():
     return {"status": "ok", "service": "monitoring"}
 
 # Start task scheduler
-from .core.tasks import MonitoringTaskManager
+from spoon_ai.monitoring.core.tasks import MonitoringTaskManager
 task_manager = MonitoringTaskManager()
 
 @app.on_event("startup")
@@ -66,7 +66,7 @@ async def shutdown_event():
 if __name__ == "__main__":
     # Get configuration parameters, can be read from environment variables
     host = os.getenv("MONITORING_HOST", "0.0.0.0")
-    port = int(os.getenv("MONITORING_PORT", "8080"))
+    port = int(os.getenv("MONITORING_PORT", "8888"))
     
     logger.info(f"Starting monitoring service on {host}:{port}")
     uvicorn.run("spoon_ai.monitoring.main:app", host=host, port=port, reload=True)

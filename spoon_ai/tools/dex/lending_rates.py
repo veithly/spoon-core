@@ -11,7 +11,7 @@ import requests
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
-from spoon_ai.tools.dex.base import DexBaseTool
+from spoon_ai.tools.dex.base import DefiBaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +320,7 @@ class ChainsightLendingProvider(LendingRateProvider):
         
         return filtered_rates
 
-class LendingRateMonitorTool(DexBaseTool):
+class LendingRateMonitorTool(DefiBaseTool):
     """Tool for monitoring lending rates across different chains and protocols"""
     
     name: str = "lending_rate_monitor"

@@ -1,7 +1,7 @@
-from .base import DexBaseTool
+from .base import BitqueryTool
 from datetime import datetime, timedelta
 
-class PredictPrice(DexBaseTool):
+class PredictPrice(BitqueryTool):
     name: str = "predict_price"
     description: str = "Predicts the price of a token"
     parameters: dict = {

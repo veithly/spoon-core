@@ -46,11 +46,11 @@ class ToolResult(BaseModel):
                 raise ValueError("Cannot concatenate non-string fields")
             return field or other_field
             
-            return ToolResult(
-                output=combine_fields(self.output, other.output),
-                error=combine_fields(self.error, other.error),
-                system=combine_fields(self.system, other.system),
-            )
+        return ToolResult(
+            output=combine_fields(self.output, other.output),
+            error=combine_fields(self.error, other.error),
+            system=combine_fields(self.system, other.system),
+        )
         
     def __str__(self) -> str:
         return f"Error: {self.error}" if self.error else f"Output: {self.output}"
