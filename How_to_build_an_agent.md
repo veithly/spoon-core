@@ -57,7 +57,6 @@ Each tool is a Python class that inherits from BaseTool, and must define:
 ```python
 from spoon_ai.tools.base import BaseTool
 
-
 class MyCustomTool(BaseTool):
     name: str = "my_custom_tool"
     description: str = "This is a custom tool for performing specific tasks"
@@ -180,7 +179,7 @@ Next, we will implement what we want to do in execute. What request do you want 
 1. Get longitude and latitude location information
 2. Get weather information based on longitude and latitude, and make clothing recommendations based on the weather
 
-````python
+```python
 from datetime import datetime, timezone
 from pydantic import Field
 import aiohttp
@@ -234,6 +233,7 @@ import asyncio
         f"🌡 Current temperature: {temperature}°C\n"
         f"👕 Clothing suggestion: {outfit}\n"
         )
+```
 
 ### 2. Creating a Custom Info Agent Using SpoonAI And Run Agent
 
@@ -257,7 +257,7 @@ description: str = (
     "1. Retrieve monthly GitHub commit counts from a specific repository and branch.\n"
     "2. Provide current weather and outfit suggestions for a given city.\n"
 )
-````
+```
 
 - system_prompt
   This string sets the initial role and instructions for your Agent
@@ -351,10 +351,12 @@ class MyInfoAgent(ToolCallAgent):
 Here’s a minimal example of how to run the agent:
 
 `info_agent = MyInfoAgent(llm=ChatBot())`
+
 💡We instantiate the custom agent class above
 Optional parameters can be passed, instead of passing the default model_name: "clclde-3-7-sonnet-20250219", llm_provider: "anthropic"
-model_name"gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
-llm_provider: "openapi" or llm_provider: "anthropic"
+
+- model_name"gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
+- llm_provider: "openapi" or llm_provider: "anthropic"
 
 `question = "What is the weather like in Shanghai today?"`
 Various questions to ask entered by the user
@@ -675,4 +677,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
+
+```
+
 ```
