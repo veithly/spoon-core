@@ -2,12 +2,18 @@ from spoon_ai.agents.toolcall import ToolCallAgent
 from spoon_ai.tools import ToolManager
 from spoon_ai.tools.base import BaseTool
 
-from pydantic import Field
-import aiohttp
-import asyncio
 from spoon_ai.chat import ChatBot
 from pydantic import Field
-import datetime
+
+from dateutil.parser import parse
+from gql import gql
+from typing import Optional
+from github_client import client
+from datetime import datetime, timezone
+
+
+import aiohttp
+import asyncio
 
 
 # ---------------------------- 1. GitHub Commit Count Tool ----------------------------
@@ -24,7 +30,7 @@ class GitHubCommitStatsTool(BaseTool):
     }
 
     async def execute(self, repo: str, branch: str) -> str:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.now(timezone.utc)
         start_of_month = now.replace(day=1).isoformat()
         until = now.isoformat()
 
@@ -152,7 +158,7 @@ class SmartWeatherTool(BaseTool):
                     return f"Failed to obtain air quality data, status code: {resp.status}"
                 air_data = await resp.json()
 
-        now = datetime.datetime.now().strftime("%Y-%m-%dT%H:00")
+        now = datetime.now().strftime("%Y-%m-%dT%H:00")
         times = air_data.get("hourly", {}).get("time", [])
         pm_values = air_data.get("hourly", {}).get("pm2_5", [])
         pm25 = None
@@ -194,31 +200,141 @@ class SmartWeatherTool(BaseTool):
         )
 
 
-# ---------------------------- 4. Agent Definition ----------------------------
+# ---------------------------- 4. GitHub Issue Count Tool ----------------------------
+class GitHubIssueStatsTool(BaseTool):
+    name: str = "github_issue_stats"
+    description: str = (
+        "Query how many issues a GitHub user has opened or closed in a given repository "
+        "between a custom date range (e.g. Jan 1 to Jan 31, 2024). "
+        "Useful for analyzing contribution activity by user."
+    )
+
+    parameters: dict = {
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string", "description": "Repo owner, e.g. 'neo-project'"},
+            "name": {"type": "string", "description": "Repo name, e.g. 'neo'"},
+            "author": {"type": "string", "description": "GitHub username"},
+            "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format"},
+            "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format (optional, defaults to today)"}
+        },
+        "required": ["owner", "name", "author", "start_date"]
+    }
+
+    async def execute(self, owner: str, name: str, author: str, start_date: str, end_date: Optional[str] = None) -> str:
+        import pandas as pd
+
+        start_dt = parse(start_date).astimezone(timezone.utc)
+        end_dt = parse(end_date).astimezone(timezone.utc) if end_date else datetime.now(timezone.utc)
+
+        if start_dt > datetime.now(timezone.utc):
+            return f" Start date {start_date} is in the future. Please provide a past date."
+        if end_dt > datetime.now(timezone.utc):
+            end_dt = datetime.now(timezone.utc)
+
+        query = gql('''
+        query($owner: String!, $name: String!, $cursor: String, $start_time: DateTime) {
+          repository(owner: $owner, name: $name) {
+            issues(first: 100, after: $cursor, filterBy: {since: $start_time}) {
+              edges {
+                cursor
+                node {
+                  createdAt
+                  closedAt
+                  url
+                  author { login }
+                  state
+                }
+              }
+            }
+          }
+        }
+        ''')
+
+        variables = {"owner": owner, "name": name, "cursor": None, "start_time": start_dt.isoformat()}
+        opened_list = []
+        closed_list = []
+
+        while True:
+            response = client.execute(query, variable_values=variables)
+            edges = response["repository"]["issues"]["edges"]
+            if not edges:
+                break
+
+            for edge in edges:
+                node = edge["node"]
+                if node["author"] and node["author"]["login"].lower() == author.lower():
+                    created_at = parse(node["createdAt"]).astimezone(timezone.utc)
+                    closed_at = parse(node["closedAt"]).astimezone(timezone.utc) if node.get("closedAt") else None
+
+                    if start_dt <= created_at <= end_dt:
+                        opened_list.append({"url": node["url"], "createdAt": created_at})
+                    if closed_at and start_dt <= closed_at <= end_dt:
+                        closed_list.append({"url": node["url"], "closedAt": closed_at})
+
+            variables["cursor"] = edges[-1]["cursor"]
+
+        if not opened_list and not closed_list:
+            return f"No issues by {author} in {owner}/{name} from {start_date} to {end_dt.strftime('%Y-%m-%d')}."
+
+        opened_count = len(opened_list)
+        closed_count = len(closed_list)
+
+        sample_url = (opened_list + closed_list)[0]['url']
+
+        return (
+            f"📊 GitHub Issue Stats for `{author}` in `{owner}/{name}` from {start_date} to {end_dt.strftime('%Y-%m-%d')}:\n"
+            f"- 👤 {author}:\n"
+            f"  - 🟢 Opened: {opened_count}\n"
+            f"  - 🔴 Closed: {closed_count}\n"
+            f"- 🔗 Sample issue: {sample_url}"
+        )
+
+    
+
+# ---------------------------- 5. Agent Definition ----------------------------
 class MyInfoAgent(ToolCallAgent):
-    """A custom agent that can get GitHub commits, fetch news, and convert currency. and Get weather and get air quality"""
-    name: str = "my_info_agent"
-    description: str = "A custom assistant for GitHub insights,currency conversion,and smart weather tool "
-
-    system_prompt: str = """
-    You are a helpful assistant that can:
-    1. Fetch monthly commit count from a GitHub repo branch
-    2. Convert an amount from one currency to another using live exchange rates.
-    3. Get weather, outfit suggestions, and air quality analysis for a city.
-
-    Choose the appropriate tool for each task and provide useful answers.
-    If the user's request does not need a tool, reply directly.
+    """
+    An intelligent assistant capable of performing useful information queries.
+    Supports tools to retrieve GitHub statistics, perform currency conversions,
+    and provide localized weather and air quality data with outfit suggestions.
     """
 
-    next_step_prompt: str = "What should be the next step?"
-    # Based on the previous tool output, what should we do now?
+    name: str = "my_info_agent"
+    description: str = (
+        "A smart assistant that can:\n"
+        "1. Retrieve monthly GitHub commit counts from a specific repository and branch.\n"
+        "2. Convert currency amounts between any two currencies using live exchange rates.\n"
+        "3. Provide current weather, PM2.5 air quality, and outfit suggestions for a given city.\n"
+        "4. Get statistics on issues created by a GitHub user in a specific repo during a given month or custom date range."
+    )
+
+    system_prompt: str = """
+    You are a helpful assistant with access to tools. You can:
+    
+    1. Fetch the number of commits made this month in a specific GitHub repository branch.
+    2. Convert amounts between currencies using up-to-date exchange rates.
+    3. Get current weather conditions, PM2.5 air quality, and clothing suggestions for a specified city.
+    4. Retrieve statistics about GitHub issues created by a particular user in a given repository during a certain time period.
+
+    For each user question, decide whether to invoke a tool or answer directly.
+    If a tool's result isn't sufficient, analyze the result and guide the next steps clearly.
+    """
+
+    next_step_prompt: str = (
+        "Based on the previous result, decide what to do next. "
+        "If the result is incomplete, consider using another tool or asking for clarification."
+    )
+
     max_steps: int = 5
 
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
         GitHubCommitStatsTool(),
         ExchangeRateTool(),
-        SmartWeatherTool()
+        SmartWeatherTool(),
+        GitHubIssueStatsTool()
     ]))
+
 
 
 async def main():
@@ -231,15 +347,22 @@ async def main():
     # Reset the Agent state
     info_agent.clear()
 
-    # Run the Agent again with a different question
+    # # Run the Agent again with a different question
     response = await info_agent.run("How many commits are there in the master branch of neo-project/neo this month?",)
     print(f"Answer: {response}\n")
 
-    response = await info_agent.run("Convert 100 USD to RMB")
-    print(f"Answer: {response}\n")
+    # 必须清理状态
+    info_agent.clear()
+
+    # response = await info_agent.run("Convert 100 USD to RMB")
+    # print(f"Answer: {response}\n")
 
     response = await info_agent.run("what is the weather and pollution in Shanghai today? should i wear A mask?")
     print(f"Answer: {response}\n")
+
+
+    # response = await info_agent.run("Query: How many issues did shargon create in neo-project/neo from 2025-02-01 to 2025-02-27?")
+    # print(f"Answer: {response}\n")
 
 
 if __name__ == "__main__":
