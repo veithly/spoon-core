@@ -237,11 +237,11 @@ import asyncio
 
 ## 2. Creating a Custom Info Agent Using SpoonAI And Run Agent
 
-## Method 1: Inheriting from ToolCallAgent
+## 2.1 Method 1: Inheriting from ToolCallAgent
 
 SpoonAI provides a powerful base class called ToolCallAgent that enables your agent to automatically perform multi-step reasoning and call tools as needed. The agent will analyze the user's request, determine if a tool should be used, call it, and continue reasoning—until a final answer is returned.
 
-## Key Configuration Fields
+## 2.1.1 Key Configuration Fields
 
 You configure your Agent’s behavior using three key fields:
 
@@ -288,7 +288,7 @@ next_step_prompt: str = "Based on the previous result, decide what to do next."
 
   `max_steps: int = 5`
 
-## Registering Tools
+## 2.1.2 Registering Tools
 
 You define tools using a ToolManager. telling the agent which functions it can call.
 
@@ -299,7 +299,7 @@ avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
 ]))
 ```
 
-## Here is a full example of a ToolCallAgent subclass implementation:
+## 2.1.3 Here is a full example of a ToolCallAgent subclass implementation:
 
 ```python
 
@@ -344,7 +344,7 @@ class MyInfoAgent(ToolCallAgent):
     ]))
 ```
 
-## Running the Agent
+## 2.1.4 Running the Agent
 
 Here’s a minimal example of how to run the agent:
 
@@ -393,7 +393,7 @@ if __name__ == "__main__":
 
 ```
 
-## Method 2：Create a custom Agent directly using ToolCallAgent
+## 2.2 Method 2：Create a custom Agent directly using ToolCallAgent
 
 If you prefer not to define a new subclass for your Agent, SpoonAI also allows you to instantiate a ToolCallAgent directly and configure it inline. This method is quick and flexible, perfect for small-scale agents or rapid prototyping
 
@@ -444,7 +444,8 @@ async def create_custom_agent_directly():
     return custom_agent
 ```
 
-⚙️ Parameters Explained Same as method 1
+### ⚙️ Parameters Explained Same as method 1
+
 -name: A short identifier string for the agent
 
 -description: A human-readable summary of what the agent can do.
