@@ -349,10 +349,10 @@ class MyInfoAgent(ToolCallAgent):
 1. We instantiate the custom agent class above
    `info_agent = MyInfoAgent(llm=ChatBot())`
 
-Optional parameters can be passed, instead of passing the default model_name: "clclde-3-7-sonnet-20250219", llm_provider: "anthropic"
+   Optional parameters can be passed, instead of passing the default model_name: "clclde-3-7-sonnet-20250219", llm_provider: "anthropic"
 
-- model_name: "gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
-- llm_provider: "openapi" or llm_provider: "anthropic"
+   - model_name: "gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
+   - llm_provider: "openapi" or llm_provider: "anthropic"
 
 2. Define the questions you want to ask
    `question = "What is the weather like in Shanghai today?"`
