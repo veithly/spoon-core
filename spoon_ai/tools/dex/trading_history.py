@@ -1,6 +1,6 @@
-from .base import DexBaseTool
+from .base import BitqueryTool
 
-class TradingHistory(DexBaseTool):
+class TradingHistory(BitqueryTool):
     name: str = "trading_history"
     description: str = "Returns the trading history of a wallet"
     parameters: dict = {

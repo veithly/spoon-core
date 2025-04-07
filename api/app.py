@@ -1,20 +1,20 @@
 import sys
-from logging import getLogger
+import os
+from loguru import logger
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
-from api.routers import chat, models, token
-
-logger = getLogger("api")
+from api.routers import chat, tools
 
 app = FastAPI(docs_url=None, redoc_url=None)
 logger.add(sys.stdout, format="{time} {level} {message}", level="INFO")
 
-app.include_router(models.router)
-app.include_router(chat.router)
-app.include_router(token.router)
+app.include_router(chat.router, prefix="/api")
+app.include_router(tools.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
@@ -32,4 +32,4 @@ def start(port=8000):
 
 if __name__ == "__main__":
     load_dotenv()
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8088)

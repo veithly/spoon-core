@@ -1,7 +1,7 @@
-from .base import DexBaseTool
+from .base import BitqueryTool
 from datetime import datetime, timedelta
 
-class TokenHolders(DexBaseTool):
+class TokenHolders(BitqueryTool):
     name: str = "token_holders"
     description: str = "Get the top token holders of a token"
     parameters: dict = {

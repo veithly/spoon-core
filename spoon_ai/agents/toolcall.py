@@ -46,6 +46,10 @@ class ToolCallAgent(ReActAgent):
         tool_count = len(self.tool_calls) if self.tool_calls else 0
         logger.info(colored(f"🛠️ {self.name} selected {tool_count} tools: {self.tool_calls}", "green" if tool_count else "yellow"))
         
+        if self.output_queue:
+            self.output_queue.put_nowait({"content": response.content})
+            self.output_queue.put_nowait({"tool_calls": response.tool_calls})
+
         try:
             if self.tool_choices == ToolChoice.NONE:
                 if response.tool_calls:

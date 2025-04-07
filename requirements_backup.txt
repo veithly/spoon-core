@@ -1,0 +1,184 @@
+aiohappyeyeballs==2.4.6
+aiohttp==3.11.13
+aiosignal==1.3.2
+aiosqlite==0.21.0
+aliyun-python-sdk-core==2.16.0
+aliyun-python-sdk-kms==2.16.5
+anaconda-anon-usage @ file:///croot/anaconda-anon-usage_1732732445543/work
+annotated-types==0.7.0
+anthropic==0.49.0
+anyio==4.8.0
+archspec @ file:///croot/archspec_1709217642129/work
+asgiref==3.8.1
+asyncpg==0.30.0
+attrs==25.1.0
+backoff==2.2.1
+bcrypt==4.3.0
+boltons @ file:///work/perseverance-python-buildout/croot/boltons_1698851177130/work
+Brotli @ file:///croot/brotli-split_1714483155106/work
+build==1.2.2.post1
+cachetools==5.5.2
+certifi @ file:///croot/certifi_1725551672989/work/certifi
+cffi @ file:///croot/cffi_1726856441404/work
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+chroma-hnswlib==0.7.6
+chromadb==0.6.3
+click==8.1.8
+coloredlogs==15.0.1
+conda @ file:///croot/conda_1733841818148/work
+conda-anaconda-telemetry @ file:///croot/conda-anaconda-telemetry_1733258728466/work
+conda-content-trust @ file:///croot/conda-content-trust_1714483159009/work
+conda-libmamba-solver @ file:///croot/conda-libmamba-solver_1727775630457/work/src
+conda-package-handling @ file:///croot/conda-package-handling_1731369017509/work
+conda_package_streaming @ file:///croot/conda-package-streaming_1731366181659/work
+crcmod==1.7
+cryptography @ file:///croot/cryptography_1732129644106/work
+dataclasses-json==0.6.7
+Deprecated==1.2.18
+distro @ file:///croot/distro_1714488253808/work
+dnspython==2.7.0
+durationpy==0.9
+fastapi==0.115.8
+filelock==3.17.0
+fireworks-ai==0.15.12
+flatbuffers==25.2.10
+frozendict @ file:///croot/frozendict_1713194832637/work
+frozenlist==1.5.0
+fsspec==2025.2.0
+google-auth==2.38.0
+google-genai==1.5.0
+googleapis-common-protos==1.68.0
+greenlet==3.1.1
+grpcio==1.70.0
+h11==0.14.0
+httpcore==1.0.7
+httptools==0.6.4
+httpx==0.28.1
+httpx-sse==0.4.0
+httpx-ws==0.7.1
+huggingface-hub==0.29.1
+humanfriendly==10.0
+idna @ file:///croot/idna_1714398848350/work
+importlib_metadata==8.5.0
+importlib_resources==6.5.2
+jiter==0.8.2
+jmespath==0.10.0
+jsonpatch @ file:///croot/jsonpatch_1714483231291/work
+jsonpointer==2.1
+jsonschema_rs==0.20.0
+kubernetes==32.0.1
+langchain==0.3.19
+langchain-anthropic==0.3.8
+langchain-community==0.3.15
+langchain-core==0.3.40
+langchain-fireworks==0.2.7
+langchain-openai==0.3.1
+langchain-text-splitters==0.3.6
+langfuse==2.59.7
+langgraph==0.3.1
+langgraph-api==0.0.27
+langgraph-checkpoint==2.0.16
+langgraph-cli==0.1.74
+langgraph-prebuilt==0.1.1
+langgraph-sdk==0.1.53
+langsmith==0.3.11
+libmambapy @ file:///croot/mamba-split_1732896306512/work/libmambapy
+loguru==0.7.3
+markdown-it-py==3.0.0
+marshmallow==3.26.1
+mdurl==0.1.2
+menuinst @ file:///croot/menuinst_1731364904452/work
+mmh3==5.1.0
+monotonic==1.6
+mpmath==1.3.0
+msgpack==1.1.0
+multidict==6.1.0
+mypy-extensions==1.0.0
+narwhals==1.29.1
+numpy==2.2.3
+oauthlib==3.2.2
+onnxruntime==1.20.1
+openai==1.66.3
+opentelemetry-api==1.30.0
+opentelemetry-exporter-otlp-proto-common==1.30.0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-instrumentation==0.51b0
+opentelemetry-instrumentation-asgi==0.51b0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-proto==1.30.0
+opentelemetry-sdk==1.30.0
+opentelemetry-semantic-conventions==0.51b0
+opentelemetry-util-http==0.51b0
+orjson==3.10.15
+oss2==2.19.1
+overrides==7.7.0
+packaging @ file:///croot/packaging_1720101850331/work
+pandas==2.2.3
+pillow==11.1.0
+platformdirs @ file:///work/perseverance-python-buildout/croot/platformdirs_1701732573265/work
+plotly==6.0.0
+pluggy @ file:///croot/pluggy_1733169602837/work
+posthog==3.17.0
+propcache==0.3.0
+protobuf==5.29.3
+psycopg2-binary==2.9.10
+pyasn1==0.6.1
+pyasn1_modules==0.4.1
+pycosat @ file:///croot/pycosat_1714510623388/work
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pycryptodome==3.22.0
+pydantic==2.10.6
+pydantic-settings==2.8.1
+pydantic_core==2.27.2
+Pygments==2.19.1
+PyJWT==2.10.1
+pymongo==4.11.1
+PyPika==0.48.9
+pyproject_hooks==1.2.0
+PySocks @ file:///work/perseverance-python-buildout/croot/pysocks_1698845478203/work
+python-dateutil==2.9.0.post0
+python-dotenv==1.0.1
+pytz==2025.1
+PyYAML==6.0.2
+-e git+ssh://git@github.com/spoonboy/langgraph_demo.git@010fd6ce4e380ad9d456cb36dc74578ceb783e22#egg=react_agent&subdirectory=langgraph_config
+regex==2024.11.6
+requests @ file:///croot/requests_1730999120400/work
+requests-oauthlib==2.0.0
+requests-toolbelt==1.0.0
+rich==13.9.4
+rsa==4.9
+ruamel.yaml @ file:///croot/ruamel.yaml_1727980156079/work
+ruamel.yaml.clib @ file:///croot/ruamel.yaml.clib_1727769819935/work
+setuptools==75.1.0
+shellingham==1.5.4
+six==1.17.0
+sniffio==1.3.1
+socksio==1.0.0
+SQLAlchemy==2.0.38
+sse-starlette==2.1.3
+starlette==0.45.3
+structlog==23.3.0
+sympy==1.13.3
+tavily-python==0.5.1
+tenacity==9.0.0
+tiktoken==0.9.0
+tokenizers==0.21.0
+toml==0.10.2
+tqdm @ file:///croot/tqdm_1724853939799/work
+truststore @ file:///work/perseverance-python-buildout/croot/truststore_1701735771625/work
+typer==0.15.2
+typing-inspect==0.9.0
+typing_extensions==4.12.2
+tzdata==2025.1
+urllib3 @ file:///croot/urllib3_1727769808118/work
+uvicorn==0.34.0
+uvloop==0.21.0
+watchfiles==1.0.4
+websocket-client==1.8.0
+websockets==14.2
+wheel==0.44.0
+wrapt==1.17.2
+wsproto==1.2.0
+yarl==1.18.3
+zipp==3.21.0
+zstandard @ file:///croot/zstandard_1731356346222/work

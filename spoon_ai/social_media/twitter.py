@@ -1,6 +1,6 @@
 import os
 from logging import getLogger
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -213,3 +213,39 @@ class TwitterClient:
         
         logger.info(f"Retrieved {len(replies)} replies")
         return replies
+
+    def send(self, message: str, tags: Optional[List[str]] = None, **kwargs) -> bool:
+        """
+        Send Twitter notification message
+        
+        This method is specifically for the notification function of the monitoring system, it publishes the message as a tweet
+        
+        Args:
+            message: Notification message content
+            tags: List of tags to append
+            **kwargs: Other parameters
+        
+        Returns:
+            bool: Whether the sending was successful
+        """
+        try:
+            # Check message length and truncate if necessary
+            max_length = 280
+            if len(message) > max_length:
+                message = message[:max_length-3] + "..."
+            
+            # Add tags
+            if tags is None:
+                tags = kwargs.get("tags", ["#CryptoAlert", "#TradingAlert"])
+            
+            # If tags are not in the message and there's space, add them
+            if all(tag not in message for tag in tags) and len(message) + sum(len(tag) + 1 for tag in tags) <= max_length:
+                message += " " + " ".join(tags)
+            
+            # Post the tweet
+            self.post_tweet(message)
+            logger.info("Twitter notification sent successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send Twitter notification: {str(e)}")
+            return False

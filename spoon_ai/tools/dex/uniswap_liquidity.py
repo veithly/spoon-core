@@ -1,6 +1,6 @@
-from .base import DexBaseTool
+from .base import BitqueryTool
 
-class UniswapLiquidity(DexBaseTool):
+class UniswapLiquidity(BitqueryTool):
     name: str = "uniswap_liquidity"
     description: str = "Returns the liquidity of a token"
     parameters: dict = {
