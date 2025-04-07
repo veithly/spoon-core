@@ -39,7 +39,7 @@ The agent follows this loop:
 
 - A Final response is generated and returned
 
-## 1、Define Your Tools
+## 1. Define Your Tools
 
 SpoonAI Agents rely on tools to interact with external data sources and perform real-world actions. In this example, we define two tools:
 
