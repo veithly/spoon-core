@@ -251,13 +251,13 @@ You configure your Agent’s behavior using three key fields:
 - description
   A concise but descriptive explanation of what your agent does. This helps document the agent’s purpose and capabilities.
 
-  ```python
-  description: str = (
-      "A smart assistant that can:\n"
-      "1. Retrieve monthly GitHub commit counts from a specific repository and branch.\n"
-      "2. Provide current weather and outfit suggestions for a given city.\n"
-  )
-  ```
+```python
+description: str = (
+    "A smart assistant that can:\n"
+    "1. Retrieve monthly GitHub commit counts from a specific repository and branch.\n"
+    "2. Provide current weather and outfit suggestions for a given city.\n"
+)
+```
 
 - system_prompt
   This string sets the initial role and instructions for your Agent
@@ -286,7 +286,7 @@ next_step_prompt: str = "Based on the previous result, decide what to do next."
   How many times the Agent can loop through the reasoning → tool → reasoning cycle.
   It helps avoid infinite loops, especially when tool output is ambiguous.
 
-  `max_steps: int = 5`
+`max_steps: int = 5`
 
 ## 2.1.2 Registering Tools
 
@@ -679,8 +679,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
-
-```
-
 ```
