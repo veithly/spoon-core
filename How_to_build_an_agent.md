@@ -346,18 +346,22 @@ class MyInfoAgent(ToolCallAgent):
 
 ## 2.1.4 Running the Agent
 
-Here’s a minimal example of how to run the agent:
+1. We instantiate the custom agent class above
+   `info_agent = MyInfoAgent(llm=ChatBot())`
 
-`info_agent = MyInfoAgent(llm=ChatBot())`
-
-💡We instantiate the custom agent class above
 Optional parameters can be passed, instead of passing the default model_name: "clclde-3-7-sonnet-20250219", llm_provider: "anthropic"
 
-- model_name"gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
+- model_name: "gpt-4.5-preview" or model_name: "laude-3-7-sonnet-20250219"
 - llm_provider: "openapi" or llm_provider: "anthropic"
 
-`question = "What is the weather like in Shanghai today?"`
-Various questions to ask entered by the user
+2. Define the questions you want to ask
+   `question = "What is the weather like in Shanghai today?"`
+   Various questions to ask entered by the user
+
+3. Run the main function asynchronously
+   `await info_agent.run(question)`
+
+## Here’s a minimal example of how to run the agent
 
 ```python
 from spoon_ai.chat import ChatBot
