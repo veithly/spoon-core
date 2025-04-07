@@ -46,7 +46,7 @@ SpoonAI Agents rely on tools to interact with external data sources and perform 
 - SmartWeatherTool: provides real-time weather
 - GitHubCommitStatsTool: retrieves commit activity from a GitHub repository.
 
-### 1.1 The following are custom tool templates
+## 1.1 The following are custom tool templates
 
 First, you need to create custom tools.
 
@@ -89,7 +89,7 @@ Each tool is a Python class that inherits from BaseTool, and must define:
 - `parameters`: JSON Schema definition of the tool parameters
 - `execute()`: Method implementing the tool's specific logic
 
-### 1.2 Use the above tool template to create our tool - GitHubCommitStatsTool
+## 1.2 Use the above tool template to create our tool - GitHubCommitStatsTool
 
 GitHubCommitStatsTool is a custom tool that fetches the number of commits made to a specific GitHub repository branch within the current month. This tool is particularly useful for generating monthly contribution stats.
 
@@ -147,7 +147,7 @@ This method sends a request to GitHub’s REST API to retrieve commits from a re
         return f"Total commits in {repo} ({branch}) since {start_of_month[:10]}: {len(commits)}"
 ```
 
-### 1.3 Use the above tool template to create our tool - SmartWeatherTool
+## 1.3 Use the above tool template to create our tool - SmartWeatherTool
 
 Each tool is a Python class that inherits from BaseTool, and must define:
 
@@ -237,11 +237,11 @@ import asyncio
 
 ## 2. Creating a Custom Info Agent Using SpoonAI And Run Agent
 
-### Method 1: Inheriting from ToolCallAgent
+## Method 1: Inheriting from ToolCallAgent
 
 SpoonAI provides a powerful base class called ToolCallAgent that enables your agent to automatically perform multi-step reasoning and call tools as needed. The agent will analyze the user's request, determine if a tool should be used, call it, and continue reasoning—until a final answer is returned.
 
-#### Key Configuration Fields
+## Key Configuration Fields
 
 You configure your Agent’s behavior using three key fields:
 
@@ -282,12 +282,13 @@ Decide which tool to use, or reply directly if no tool is needed.
 next_step_prompt: str = "Based on the previous result, decide what to do next."
 ```
 
--max_steps
-How many times the Agent can loop through the reasoning → tool → reasoning cycle.
-It helps avoid infinite loops, especially when tool output is ambiguous.
-`max_steps: int = 5`
+- max_steps
+  How many times the Agent can loop through the reasoning → tool → reasoning cycle.
+  It helps avoid infinite loops, especially when tool output is ambiguous.
 
-#### Registering Tools
+  `max_steps: int = 5`
+
+## Registering Tools
 
 You define tools using a ToolManager. telling the agent which functions it can call.
 
@@ -298,7 +299,7 @@ avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
 ]))
 ```
 
-##### Here is a full example of a ToolCallAgent subclass implementation:
+## Here is a full example of a ToolCallAgent subclass implementation:
 
 ```python
 
@@ -343,7 +344,7 @@ class MyInfoAgent(ToolCallAgent):
     ]))
 ```
 
-#### Running the Agent
+## Running the Agent
 
 Here’s a minimal example of how to run the agent:
 
@@ -392,11 +393,11 @@ if __name__ == "__main__":
 
 ```
 
-### Method 2：Create a custom Agent directly using ToolCallAgent
+## Method 2：Create a custom Agent directly using ToolCallAgent
 
 If you prefer not to define a new subclass for your Agent, SpoonAI also allows you to instantiate a ToolCallAgent directly and configure it inline. This method is quick and flexible, perfect for small-scale agents or rapid prototyping
 
-#### Step 1 — Import and Prepare Tools
+## Step 1 — Import and Prepare Tools
 
 Make sure you've already implemented your tools and imported them properly:
 
@@ -406,7 +407,7 @@ from spoon_ai.tools import ToolManager
 from spoon_ai.chat import ChatBot
 ```
 
-#### Step 2 — Instantiate the Agent
+## Step 2 — Instantiate the Agent
 
 We build the agent inline by creating a ToolManager, setting the prompt, and instantiating the agent:
 
@@ -456,7 +457,7 @@ async def create_custom_agent_directly():
 
 -max_steps: Controls how many tool/reasoning loops the agent may perform before finalizing a response.
 
-#### Step 3 — Run the Agent
+## Step 3 — Run the Agent
 
 To use this agent in practice, run it just like any other asynchronous function:
 
