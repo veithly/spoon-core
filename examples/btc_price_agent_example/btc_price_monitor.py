@@ -8,18 +8,18 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-# 添加父目录到路径，确保能够导入 spoon_ai 包
+# Add parent directory to path to ensure spoon_ai package can be imported
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-# 导入 SpoonAI 组件
+# Import SpoonAI components
 from spoon_ai.chat import ChatBot, Memory
 from spoon_ai.schema import Message
 from spoon_ai.monitoring.core.tasks import MonitoringTaskManager
 from spoon_ai.monitoring.core.alerts import Metric, Comparator
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("btc-price-agent")
 
 class BTCPriceAgent:
-    """比特币价格监控 Agent"""
+    """Bitcoin Price Monitoring Agent"""
     
     def __init__(
         self,
@@ -38,30 +38,30 @@ class BTCPriceAgent:
         notification_channels: List[str] = ["telegram"],
         check_interval_minutes: int = 5,
     ):
-        # 初始化监控任务管理器
+        # Initialize monitoring task manager
         self.task_manager = MonitoringTaskManager()
         
-        # 初始化 ChatBot
+        # Initialize ChatBot
         self.chatbot = ChatBot(
             llm_provider=llm_provider,
             model_name=model_name,
             api_key=os.getenv("ANTHROPIC_API_KEY") if llm_provider == "anthropic" else os.getenv("OPENAI_API_KEY")
         )
         
-        # 初始化记忆
+        # Initialize memory
         self.memory = Memory()
         
-        # 保存配置
+        # Save configuration
         self.notification_channels = notification_channels
         self.check_interval_minutes = check_interval_minutes
         
-        # 系统消息
-        self.system_message = """你是一个专业的加密货币市场分析师，负责监控比特币价格波动并提供分析。
-        当价格触发阈值时，你需要提供简洁明了的价格提醒和市场分析。
-        分析应该考虑价格趋势、重要的支撑/阻力位以及近期市场情绪。
+        # System message
+        self.system_message = """You are a professional cryptocurrency market analyst, responsible for monitoring Bitcoin price fluctuations and providing analysis.
+        When prices trigger thresholds, you need to provide concise price alerts and market analysis.
+        The analysis should consider price trends, important support/resistance levels, and recent market sentiment.
         """
         
-        logger.info("BTC 价格监控 Agent 已初始化")
+        logger.info("BTC price monitoring Agent initialized")
     
     def setup_price_monitor(
         self, 
@@ -73,12 +73,12 @@ class BTCPriceAgent:
         expires_in_hours: int = 24,
         notification_params: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """设置价格监控任务"""
+        """Setup price monitoring task"""
         
-        # 为了同时设置价格阈值和价格变化监控
+        # For setting up both price threshold and price change monitoring
         tasks_created = []
         
-        # 如果设置了具体价格阈值，创建价格阈值监控
+        # If specific price threshold is set, create price threshold monitoring
         if price_threshold is not None:
             price_monitor_config = {
                 "market": market,
@@ -86,20 +86,20 @@ class BTCPriceAgent:
                 "symbol": symbol,
                 "metric": Metric.PRICE.value,
                 "threshold": price_threshold,
-                "comparator": Comparator.GREATER_THAN.value,  # 可以根据需要修改比较运算符
-                "name": f"比特币价格监控 - {price_threshold} 美元",
+                "comparator": Comparator.GREATER_THAN.value,  # Comparator can be modified as needed
+                "name": f"Bitcoin Price Monitor - {price_threshold} USD",
                 "check_interval_minutes": self.check_interval_minutes,
                 "expires_in_hours": expires_in_hours,
                 "notification_channels": self.notification_channels,
                 "notification_params": notification_params or {}
             }
             
-            # 创建价格阈值监控任务
+            # Create price threshold monitoring task
             price_task = self.task_manager.create_task(price_monitor_config)
             tasks_created.append(price_task)
-            logger.info(f"创建价格阈值监控: {symbol} > {price_threshold}")
+            logger.info(f"Created price threshold monitoring: {symbol} > {price_threshold}")
         
-        # 创建价格变化百分比监控
+        # Create price change percentage monitoring
         price_change_config = {
             "market": market,
             "provider": provider,
@@ -107,17 +107,17 @@ class BTCPriceAgent:
             "metric": Metric.PRICE_CHANGE_PERCENT.value,
             "threshold": price_change_threshold,
             "comparator": Comparator.GREATER_THAN.value if price_change_threshold > 0 else Comparator.LESS_THAN.value,
-            "name": f"比特币价格变化监控 - {price_change_threshold}%",
+            "name": f"Bitcoin Price Change Monitor - {price_change_threshold}%",
             "check_interval_minutes": self.check_interval_minutes,
             "expires_in_hours": expires_in_hours,
             "notification_channels": self.notification_channels,
             "notification_params": notification_params or {}
         }
         
-        # 创建价格变化监控任务
+        # Create price change monitoring task
         price_change_task = self.task_manager.create_task(price_change_config)
         tasks_created.append(price_change_task)
-        logger.info(f"创建价格变化监控: {symbol} 变化 {price_change_threshold}%")
+        logger.info(f"Created price change monitoring: {symbol} change {price_change_threshold}%")
         
         return {
             "tasks_created": tasks_created,
@@ -125,101 +125,101 @@ class BTCPriceAgent:
         }
     
     async def process_notification(self, alert_data: Dict[str, Any]) -> str:
-        """处理并增强通知内容"""
-        # 从警报数据中提取相关信息
+        """Process and enhance notification content"""
+        # Extract relevant information from alert data
         symbol = alert_data.get("symbol", "BTCUSDT")
         current_value = alert_data.get("current_value", 0)
         threshold = alert_data.get("threshold", 0)
         metric = alert_data.get("metric", "price")
         
-        # 创建给 LLM 的提示消息
+        # Create prompt message for LLM
         user_message = Message(
             role="user", 
-            content=f"""比特币价格监控触发了警报:
-            - 交易对: {symbol}
-            - 当前值: {current_value}
-            - 阈值: {threshold}
-            - 指标: {metric}
-            - 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            content=f"""Bitcoin price monitoring triggered an alert:
+            - Trading Pair: {symbol}
+            - Current Value: {current_value}
+            - Threshold: {threshold}
+            - Metric: {metric}
+            - Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             
-            请提供简短的价格提醒和市场情况分析，包括:
-            1. 价格动向简述
-            2. 可能的近期支撑/阻力位
-            3. 对短期走势的简要看法
+            Please provide a brief price alert and market analysis, including:
+            1. Brief description of price movement
+            2. Potential recent support/resistance levels
+            3. Brief view on short-term trends
             """
         )
         
-        # 添加消息到记忆
+        # Add message to memory
         self.memory.add_message(user_message)
         
-        # 获取 LLM 回复
+        # Get LLM response
         response = await self.chatbot.ask(self.memory.get_messages(), system_msg=self.system_message)
         
-        # 添加助手回复到记忆
+        # Add assistant response to memory
         assistant_message = Message(role="assistant", content=response)
         self.memory.add_message(assistant_message)
         
         return response
     
     def get_active_tasks(self) -> Dict[str, Any]:
-        """获取所有活跃的监控任务"""
+        """Get all active monitoring tasks"""
         return self.task_manager.get_tasks()
     
     def stop_all_tasks(self) -> bool:
-        """停止所有监控任务"""
+        """Stop all monitoring tasks"""
         tasks = self.task_manager.get_tasks()
         success = True
         
         for task_id in tasks:
             if not self.task_manager.delete_task(task_id):
                 success = False
-                logger.error(f"无法删除任务: {task_id}")
+                logger.error(f"Unable to delete task: {task_id}")
         
         return success
 
 async def main():
-    """主函数，设置并运行比特币价格监控"""
+    """Main function, setup and run Bitcoin price monitoring"""
     try:
-        # 创建比特币价格 Agent
+        # Create Bitcoin price Agent
         btc_agent = BTCPriceAgent(
             notification_channels=["telegram"],
             check_interval_minutes=2
         )
         
-        # 设置监控参数
-        # 可以根据需要调整这些参数
+        # Setup monitoring parameters
+        # These parameters can be adjusted as needed
         notification_params = {
             "telegram": {
-                "chat_id": os.getenv("TELEGRAM_CHAT_ID", "")  # 替换为您的 Telegram chat_id
+                "chat_id": os.getenv("TELEGRAM_CHAT_ID", "")  # Replace with your Telegram chat_id
             }
         }
         
-        # 设置价格阈值和价格变化监控
+        # Setup price threshold and price change monitoring
         result = btc_agent.setup_price_monitor(
             symbol="BTCUSDT",
-            price_threshold=70000,  # 当 BTC 价格超过 70000 美元时触发
-            price_change_threshold=3.0,  # 当 BTC 价格在 24 小时内变化超过 3% 时触发
+            price_threshold=70000,  # Trigger when BTC price exceeds 70000 USD
+            price_change_threshold=3.0,  # Trigger when BTC price changes more than 3% within 24 hours
             notification_params=notification_params,
-            expires_in_hours=48  # 监控持续 48 小时
+            expires_in_hours=48  # Monitoring lasts for 48 hours
         )
         
-        logger.info(f"已创建 {result['task_count']} 个监控任务")
+        logger.info(f"Created {result['task_count']} monitoring tasks")
         
-        # 运行一段时间后，可以调用下面的代码来停止所有任务
-        # 这里我们等待 3 分钟只是为了演示，实际使用中可以根据需要调整
-        # await asyncio.sleep(180)  # 等待 3 分钟
+        # After running for a while, you can call the code below to stop all tasks
+        # Here we wait for 3 minutes just for demonstration, in actual use it can be adjusted as needed
+        # await asyncio.sleep(180)  # Wait for 3 minutes
         # btc_agent.stop_all_tasks()
-        # logger.info("已停止所有监控任务")
+        # logger.info("All monitoring tasks stopped")
         
-        # 保持主程序运行
+        # Keep main program running
         while True:
             await asyncio.sleep(60)
-            logger.info("监控服务正在运行...")
+            logger.info("Monitoring service is running...")
         
     except KeyboardInterrupt:
-        logger.info("程序被用户中断")
+        logger.info("Program interrupted by user")
     except Exception as e:
-        logger.error(f"运行出错: {str(e)}")
+        logger.error(f"Runtime error: {str(e)}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
