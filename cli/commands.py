@@ -19,7 +19,7 @@ from spoon_ai.agents import SpoonChatAI, SpoonReactAI
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
-from utils.config_manager import ConfigManager
+from spoon_ai.utils.config_manager import ConfigManager
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")

@@ -16,8 +16,8 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
 from spoon_ai.agents.rag import RetrievalMixin
-from utils.config_manager import ConfigManager
-from utils.utils import to_langchain_messages
+from spoon_ai.utils.config_manager import ConfigManager
+from spoon_ai.utils.utils import to_langchain_messages
 from spoon_ai.agents.toolcall import ToolCallAgent
 from spoon_ai.schema import Role, Message
 

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spoon-ai-sdk" # Package name, can be changed
+version = "0.1.0" # Initial version
+authors = [
+  { name="Your Name", email="your.email@example.com" }, # Please replace with your info
+]
+description = "SDK for SpoonAI tools and agents" # A brief description
+readme = "README.md" # If you have a README file
+# packages = ["spoon_ai"] # REMOVED: Invalid field here
+requires-python = ">=3.12" # Specify supported Python version
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License", # Choose an appropriate license
+    "Operating System :: OS Independent",
+]
+# dependencies = [ # List your project dependencies here, e.g.:
+#     "requests",
+#     "pydantic>=2.0",
+#     "openai",
+#     "python-dotenv",
+#     # ... other dependencies
+# ]
+
+[project.urls]
+"Homepage" = "https://github.com/XSpoonAi/spoon-core" # Project URL
+"Bug Tracker" = "https://github.com/XSpoonAi/spoon-core/issues" # Project issue tracker URL
+
+# ADDED: Setuptools configuration to specify the package
+[tool.setuptools.packages.find]
+where = ["."]  # Look in the project root directory
+include = ["spoon_ai*"] # Include only the 'spoon_ai' package and its subpackages
+exclude = ["tests*", "test*", "cookbook*", "api*", "cli*", "agents*", "models*", "chat_logs*", "migrations*", "react_logs*", "notebooks*"] # Explicitly exclude other top-level dirs 
