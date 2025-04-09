@@ -9,13 +9,13 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 class EmailNotifier:
-    """邮件通知发送器，用于监控警报"""
+    """Email notification sender for monitoring alerts"""
     
     def __init__(self):
         self.config = self._load_config()
     
     def _load_config(self) -> Dict[str, Any]:
-        """从环境变量加载邮件配置"""
+        """Load email configuration from environment variables"""
         load_dotenv()
         
         config = {
@@ -29,7 +29,7 @@ class EmailNotifier:
             ]
         }
         
-        # 验证必要的配置项
+        # Validate required configuration items
         missing = []
         for key in ["smtp_server", "smtp_user", "smtp_password"]:
             if not config.get(key):
@@ -44,19 +44,19 @@ class EmailNotifier:
              subject: str = "Crypto Monitoring Alert", 
              html_format: bool = True, **kwargs) -> bool:
         """
-        发送邮件通知
+        Send email notification
         
         Args:
-            message: 邮件内容
-            to_emails: 收件人列表，如果为None则使用默认收件人
-            subject: 邮件主题
-            html_format: 是否以HTML格式发送
-            **kwargs: 其他SMTP参数
+            message: Email content
+            to_emails: List of recipients, uses default recipients if None
+            subject: Email subject
+            html_format: Whether to send in HTML format
+            **kwargs: Other SMTP parameters
         
         Returns:
-            bool: 是否发送成功
+            bool: Whether the send was successful
         """
-        # 获取SMTP配置
+        # Get SMTP configuration
         smtp_server = self.config.get("smtp_server")
         smtp_port = self.config.get("smtp_port", 587)
         smtp_user = self.config.get("smtp_user")
@@ -66,7 +66,7 @@ class EmailNotifier:
             logger.error("SMTP configuration is incomplete")
             return False
         
-        # 确定发件人和收件人
+        # Determine sender and recipients
         from_email = kwargs.get("from_email") or self.config.get("from_email", smtp_user)
         recipients = to_emails or self.config.get("default_recipients", [])
         
@@ -75,19 +75,19 @@ class EmailNotifier:
             return False
         
         try:
-            # 创建邮件
+            # Create email
             msg = MIMEMultipart()
             msg['From'] = from_email
             msg['To'] = ", ".join(recipients)
             msg['Subject'] = subject
             
-            # 添加内容
+            # Add content
             if html_format:
-                # 如果消息已经包含HTML标签，直接使用它
+                # If message already contains HTML tags, use it directly
                 if not (message.startswith('<') and message.endswith('>')):
-                    # 转换换行符为<br>
+                    # Convert newlines to <br>
                     message = message.replace('\n', '<br>')
-                    # 添加基本HTML结构
+                    # Add basic HTML structure
                     message = f"""
                     <html>
                     <body>
@@ -101,12 +101,12 @@ class EmailNotifier:
             else:
                 msg.attach(MIMEText(message, 'plain'))
             
-            # 连接SMTP服务器
+            # Connect to SMTP server
             with smtplib.SMTP(smtp_server, smtp_port) as server:
                 server.starttls()
                 server.login(smtp_user, smtp_password)
                 
-                # 发送邮件
+                # Send email
                 server.send_message(msg)
             
             logger.info(f"Email sent successfully to {recipients}")

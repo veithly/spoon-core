@@ -73,6 +73,16 @@ class NotificationManager:
             logger.info("Registered Email notification channel")
         except Exception as e:
             logger.warning(f"Failed to register Email channel: {str(e)}")
+            
+        # Load Discord
+        try:
+            from spoon_ai.social_media.discord import DiscordClient
+            self.channels["discord"] = {
+                "instance": DiscordClient(NotificationAgent())
+            }
+            logger.info("Registered Discord notification channel")
+        except Exception as e:
+            logger.warning(f"Failed to register Discord channel: {str(e)}")
     
     async def _run_async_method(self, method, *args, **kwargs):
         """Run async method and wait for results"""
@@ -124,6 +134,26 @@ class NotificationManager:
                 
                 logger.info(f"Telegram notification sent successfully")
                 return True
+            elif channel == "discord":
+                # Discord uses async send method
+                channel_id = kwargs.get("channel_id")
+                method = instance.send
+                
+                # Prepare arguments for send method
+                send_args = {"message": message}
+                if channel_id:
+                    send_args["channel_id"] = channel_id
+                
+                # Run async method
+                logger.info(f"Sending Discord message with args: {send_args}")
+                loop = asyncio.get_event_loop()
+                if not loop.is_running():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                result = loop.run_until_complete(method(**send_args))
+                logger.info(f"Discord notification result: {result}")
+                return result
             else:
                 # Twitter and Email use synchronous send method
                 method = instance.send
