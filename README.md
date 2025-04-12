@@ -1,98 +1,221 @@
-# SpoonAI
+# 🚀 SpoonAI
 
-## CLI User Guide
+<div align="center">
+  <img src="https://via.placeholder.com/200x200?text=SpoonAI" alt="SpoonAI Logo" width="200"/>
+  <p><strong>Next-Generation AI Agent Framework | Powerful Interactive CLI | Cryptocurrency Trading Support</strong></p>
+</div>
 
-SpoonAI CLI is a powerful command-line tool that provides various functions such as interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents. This document will detail how to install and use SpoonAI CLI.
+<div align="center">
+  <a href="#✨-features">Features</a> •
+  <a href="#🔧-installation">Installation</a> •
+  <a href="#🚀-quick-start">Quick Start</a> •
+  <a href="#💡-usage-examples">Usage Examples</a> •
+  <a href="#🛠️-cli-tools">CLI Tools</a> •
+  <a href="#🧩-agent-framework">Agent Framework</a> •
+  <a href="#🔌-api-integration">API Integration</a> •
+  <a href="#🤝-contributing">Contributing</a> •
+  <a href="#📄-license">License</a>
+</div>
 
-### Installation
+## ✨ Features
 
-1. Clone the repository:
+SpoonAI is a powerful AI agent framework designed specifically for building advanced intelligent assistants and automation systems.
+
+- **🧠 ReAct Intelligent Agent** - Advanced agent architecture combining reasoning and action
+- **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
+- **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more
+- **📊 Cryptocurrency Integration** - Native support for cryptocurrency queries, trading, and transfers
+- **📝 Document Processing** - Intelligent loading and processing of various document types
+- **💻 Interactive CLI** - Feature-rich command line interface
+- **🔄 State Management** - Comprehensive session history and state persistence
+- **📈 Performance Monitoring** - Built-in agent execution monitoring and analysis tools
+- **🚀 Easy to Use** - Well-designed API for rapid development and integration
+
+## 🔧 Installation
+
+### Prerequisites
+
+- Python 3.9+
+- pip package manager
+
+### Install from Source
+
 ```bash
+# Clone the repository
 git clone git@github.com:XSpoonAi/spoon-core.git
 cd SpoonAI
-```
 
-2. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Install in development mode (optional)
+pip install -e .
 ```
 
-3. Configure environment variables (optional):
-For cryptocurrency-related functions, you may need to set the following environment variables:
-- `RPC_URL`: Blockchain RPC service address
-- `CHAIN_ID`: Blockchain network ID (default is 1, which is the Ethereum mainnet)
-- `SCAN_URL`: Blockchain explorer address (default is "https://etherscan.io")
+### Install via pip (Coming Soon)
 
-### API Key Configuration
-
-SpoonAI CLI supports various AI services and functions, requiring different API keys to be configured. Below are the methods for configuring the main API keys:
-
-#### Configuration Methods
-
-1. **Via CLI command**:
+```bash
+pip install spoon-ai
 ```
+
+## 🔑 API Key Configuration
+
+SpoonAI supports various API services that require different API keys. Here are the configuration methods for the main API keys:
+
+### Configuration Methods
+
+1. **Via CLI Command**:
+```bash
 > config <key_name> <key_value>
 ```
 
-2. **Via environment variables**:
+2. **Via Environment Variables**:
 Set the corresponding environment variables in your system
 
-3. **Via configuration file**:
+3. **Via Configuration File**:
 Edit the `~/.config/spoonai/config.json` file
 
-#### Common API Keys
+### Common API Keys
 
-| API Key Name | Description | How to Obtain |
+| Key Name | Description | How to Obtain |
 |------------|------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for GPT models | [OpenAI Website](https://platform.openai.com/api-keys) |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | [Anthropic Website](https://console.anthropic.com/keys) |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | [DeepSeek Website](https://platform.deepseek.com/) |
 | `PRIVATE_KEY` | Blockchain wallet private key for cryptocurrency transactions | Export from your wallet |
 
-#### Configuration Examples
+### Configuration Examples
 
-1. Configure OpenAI API key:
-```
+```bash
+# Configure OpenAI API key
 > config OPENAI_API_KEY sk-your-openai-api-key
 OPENAI_API_KEY updated
-```
 
-2. Configure Anthropic API key:
-```
+# Configure Anthropic API key
 > config ANTHROPIC_API_KEY sk-ant-your-anthropic-api-key
 ANTHROPIC_API_KEY updated
-```
 
-3. Configure wallet private key:
-```
+# Configure wallet private key
 > config PRIVATE_KEY your-private-key-here
 PRIVATE_KEY updated
 ```
 
-#### View Current Configuration
+### Key Security Considerations
 
-Use the following command to view all current configurations:
-```
-> config
-Current configuration:
-OPENAI_API_KEY: sk-***********
-ANTHROPIC_API_KEY: sk-ant-***********
-MODEL: gpt-4
-...
-```
-
-#### Key Security Considerations
-
-1. API keys are sensitive; do not share them with others or expose them in public
+1. API keys are sensitive; never share them with others or expose them in public
 2. Wallet private keys are especially important; leakage may result in asset loss
 3. It is recommended to store keys using environment variables or configuration files rather than entering them directly in the command line
 4. Regularly change API keys to improve security
 
-### Starting the CLI
+## 🚀 Quick Start
+
+### Start the CLI
 
 ```bash
 python main.py
 ```
+
+After entering the interactive command line interface, you can start using the various features of SpoonAI.
+
+### Basic Example
+
+```python
+from spoon_ai.agents import SpoonChatAI
+from spoon_ai.chat import ChatBot
+
+# Create a chat agent
+chat_agent = SpoonChatAI(llm=ChatBot())
+
+# Run the agent and get a response
+response = await chat_agent.run("Hello, please introduce yourself")
+print(response)
+```
+
+### Create a ReAct Agent
+
+```python
+from spoon_ai.agents import SpoonReactAI
+from spoon_ai.chat import ChatBot
+
+# Create a ReAct agent
+react_agent = SpoonReactAI(llm=ChatBot())
+
+# Run the ReAct agent and get a response
+response = await react_agent.run("Analyze the transaction history of this wallet address: 0x123...")
+print(response)
+```
+
+## 💡 Usage Examples
+
+### Chat Assistant
+
+```python
+from spoon_ai.agents import SpoonChatAI
+from spoon_ai.chat import ChatBot
+
+# Create an advanced chat agent
+chat_agent = SpoonChatAI(
+    llm=ChatBot(model="gpt-4"),  # Use specified model
+    system_prompt="You are an AI assistant focused on cryptocurrency, proficient in blockchain technology, DeFi, and NFTs."
+)
+
+# Run the agent
+response = await chat_agent.run("What are the main technical improvements in Ethereum 2.0?")
+print(response)
+```
+
+### Cryptocurrency Trading Assistant
+
+```python
+from spoon_ai.agents import SpoonReactAI
+from spoon_ai.chat import ChatBot
+from spoon_ai.tools import ToolManager
+from spoon_ai.tools.crypto import TokenInfoTool, SwapTool, TransferTool
+
+# Create a tool manager and add cryptocurrency-related tools
+tool_manager = ToolManager([
+    TokenInfoTool(),
+    SwapTool(),
+    TransferTool()
+])
+
+# Create a cryptocurrency trading agent
+crypto_agent = SpoonReactAI(
+    llm=ChatBot(model="gpt-4"),
+    avaliable_tools=tool_manager,
+    system_prompt="You are a cryptocurrency trading assistant that can help users get token information, exchange tokens, and make transfers."
+)
+
+# Run the agent
+response = await crypto_agent.run("Help me check the current price of ETH and analyze if it's a good time to buy")
+print(response)
+```
+
+### Document Analysis Assistant
+
+```python
+from spoon_ai.agents import SpoonReactAI
+from spoon_ai.chat import ChatBot
+from spoon_ai.tools.docs import LoadDocsTool, QueryDocsTool
+
+# Create a document analysis agent
+docs_agent = SpoonReactAI(
+    llm=ChatBot(),
+    avaliable_tools=ToolManager([
+        LoadDocsTool(),
+        QueryDocsTool()
+    ]),
+    system_prompt="You are a document analysis assistant who can help users load and analyze various documents."
+)
+
+# Run the agent
+response = await docs_agent.run("Load all PDF files in the './docs' directory, then summarize their main content")
+print(response)
+```
+
+## 🛠️ CLI Tools
+
+SpoonAI CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
 ### Basic Commands
 
@@ -129,7 +252,7 @@ python main.py
 |------|------|------|
 | `load-docs <directory_path>` | `docs` | Load documents from the specified directory to the current agent |
 
-### Atomic Capabilities
+### CLI Usage Examples
 
 #### Basic Interaction
 
@@ -188,24 +311,19 @@ Preparing to transfer 0.1 ETH to 0x123...
 [Transfer details will be displayed here]
 ```
 
-#### Document Management
+## 🧩 Agent Framework
 
-1. Load documents:
-```
-> load-docs /path/to/documents
-Loading documents...
-Successfully loaded 5 documents
-```
+SpoonAI provides a powerful Agent framework that supports two ways of use:
+1. Using predefined Agents - Simple declaration and execution
+2. Custom Agents - Creating your own tools and logic
 
-### ReAct Agent
+### ReAct Intelligent Agent
 
-#### ReAct Intelligent Agent Introduction
-
-SpoonAI implements an intelligent agent based on the ReAct (Reasoning + Acting) paradigm, which is an advanced AI agent architecture that combines reasoning and action capabilities. The ReAct Agent can think, plan, and execute in complex tasks, solving problems through an iterative reasoning-action loop.
+SpoonAI implements an intelligent agent based on the ReAct (Reasoning + Acting) paradigm, which is an advanced AI agent architecture that combines reasoning and action capabilities. The ReAct agent can think, plan, and execute in complex tasks, solving problems through an iterative reasoning-action loop.
 
 #### ReAct Workflow
 
-The ReAct Agent workflow includes the following key steps:
+The ReAct agent workflow includes the following key steps:
 
 1. **Observation**: Collecting environment and task-related information
 2. **Reasoning**: Analyzing information and reasoning
@@ -214,55 +332,9 @@ The ReAct Agent workflow includes the following key steps:
 
 This cycle repeats continuously until the task is completed or the preset goal is achieved.
 
-Through the ReAct Agent, SpoonAI can handle complex tasks that require deep thinking and multi-step actions, providing users with more intelligent and autonomous problem-solving capabilities.
+### Custom Tools
 
-## Agent Usage and Customization Guide
-
-SpoonAI offers two ways to use Agents:
-1. Using predefined Agents - Simple declaration and execution
-2. Custom Agents - Creating your own tools and logic
-
-### Using Predefined Agents
-
-SpoonAI comes with several predefined Agents, such as SpoonChatAI and SpoonReactAI. Using these Agents is very simple and requires just a few lines of code:
-
-```python
-from spoon_ai.agents import SpoonChatAI, SpoonReactAI
-from spoon_ai.chat import ChatBot
-
-# Create a Chat Agent
-chat_agent = SpoonChatAI(llm=ChatBot())
-
-# Run the Agent and get a response
-response = await chat_agent.run("Hello, please introduce yourself")
-print(response)
-
-# Create a ReAct Agent
-react_agent = SpoonReactAI(llm=ChatBot())
-
-# Run the ReAct Agent and get a response
-response = await react_agent.run("Analyze the transaction history of this wallet address: 0x123...")
-print(response)
-```
-
-Predefined Agents are already configured with appropriate system prompts and tools, ready to use. You can also customize some parameters when creating them:
-
-```python
-# Create a ReAct Agent with custom parameters
-custom_react = SpoonReactAI(
-    llm=ChatBot(model="gpt-4"),  # Specify the model to use
-    max_steps=15,                # Set the maximum number of steps
-    system_prompt="Custom system prompt"  # Override the default system prompt
-)
-```
-
-### Custom Agents
-
-If predefined Agents don't meet your needs, you can create your own. SpoonAI provides a flexible framework to support custom Agents.
-
-#### 1. Creating Custom Tools
-
-First, you need to create custom tools. Each tool should inherit from the `BaseTool` class:
+Creating custom tools is one of SpoonAI's most powerful features. Each tool should inherit from the `BaseTool` class:
 
 ```python
 from spoon_ai.tools.base import BaseTool
@@ -292,13 +364,7 @@ class MyCustomTool(BaseTool):
         return result
 ```
 
-Tool definitions include three main parts:
-- `name`: The unique name of the tool
-- `description`: A detailed description of the tool (AI will decide when to use it based on this)
-- `parameters`: JSON Schema definition of the tool parameters
-- `execute()`: Method implementing the tool's specific logic
-
-#### 2. Creating Custom Agents
+### Custom Agents
 
 There are two ways to create custom Agents:
 
@@ -352,17 +418,7 @@ my_agent = ToolCallAgent(
 )
 ```
 
-#### 3. Running Custom Agents
-
-After creating an Agent, you can run it just like predefined Agents:
-
-```python
-# Run the custom Agent
-response = await my_agent.run("Perform a specific task")
-print(response)
-```
-
-### Advanced Usage: Tool Combination and Indexing
+### Tool Combination and Indexing
 
 SpoonAI supports dynamic tool combination and semantic indexing, allowing Agents to more intelligently select appropriate tools:
 
@@ -388,39 +444,127 @@ relevant_tools = tool_manager.query_tools(
     query="I need to analyze this data", 
     top_k=3  # Return the top 3 most relevant tools
 )
-
-# Create a new Agent with the found tools
-from spoon_ai.agents import ToolCallAgent
-from spoon_ai.chat import ChatBot
-
-specialized_agent = ToolCallAgent(
-    name="specialized_agent",
-    llm=ChatBot(),
-    avaliable_tools=ToolManager(relevant_tools)
-)
-
-# Run the specialized Agent
-response = await specialized_agent.run("Analyze this dataset")
 ```
 
-### Best Practices
+## 🔌 API Integration
 
-1. **Tool Design**:
-   - Each tool should have a clear, single responsibility
-   - Provide detailed descriptions to help AI understand when to use the tool
-   - Parameters should have clear types and descriptions
+SpoonAI supports multiple AI service providers, including:
 
-2. **System Prompts**:
-   - Provide clear guidance and constraints for the Agent
-   - Explain the task's goals and expected behavior
-   - Explain how to use the available tools
+- **OpenAI** - GPT-3.5/GPT-4 series models
+- **Anthropic** - Claude series models
+- **DeepSeek** - DeepSeek series models
+- **More...** - Easily extendable to support other AI providers
 
-3. **Error Handling**:
-   - Tools should gracefully handle errors and return useful error messages
-   - Use the `ToolFailure` class to return error results
+### Integration Examples
 
-4. **Step Limitations**:
-   - Set reasonable `max_steps` values to avoid infinite loops
-   - Complex tasks may require more steps, simple tasks fewer
+```python
+from spoon_ai.chat import ChatBot
+from spoon_ai.agents import SpoonChatAI
 
-By following these guidelines, you can create powerful and flexible custom Agents to meet the needs of various complex tasks.
+# Using OpenAI's GPT-4
+openai_agent = SpoonChatAI(
+    llm=ChatBot(model="gpt-4", provider="openai")
+)
+
+# Using Anthropic's Claude
+claude_agent = SpoonChatAI(
+    llm=ChatBot(model="claude-3-opus-20240229", provider="anthropic")
+)
+
+# Using DeepSeek
+deepseek_agent = SpoonChatAI(
+    llm=ChatBot(model="deepseek-llm", provider="deepseek")
+)
+```
+
+## 💼 Enterprise Application Scenarios
+
+SpoonAI can be applied to various enterprise scenarios:
+
+- **Financial Analysis** - Cryptocurrency market analysis, investment advice, risk assessment
+- **Customer Service** - Intelligent customer service, problem-solving, ticket processing
+- **Document Processing** - Contract analysis, report generation, content summarization
+- **Business Automation** - Process automation, task coordination, intelligent decision support
+- **Research Assistant** - Information retrieval, data analysis, research report generation
+
+## 🔍 Advanced Features
+
+### Tool Chain Orchestration
+
+SpoonAI supports complex tool chain orchestration, allowing the creation of multi-step, multi-tool execution flows:
+
+```python
+from spoon_ai.tools import ToolChain
+from spoon_ai.tools.crypto import TokenInfoTool, PriceAnalysisTool
+
+# Create a tool chain
+tool_chain = ToolChain([
+    (TokenInfoTool(), "Get token information"),
+    (PriceAnalysisTool(), "Analyze price trends")
+])
+
+# Execute the tool chain
+result = await tool_chain.execute("ETH")
+```
+
+### Event Listening and Callbacks
+
+SpoonAI provides a powerful event system that supports registering callbacks at different stages of agent execution:
+
+```python
+from spoon_ai.callbacks import register_callback
+
+# Register before execution callback
+@register_callback("before_execution")
+async def before_execution_callback(agent, query):
+    print(f"Agent {agent.name} is about to execute query: {query}")
+
+# Register after execution callback
+@register_callback("after_execution")
+async def after_execution_callback(agent, query, result):
+    print(f"Agent {agent.name} completed execution with result: {result}")
+```
+
+## 🎯 Project Roadmap
+
+- [ ] **Web Interface** - Develop a web-based user interface
+- [ ] **Agent Marketplace** - Create a sharing platform for agents and tools
+- [ ] **Multi-Agent Collaboration** - Implement collaboration capabilities between multiple agents
+- [ ] **Local Model Support** - Add support for locally running open-source models
+- [ ] **Plugin System** - Build an extensible plugin architecture
+- [ ] **Advanced Monitoring** - Enhance agent execution monitoring and analysis capabilities
+- [ ] **Multi-Language Support** - Extend support for more languages
+- [ ] **Cloud Deployment** - Simplify cloud environment deployment process
+
+## 🤝 Contributing
+
+We welcome contributions of all forms!
+
+1. Fork this repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Create a Pull Request
+
+Please ensure you follow our code style and contribution guidelines.
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## 🌟 Acknowledgements
+
+- Thanks to all developers who have contributed to this project
+- Special thanks to the major AI model providers for their support
+- Thanks to the open-source community for their valuable feedback
+
+---
+
+<div align="center">
+  <p>Made with ❤️ | Developed by the XSpoonAi Team</p>
+  <p>
+    <a href="https://github.com/XSpoonAi">GitHub</a> •
+    <a href="https://twitter.com/XSpoonAi">Twitter</a> •
+    <a href="https://discord.gg/XSpoonAi">Discord</a>
+  </p>
+</div>
