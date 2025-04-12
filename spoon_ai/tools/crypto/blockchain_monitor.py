@@ -56,7 +56,7 @@ class CryptoMarketMonitor(BaseTool):
         name: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a cryptocurrency market monitoring task for CEX or DEX"""
-        from spoon_ai.monitoring.core.tasks import MonitoringTaskManager
+        import aiohttp  # 异步HTTP客户端
         
         # Map platform to provider code
         provider = self._get_provider_for_platform(market_type, platform)
@@ -66,7 +66,6 @@ class CryptoMarketMonitor(BaseTool):
             platform_name = self._get_platform_display_name(platform)
             name = f"{platform_name} {symbol} {metric} Monitor"
         
-        # Create task config
         task_config = {
             "market": market_type,
             "provider": provider,
@@ -80,16 +79,42 @@ class CryptoMarketMonitor(BaseTool):
             "notification_channels": ["Email"]
         }
         
-        # Create task
-        task_manager = MonitoringTaskManager()
-        result = task_manager.create_task(task_config)
+        # Send to the monitoring service
+        api_url = "http://localhost:8888/monitoring/tasks"
         
-        return {
-            "status": "success",
-            "message": f"Created {market_type.upper()} monitoring for {symbol} on {platform}",
-            "task_id": result["task_id"],
-            "expires_at": result["expires_at"]
-        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_url, json=task_config) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"API request failed: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+            
+            return {
+                "status": "success",
+                "message": f"Created {market_type.upper()} monitoring for {symbol} on {platform}",
+                "task_id": result.get("task_id", "unknown"),
+                "expires_at": result.get("expires_at", "unknown")
+            }
+        except aiohttp.ClientError as e:
+            return {
+                "status": "error",
+                "message": f"Connection to monitoring service failed: {str(e)}",
+                "error_type": "connection_error"
+            }
+        except ValueError as e:
+            return {
+                "status": "error",
+                "message": str(e),
+                "error_type": "api_error"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Unexpected error: {str(e)}",
+                "error_type": "unknown_error"
+            }
     
     def _get_provider_for_platform(self, market_type: str, platform: str) -> str:
         """Convert platform name to provider code"""
