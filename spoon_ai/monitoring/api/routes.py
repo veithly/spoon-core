@@ -16,9 +16,9 @@ task_manager = MonitoringTaskManager()
 class MonitoringTaskCreate(BaseModel):
     """Request model for creating monitoring task"""
     market: str = Field("cex", description="Market type: cex, dex, etc.")
-    provider: str = Field(..., description="Data provider: bn (Binance), cb (Coinbase), etc.")
-    symbol: str = Field(..., description="Trading pair symbol, e.g., BTCUSDT")
-    metric: str = Field(..., description="Monitoring metric: price, volume, price_change, price_change_percent")
+    provider: str = Field(..., description="Data provider: bn (Binance), uni (Uniswap), ray (Raydium), etc.")
+    symbol: str = Field(..., description="Trading pair symbol, e.g., BTCUSDT, ETH-USDC, SOL-USDC")
+    metric: str = Field(..., description="Monitoring metric: price, volume, price_change, price_change_percent, liquidity")
     threshold: float = Field(..., description="Alert threshold")
     comparator: str = Field(..., description="Comparison operator: >, <, =, >=, <=")
     name: Optional[str] = Field(None, description="Alert name")

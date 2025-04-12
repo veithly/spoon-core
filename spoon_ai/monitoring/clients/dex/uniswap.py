@@ -5,9 +5,13 @@ import time
 import asyncio
 
 from .base import DEXClient
-from spoon_ai.tools.dex.price_data import UniswapPriceProvider
+from spoon_ai.tools.crypto.price_data import UniswapPriceProvider
+import nest_asyncio
 
+# Apply nest_asyncio to allow nested event loops
+nest_asyncio.apply()
 logger = logging.getLogger(__name__)
+
 
 class UniswapClient(DEXClient):
     """Uniswap API client"""
@@ -17,29 +21,34 @@ class UniswapClient(DEXClient):
         self.provider = UniswapPriceProvider(rpc_url=self.rpc_url)
     
     def get_ticker_price(self, symbol: str) -> Dict[str, Any]:
-        """Get trading pair price
-        
-        In Uniswap, symbol should be in the format "TOKEN0-TOKEN1",
-        e.g., "ETH-USDC" represents the ETH/USDC trading pair
-        """
+        """Get trading pair price"""
         logger.info(f"Getting Uniswap price for: {symbol}")
-        # Run the async method in a synchronous context
-        return asyncio.run(self.provider.get_ticker_price(symbol))
+        
+        # Fix: Create a new event loop for synchronous context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(self.provider.get_ticker_price(symbol))
+        loop.close()
+        return result
             
     def get_ticker_24h(self, symbol: str) -> Dict[str, Any]:
         """Get 24-hour price change statistics"""
         logger.info(f"Getting Uniswap 24h data for: {symbol}")
-        # Run the async method in a synchronous context
-        return asyncio.run(self.provider.get_ticker_24h(symbol))
+        
+        # Fix: Create a new event loop for synchronous context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(self.provider.get_ticker_24h(symbol))
+        loop.close()
+        return result
     
     def get_klines(self, symbol: str, interval: str, limit: int = 500) -> List[List]:
-        """Get K-line data
-        
-        Note: Uniswap contracts don't provide K-line data directly, this would typically
-        need to be obtained from a Graph API or by collecting and processing historical event data.
-        
-        This method would need to integrate with a service like The Graph to get real K-line data.
-        """
+        """Get K-line data"""
         logger.info(f"Getting Uniswap K-line data: {symbol}, interval: {interval}, limit: {limit}")
-        # Run the async method in a synchronous context
-        return asyncio.run(self.provider.get_klines(symbol, interval, limit))
+        
+        # Fix: Create a new event loop for synchronous context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(self.provider.get_klines(symbol, interval, limit))
+        loop.close()
+        return result

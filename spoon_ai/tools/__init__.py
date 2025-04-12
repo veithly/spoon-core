@@ -2,17 +2,17 @@ from .tool_manager import ToolManager
 from .base import BaseTool
 from .terminate import Terminate
 
-from .dex.predict_price import PredictPrice
-from .dex.token_holders import TokenHolders
-from .dex.trading_history import TradingHistory
-from .dex.uniswap_liquidity import UniswapLiquidity
-from .dex.wallet_analysis import WalletAnalysis
-from .dex.price_data import GetTokenPriceTool, Get24hStatsTool, GetKlineDataTool
-from .dex.price_alerts import PriceThresholdAlertTool, LpRangeCheckTool, SuddenPriceIncreaseTool
-from .dex.lending_rates import LendingRateMonitorTool
+from .crypto.predict_price import PredictPrice
+from .crypto.token_holders import TokenHolders
+from .crypto.trading_history import TradingHistory
+from .crypto.uniswap_liquidity import UniswapLiquidity
+from .crypto.wallet_analysis import WalletAnalysis
+from .crypto.price_data import GetTokenPriceTool, Get24hStatsTool, GetKlineDataTool
+from .crypto.price_alerts import PriceThresholdAlertTool, LpRangeCheckTool, SuddenPriceIncreaseTool
+from .crypto.lending_rates import LendingRateMonitorTool
 
 # Add import for LstArbitrageTool from dex
-from .dex.lst_arbitrage import LstArbitrageTool
+from .crypto.lst_arbitrage import LstArbitrageTool
 
 # Add import for TokenTransfer from token_execute
 from .token_execute.token_transfer import TokenTransfer

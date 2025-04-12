@@ -8,7 +8,7 @@ from web3.middleware import geth_poa_middleware
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
-from spoon_ai.tools.dex.base import DexBaseTool
+from spoon_ai.tools.crypto.base import DexBaseTool
 
 logger = logging.getLogger(__name__)
 
