@@ -11,8 +11,8 @@ from web3.middleware import geth_poa_middleware
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
-from spoon_ai.tools.dex.base import DexBaseTool
-from spoon_ai.tools.dex.price_data import (
+from spoon_ai.tools.crypto.base import DexBaseTool
+from spoon_ai.tools.crypto.price_data import (
     PriceDataProvider,
     UniswapPriceProvider,
     TOKEN_ADDRESSES,

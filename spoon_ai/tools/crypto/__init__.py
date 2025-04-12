@@ -1,28 +1,28 @@
 """DEX tools module for SpoonAI"""
 
-from spoon_ai.tools.dex.base import (
+from spoon_ai.tools.crypto.base import (
     DexBaseTool,
     DefiBaseTool,
     BitqueryTool
 )
 
-from spoon_ai.tools.dex.price_data import (
+from spoon_ai.tools.crypto.price_data import (
     GetTokenPriceTool,
     Get24hStatsTool,
     GetKlineDataTool,
 )
 
-from spoon_ai.tools.dex.price_alerts import (
+from spoon_ai.tools.crypto.price_alerts import (
     PriceThresholdAlertTool,
     LpRangeCheckTool,
     SuddenPriceIncreaseTool,
 )
 
-from spoon_ai.tools.dex.lending_rates import (
+from spoon_ai.tools.crypto.lending_rates import (
     LendingRateMonitorTool,
 )
 
-from spoon_ai.tools.dex.lst_arbitrage import LstArbitrageTool
+from spoon_ai.tools.crypto.lst_arbitrage import LstArbitrageTool
 
 __all__ = [
     "GetTokenPriceTool",

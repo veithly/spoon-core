@@ -11,7 +11,7 @@ import requests
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
-from spoon_ai.tools.dex.base import DefiBaseTool
+from spoon_ai.tools.crypto.base import DefiBaseTool
 
 logger = logging.getLogger(__name__)
 

@@ -23,6 +23,7 @@ class Metric(str, Enum):
     VOLUME = "volume"
     PRICE_CHANGE = "price_change"
     PRICE_CHANGE_PERCENT = "price_change_percent"
+    LIQUIDITY = "liquidity"
 
 class AlertManager:
     """Alert manager, handles metric monitoring and notification sending"""
@@ -70,6 +71,10 @@ class AlertManager:
                 return float(data["priceChange"])
             elif metric == Metric.PRICE_CHANGE_PERCENT:
                 return float(data["priceChangePercent"])
+            
+        elif metric == Metric.LIQUIDITY:
+            data = client.get_ticker_price(symbol)
+            return float(data.get("liquidity", 0))
         
         raise ValueError(f"Unsupported metric: {metric}")
     
