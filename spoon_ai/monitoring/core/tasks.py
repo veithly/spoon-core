@@ -252,7 +252,6 @@ class MonitoringTaskManager:
         try:
             from ..clients.base import DataClient
             # This will check if the provider is valid
-            print("get")
             DataClient.get_client(market, provider)
         except ValueError as e:
             raise ValueError(f"Invalid provider: {str(e)}")
