@@ -1,4 +1,5 @@
 import json
+import asyncio
 from logging import getLogger
 from typing import Any, List
 
@@ -29,6 +30,8 @@ class ToolCallAgent(ReActAgent):
     
     tool_calls: List[ToolCall] = Field(default_factory=list)
     
+    output_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
+    
     async def think(self) -> bool:
         if self.next_step_prompt:
             self.add_message("user", self.next_step_prompt)
@@ -38,6 +41,7 @@ class ToolCallAgent(ReActAgent):
             system_msg=self.system_prompt,
             tools=self.avaliable_tools.to_params(),
             tool_choice=self.tool_choices,
+            output_queue=self.output_queue,
         )
 
         self.tool_calls = response.tool_calls

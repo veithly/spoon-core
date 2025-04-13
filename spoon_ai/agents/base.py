@@ -6,7 +6,7 @@ import datetime
 from pathlib import Path
 from abc import ABC
 from contextlib import asynccontextmanager
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Union, cast
 
 from spoon_ai.schema import Message, Role
 from pydantic import BaseModel, Field
@@ -38,6 +38,7 @@ class BaseAgent(BaseModel, ABC):
     current_step: int = Field(default=0, description="The current step of the agent")
 
     output_queue: asyncio.Queue = Field(default_factory=asyncio.Queue, description="The queue to store the output of the agent")
+    task_done: asyncio.Event = Field(default_factory=asyncio.Event, description="The signal of agent run done")
     
     class Config:
         arbitrary_types_allowed = True
@@ -165,3 +166,20 @@ class BaseAgent(BaseModel, ABC):
             debug_log(f"Saved chat history with {len(save_data.get('messages', []))} messages")
         except Exception as e:
             debug_log(f"Error saving chat history: {e}")
+
+    async def stream(self):
+        while not (self.task_done.is_set() or self.output_queue.empty()):
+            queue_task = asyncio.create_task(self.output_queue.get())
+            task_done_task = asyncio.create_task(self.task_done.wait())
+
+            done, pending = await asyncio.wait(queue_task, task_done_task, return_when=asyncio.FIRST_COMPLETED)
+
+            if pending:
+                pending.pop().cancel()
+            
+            token_or_done = cast(Union[str, Literal[True]], done.pop().result())
+            if token_or_done is True:
+                while not self.output_queue.empty():
+                    yield await self.output_queue.get()
+                break
+            yield token_or_done
