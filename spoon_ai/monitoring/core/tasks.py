@@ -63,7 +63,6 @@ class MonitoringTaskManager:
             10,  # Check expiry status every 10 minutes
             task_id=task_id
         )
-        print('create')
         self._task_wrapper(task_id, config)
         return {
             "task_id": task_id,
@@ -253,6 +252,7 @@ class MonitoringTaskManager:
         try:
             from ..clients.base import DataClient
             # This will check if the provider is valid
+            print("get")
             DataClient.get_client(market, provider)
         except ValueError as e:
             raise ValueError(f"Invalid provider: {str(e)}")
