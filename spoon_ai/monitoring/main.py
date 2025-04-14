@@ -1,12 +1,14 @@
 #!/usr/bin/env python
-# spoon_ai/monitoring/standalone.py
-
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 import sys
+import asyncio
+from asyncio import DefaultEventLoopPolicy
+
+asyncio.set_event_loop_policy(DefaultEventLoopPolicy())
 
 # Add parent directory to sys.path to ensure the spoon_ai package can be imported
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -47,13 +49,14 @@ async def health_check():
 
 # Start task scheduler
 from spoon_ai.monitoring.core.tasks import MonitoringTaskManager
-task_manager = MonitoringTaskManager()
+task_manager = None
 
 @app.on_event("startup")
 async def startup_event():
     """Event handler for service startup"""
+    global task_manager
     logger.info("Starting monitoring service...")
-    # Scheduler is already started when MonitoringTaskManager is initialized
+    task_manager = MonitoringTaskManager()
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -62,11 +65,9 @@ async def shutdown_event():
     # Stop scheduler
     task_manager.scheduler.stop()
 
-# If this file is run directly, start the service
 if __name__ == "__main__":
-    # Get configuration parameters, can be read from environment variables
     host = os.getenv("MONITORING_HOST", "0.0.0.0")
     port = int(os.getenv("MONITORING_PORT", "8888"))
     
     logger.info(f"Starting monitoring service on {host}:{port}")
-    uvicorn.run("spoon_ai.monitoring.main:app", host=host, port=port, reload=True)
+    uvicorn.run("main:app", host=host, port=port, reload=True, loop="asyncio", http="h11")

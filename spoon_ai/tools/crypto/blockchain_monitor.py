@@ -60,7 +60,7 @@ class CryptoMarketMonitor(BaseTool):
         
         # Map platform to provider code
         provider = self._get_provider_for_platform(market_type, platform)
-        
+        print(provider)
         # Create default name if not provided
         if not name:
             platform_name = self._get_platform_display_name(platform)
