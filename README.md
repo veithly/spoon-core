@@ -1,7 +1,7 @@
 # 🚀 SpoonAI
 
 <div align="center">
-  <img src="https://via.placeholder.com/200x200?text=SpoonAI" alt="SpoonAI Logo" width="200"/>
+  <img src="logo/spoon.gif" alt="SpoonAI Logo" width="200"/>
   <p><strong>Next-Generation AI Agent Framework | Powerful Interactive CLI | Cryptocurrency Trading Support</strong></p>
 </div>
 
