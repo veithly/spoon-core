@@ -1,8 +1,8 @@
-# 🚀 SpoonAI
+# 🚀 SpoonOS Core Developer Framework(SCDF)
 
 <div align="center">
   <img src="logo/spoon.gif" alt="SpoonAI Logo" width="200"/>
-  <p><strong>Next-Generation AI Agent Framework | Powerful Interactive CLI | Cryptocurrency Trading Support</strong></p>
+  <p><strong>Core developer framework of SpoonOS ——Agentic OS for the sentient economy. Next-Generation AI Agent Framework | Powerful Interactive CLI | Web3 infrastructure optimized Support</strong></p>
 </div>
 
 <div align="center">
@@ -19,16 +19,16 @@
 
 ## ✨ Features
 
-SpoonAI is a powerful AI agent framework designed specifically for building advanced intelligent assistants and automation systems.
+SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-built to meet the growing demands of Web3 developers — offering a complete toolkit for building sentient, composable, and interoperable AI agents.
 
 - **🧠 ReAct Intelligent Agent** - Advanced agent architecture combining reasoning and action
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
-- **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more
-- **📊 Cryptocurrency Integration** - Native support for cryptocurrency queries, trading, and transfers
-- **📝 Document Processing** - Intelligent loading and processing of various document types
+- **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
+- **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
+- **📡 Scalable Data Access** - Supports structured and unstructured data via MCP+
 - **💻 Interactive CLI** - Feature-rich command line interface
 - **🔄 State Management** - Comprehensive session history and state persistence
-- **📈 Performance Monitoring** - Built-in agent execution monitoring and analysis tools
+- **🔗Composable Agent Logic** - Create agents that can sense, reason, plan, and execute modularly — enabling use cases across DeFi, creator economy, and more
 - **🚀 Easy to Use** - Well-designed API for rapid development and integration
 
 ## 🔧 Installation
@@ -60,7 +60,7 @@ pip install spoon-ai
 
 ## 🔑 API Key Configuration
 
-SpoonAI supports various API services that require different API keys. Here are the configuration methods for the main API keys:
+SDCF supports various API services that require different API keys. Here are the configuration methods for the main API keys:
 
 ### Configuration Methods
 
@@ -215,7 +215,7 @@ print(response)
 
 ## 🛠️ CLI Tools
 
-SpoonAI CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
+SCDF CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
 ### Basic Commands
 
@@ -295,10 +295,10 @@ API_KEY updated
 
 1. View token information:
 ```
-> token-by-symbol ETH
+> token-by-symbol SPO
 Token information:
-Name: Ethereum
-Symbol: ETH
+Name: SpoonOS not a meme
+Symbol:SPO
 Address: 0x...
 Decimals: 18
 ...
@@ -306,20 +306,20 @@ Decimals: 18
 
 2. Transfer operation:
 ```
-> transfer 0x123... 0.1 ETH
-Preparing to transfer 0.1 ETH to 0x123...
+> transfer 0x123... 0.1 SPO
+Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
 ## 🧩 Agent Framework
 
-SpoonAI provides a powerful Agent framework that supports two ways of use:
+SDCF provides a powerful Agent framework that supports two ways of use:
 1. Using predefined Agents - Simple declaration and execution
 2. Custom Agents - Creating your own tools and logic
 
 ### ReAct Intelligent Agent
 
-SpoonAI implements an intelligent agent based on the ReAct (Reasoning + Acting) paradigm, which is an advanced AI agent architecture that combines reasoning and action capabilities. The ReAct agent can think, plan, and execute in complex tasks, solving problems through an iterative reasoning-action loop.
+SDCF implements an intelligent agent based on the ReAct (Reasoning + Acting) paradigm, which is an advanced AI agent architecture that combines reasoning and action capabilities. The ReAct agent can think, plan, and execute in complex tasks, solving problems through an iterative reasoning-action loop.
 
 #### ReAct Workflow
 
@@ -491,7 +491,7 @@ SpoonAI can be applied to various enterprise scenarios:
 
 ### Tool Chain Orchestration
 
-SpoonAI supports complex tool chain orchestration, allowing the creation of multi-step, multi-tool execution flows:
+SDCF supports complex tool chain orchestration, allowing the creation of multi-step, multi-tool execution flows:
 
 ```python
 from spoon_ai.tools import ToolChain
@@ -509,7 +509,7 @@ result = await tool_chain.execute("ETH")
 
 ### Event Listening and Callbacks
 
-SpoonAI provides a powerful event system that supports registering callbacks at different stages of agent execution:
+SDCF provides a powerful event system that supports registering callbacks at different stages of agent execution:
 
 ```python
 from spoon_ai.callbacks import register_callback
@@ -529,7 +529,7 @@ async def after_execution_callback(agent, query, result):
 
 - [ ] **Web Interface** - Develop a web-based user interface
 - [ ] **Agent Marketplace** - Create a sharing platform for agents and tools
-- [ ] **Multi-Agent Collaboration** - Implement collaboration capabilities between multiple agents
+- [ ] **Agent Interoperability** - Implement collaboration capabilities between multiple agents
 - [ ] **Local Model Support** - Add support for locally running open-source models
 - [ ] **Plugin System** - Build an extensible plugin architecture
 - [ ] **Advanced Monitoring** - Enhance agent execution monitoring and analysis capabilities
@@ -564,7 +564,7 @@ This project is licensed under the [MIT License](LICENSE).
   <p>Made with ❤️ | Developed by the XSpoonAi Team</p>
   <p>
     <a href="https://github.com/XSpoonAi">GitHub</a> •
-    <a href="https://twitter.com/XSpoonAi">Twitter</a> •
-    <a href="https://discord.gg/XSpoonAi">Discord</a>
+    <a href="hhttps://x.com/Spoonai_OS">Twitter</a> •
+    <a href="https://discord.gg/G6y3ZCFK4h">Discord</a>
   </p>
 </div>
