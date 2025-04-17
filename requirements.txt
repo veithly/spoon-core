@@ -1,4 +1,5 @@
 ag2==0.5.3
+aiocache==0.12.3
 aiofile==3.9.0
 aiofiles==24.1.0
 aiohappyeyeballs==2.4.4
@@ -7,6 +8,23 @@ aiolimiter==1.2.1
 aiosignal==1.3.2
 aiosqlite==0.21.0
 alembic==1.14.1
+alibabacloud-darabonba-string==0.0.4
+alibabacloud-kms20160120==2.2.3
+alibabacloud-tea==0.4.3
+alibabacloud_credentials==0.3.6
+alibabacloud_darabonba_array==0.1.0
+alibabacloud_darabonba_encode_util==0.0.2
+alibabacloud_darabonba_map==0.0.1
+alibabacloud_darabonba_signature_util==0.0.4
+alibabacloud_endpoint_util==0.0.3
+alibabacloud_gateway_pop==0.0.8
+alibabacloud_gateway_spi==0.0.3
+alibabacloud_openapi_util==0.2.2
+alibabacloud_tea_openapi==0.3.13
+alibabacloud_tea_util==0.3.13
+alibabacloud_tea_xml==0.0.2
+aliyun-python-sdk-core==2.16.0
+aliyun-python-sdk-kms==2.16.5
 allora_sdk==0.1.0
 anchorpy==0.20.1
 anchorpy-core==0.2.0
@@ -38,8 +56,8 @@ beautifulsoup4==4.12.3
 bitarray==3.0.0
 blinker==1.9.0
 borsh-construct==0.1.0
-boto3==1.34.162
-botocore==1.34.162
+boto3==1.37.28
+botocore==1.37.28
 build==1.2.2.post1
 CacheControl==0.14.2
 cached-property==2.0.1
@@ -49,7 +67,7 @@ canonicaljson==2.0.0
 cassandra-driver==3.29.2
 cassio==0.1.10
 cattrs==24.1.2
-certifi==2024.8.30
+certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1725278078093/work/certifi
 cffi==1.17.1
 chardet==5.2.0
 charset-normalizer==3.4.1
@@ -65,23 +83,28 @@ cohere==5.14.0
 colorama==0.4.6
 coloredlogs==15.0.1
 colorlog==6.9.0
+comm @ file:///home/conda/feedstock_root/build_artifacts/comm_1733502965406/work
 composio_core==0.7.1
 composio_langchain==0.7.1
 construct==2.10.68
 construct-typing==0.5.6
 coolname==2.2.0
 crashtest==0.4.1
+crcmod==1.7
 crewai==0.102.0
 cryptography==43.0.3
 cytoolz==1.0.1
 dataclasses-json==0.6.7
 datasets==2.21.0
+debugpy @ file:///croot/debugpy_1736267418885/work
 decorator==5.2.1
 deepdiff==8.2.0
 defusedxml==0.7.1
 Deprecated==1.2.18
 deprecation==2.1.0
 dill==0.3.8
+discord==2.3.2
+discord.py==2.5.2
 diskcache==5.6.3
 distlib==0.3.9
 distro==1.9.0
@@ -190,6 +213,7 @@ iniconfig==2.0.0
 inquirerpy==0.3.4
 installer==0.7.0
 instructor==1.5.2
+ipykernel @ file:///home/conda/feedstock_root/build_artifacts/ipykernel_1719845459717/work
 ipython==9.0.1
 ipython_pygments_lexers==1.1.1
 isort==6.0.0
@@ -200,7 +224,7 @@ jedi==0.19.2
 jeepney==0.9.0
 Jinja2==3.1.5
 jiter==0.5.0
-jmespath==1.0.1
+jmespath==0.10.0
 joblib==1.4.2
 jq==1.8.0
 json5==0.10.0
@@ -215,6 +239,8 @@ jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 jsonschema_rs==0.20.0
 jupiter-python-sdk==0.0.2.0
+jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/jupyter_client_1733440914442/work
+jupyter_core @ file:///home/conda/feedstock_root/build_artifacts/jupyter_core_1727163409502/work
 keyring==25.6.0
 kubernetes==31.0.0
 langchain==0.3.10
@@ -247,7 +273,7 @@ langchain-unstructured==0.1.5
 langchainhub==0.1.21
 langflow==1.2.0
 langflow-base==0.2.0
-langfuse==2.53.9
+langfuse==2.59.7
 langgraph==0.3.2
 langgraph-api==0.0.27
 langgraph-checkpoint==2.0.16
@@ -288,6 +314,7 @@ multidict==6.1.0
 multiprocess==0.70.16
 multitasking==0.0.11
 mypy-extensions==1.0.0
+nacos-sdk-python==2.0.3
 nanoid==2.0.0
 narwhals==1.29.1
 needle-python==0.4.0
@@ -299,7 +326,9 @@ numpy==1.26.4
 oauthlib==3.2.2
 ollama==0.4.7
 onnxruntime==1.20.1
-openai==1.65.2
+openai==1.70.0
+opencv-contrib-python==4.11.0.86
+opencv-python==4.11.0.86
 openinference-instrumentation==0.1.23
 openinference-instrumentation-langchain==0.1.33
 openinference-semantic-conventions==0.1.14
@@ -321,6 +350,7 @@ opentelemetry-util-http==0.51b0
 optuna==4.2.1
 orderly-set==5.3.0
 orjson==3.10.15
+oss2==2.19.1
 overrides==7.7.0
 packaging==24.2
 paho-mqtt==2.1.0
@@ -342,6 +372,7 @@ pinecone-plugin-inference==3.1.0
 pinecone-plugin-interface==0.0.7
 pkginfo==1.12.1.2
 platformdirs==4.3.6
+playwright==1.51.0
 plotly==6.0.0
 pluggy==1.5.0
 poetry==2.1.1
@@ -356,6 +387,7 @@ propcache==0.2.1
 proto-plus==1.26.0
 protobuf==5.29.3
 protoc-gen-openapiv2==0.0.1
+psutil==7.0.0
 psycopg==3.2.5
 psycopg-binary==3.2.5
 psycopg2==2.9.10
@@ -376,6 +408,7 @@ pydantic-ai-slim==0.0.30
 pydantic-graph==0.0.30
 pydantic-settings==2.4.0
 pydantic_core==2.27.2
+pyee==12.1.1
 Pygments==2.19.1
 pyheck==0.1.5
 pyhumps==3.8.0
@@ -406,6 +439,7 @@ pytz==2024.2
 pyunormalize==16.0.0
 pyvis==0.3.2
 PyYAML==6.0.2
+pyzmq @ file:///croot/pyzmq_1734687138743/work
 qdrant-client==1.9.2
 qianfan==0.3.5
 ragstack-ai-knowledge-store==0.2.1
@@ -415,6 +449,7 @@ redis==5.2.1
 referencing==0.36.2
 regex==2024.11.6
 requests==2.32.3
+requests-cache==1.2.1
 requests-oauthlib==1.3.1
 requests-toolbelt==1.0.0
 retry==0.9.2
@@ -423,7 +458,8 @@ rlp==4.0.1
 rpds-py==0.22.3
 rsa==4.9
 ruff==0.9.9
-s3transfer==0.10.4
+s3transfer==0.11.4
+schedule==1.2.2
 scikit-learn==1.6.1
 scipy==1.15.2
 scrapegraph_py==1.12.0
@@ -438,10 +474,12 @@ six==1.17.0
 smmap==5.0.2
 smolagents==1.9.2
 sniffio==1.3.1
+socksio==1.0.0
 solana==0.35.1
 solders==0.21.0
 soupsieve==2.6
 spider-client==0.1.24
+-e git+ssh://git@github.com/XSpoonAi/spoon-core.git@de24866e1d6b435c441da1a872bf3cbbfcf4dd7b#egg=spoon_ai_sdk
 SQLAlchemy==2.0.38
 sqlmodel==0.0.22
 sse-starlette==2.1.3
@@ -469,6 +507,7 @@ tomli==2.2.1
 tomli_w==1.2.0
 tomlkit==0.13.2
 toolz==0.11.2
+tornado @ file:///croot/tornado_1733960490606/work
 tox==4.23.2
 tqdm==4.67.1
 traitlets==5.14.3
@@ -486,6 +525,7 @@ uncurl==0.0.11
 unstructured-client==0.25.9
 upstash-vector==0.6.0
 uritemplate==4.1.1
+url-normalize==2.2.0
 urllib3==2.3.0
 uuid6==2024.7.10
 uv==0.6.3
