@@ -67,7 +67,7 @@ canonicaljson==2.0.0
 cassandra-driver==3.29.2
 cassio==0.1.10
 cattrs==24.1.2
-certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1725278078093/work/certifi
+certifi
 cffi==1.17.1
 chardet==5.2.0
 charset-normalizer==3.4.1
@@ -83,7 +83,7 @@ cohere==5.14.0
 colorama==0.4.6
 coloredlogs==15.0.1
 colorlog==6.9.0
-comm @ file:///home/conda/feedstock_root/build_artifacts/comm_1733502965406/work
+comm
 composio_core==0.7.1
 composio_langchain==0.7.1
 construct==2.10.68
@@ -96,7 +96,7 @@ cryptography==43.0.3
 cytoolz==1.0.1
 dataclasses-json==0.6.7
 datasets==2.21.0
-debugpy @ file:///croot/debugpy_1736267418885/work
+debugpy
 decorator==5.2.1
 deepdiff==8.2.0
 defusedxml==0.7.1
@@ -213,7 +213,7 @@ iniconfig==2.0.0
 inquirerpy==0.3.4
 installer==0.7.0
 instructor==1.5.2
-ipykernel @ file:///home/conda/feedstock_root/build_artifacts/ipykernel_1719845459717/work
+ipykernel
 ipython==9.0.1
 ipython_pygments_lexers==1.1.1
 isort==6.0.0
@@ -239,8 +239,8 @@ jsonschema==4.23.0
 jsonschema-specifications==2024.10.1
 jsonschema_rs==0.20.0
 jupiter-python-sdk==0.0.2.0
-jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/jupyter_client_1733440914442/work
-jupyter_core @ file:///home/conda/feedstock_root/build_artifacts/jupyter_core_1727163409502/work
+jupyter_client
+jupyter_core
 keyring==25.6.0
 kubernetes==31.0.0
 langchain==0.3.10
@@ -439,7 +439,7 @@ pytz==2024.2
 pyunormalize==16.0.0
 pyvis==0.3.2
 PyYAML==6.0.2
-pyzmq @ file:///croot/pyzmq_1734687138743/work
+pyzmq
 qdrant-client==1.9.2
 qianfan==0.3.5
 ragstack-ai-knowledge-store==0.2.1
@@ -507,7 +507,7 @@ tomli==2.2.1
 tomli_w==1.2.0
 tomlkit==0.13.2
 toolz==0.11.2
-tornado @ file:///croot/tornado_1733960490606/work
+tornado
 tox==4.23.2
 tqdm==4.67.1
 traitlets==5.14.3
