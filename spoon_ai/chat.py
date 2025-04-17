@@ -1,6 +1,7 @@
 import os
 from logging import getLogger
 from typing import List, Optional, Union
+import json
 
 from spoon_ai.schema import Message, LLMResponse, ToolCall
 
@@ -84,9 +85,7 @@ class ChatBot:
     # @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=60))
     async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
         if tool_choice not in ["auto", "none", "required"]:
-            raise ValueError(f"Invalid tool choice: {tool_choice}")
-        if tools is None:
-            tools = []
+            tool_choice = "auto"
         
         formatted_messages = [] if system_msg is None else [{"role": "system", "content": system_msg}]
         for message in messages:
@@ -96,6 +95,7 @@ class ChatBot:
                 formatted_messages.append(to_dict(message))
             else:
                 raise ValueError(f"Invalid message type: {type(message)}")
+        
         try:
             if self.llm_provider == "openai":
                 response = await self.llm.chat.completions.create(
@@ -112,6 +112,58 @@ class ChatBot:
             elif self.llm_provider == "anthropic":
                 def to_anthropic_tools(tools: List[dict]) -> List[dict]:
                     return [{"name": tool["function"]["name"], "description": tool["function"]["description"], "input_schema": tool["function"]["parameters"]} for tool in tools]
+                
+                # 转换消息格式为 Anthropic 格式
+                anthropic_messages = []
+                system_content = system_msg or ""
+                
+                for message in formatted_messages:
+                    role = message.get("role")
+                    
+                    # Anthropic 只支持 user 和 assistant 角色
+                    if role == "system":
+                        # 系统消息已在上面处理，这里跳过
+                        continue
+                    elif role == "tool":
+                        # 工具消息转换为用户消息，内容包含tool_result
+                        anthropic_messages.append({
+                            "role": "user",
+                            "content": [{
+                                "type": "tool_result",
+                                "tool_use_id": message.get("tool_call_id"),
+                                "content": message.get("content")
+                            }]
+                        })
+                    elif role == "assistant":
+                        content = None
+                        if message.get("tool_calls"):
+                            content = []
+                            for tool_call in message.get("tool_calls", []):
+                                tool_fn = tool_call.get("function", {})
+                                try:
+                                    arguments = json.loads(tool_fn.get("arguments", "{}"))
+                                except:
+                                    arguments = {}
+                                
+                                content.append({
+                                    "type": "tool_use",
+                                    "id": tool_call.get("id"),
+                                    "name": tool_fn.get("name"),
+                                    "input": arguments
+                                })
+                        else:
+                            content = message.get("content")
+                        
+                        anthropic_messages.append({
+                            "role": "assistant",
+                            "content": content
+                        })
+                    elif role == "user":
+                        anthropic_messages.append({
+                            "role": "user",
+                            "content": message.get("content")
+                        })
+                
                 content = ""
                 buffer = ""
                 buffer_type = ""
@@ -121,8 +173,8 @@ class ChatBot:
                     model=self.model_name,
                     max_tokens=4096,
                     temperature=0.3,
-                    system=system_msg,
-                    messages=[m for m in formatted_messages if m.get("role") != "system"],
+                    system=system_content,
+                    messages=anthropic_messages,
                     tools=to_anthropic_tools(tools),
                     **kwargs
                 ) as stream:
