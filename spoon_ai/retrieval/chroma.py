@@ -1,8 +1,14 @@
-from langchain_core.documents import Document
 import os
-from typing import List
+from typing import List, Dict, Any
 import uuid
-from langchain_openai import OpenAIEmbeddings
+import openai
+
+# Simple document class to replace langchain's Document
+class Document:
+    def __init__(self, page_content: str, metadata: Dict[str, Any] = None):
+        self.page_content = page_content
+        self.metadata = metadata or {}
+
 class ChromaClient:
     def __init__(self, config_dir: str):
         try:
@@ -13,13 +19,22 @@ class ChromaClient:
         self.client = chromadb.PersistentClient(path=os.path.join(config_dir, "spoon_ai.db"))
         self.collection = self.client.get_or_create_collection("spoon_ai")
         
+        # Initialize OpenAI client
+        self.openai_client = openai.OpenAI()
+        
+    def _get_embedding(self, text: str) -> List[float]:
+        """Get embedding for a text using OpenAI's API directly"""
+        response = self.openai_client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=text
+        )
+        return response.data[0].embedding
         
     def add_documents(self, documents: List[Document]):
         """Add documents to the collection"""
-        embeddings = OpenAIEmbeddings()
         for doc in documents:
             # TODO: parallelize this
-            doc_embedding = embeddings.embed_query(doc.page_content)
+            doc_embedding = self._get_embedding(doc.page_content)
             self.collection.add(
                 ids=[doc.metadata.get("id", str(uuid.uuid4()))],
                 documents=[doc.page_content],
@@ -29,8 +44,7 @@ class ChromaClient:
         
     def query(self, query: str, k: int = 10) -> List[Document]:
         """Query the collection"""
-        embeddings = OpenAIEmbeddings()
-        query_embedding = embeddings.embed_query(query)
+        query_embedding = self._get_embedding(query)
         results = self.collection.query(query_embedding, n_results=k)
         docs = []
         for i in range(len(results["documents"][0])):

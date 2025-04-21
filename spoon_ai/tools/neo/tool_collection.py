@@ -1,5 +1,19 @@
-from langchain_core.tools import tool
-from typing import Annotated
+from typing import Annotated, Callable, Any, Dict, List, TypeVar, get_type_hints
+import functools
+
+# Custom tool decorator to replace langchain's tool
+def tool(func):
+    """Simple tool decorator to replace langchain's tool decorator"""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    
+    # Store original function metadata
+    wrapper.__tool_name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    wrapper.__annotations__ = func.__annotations__
+    
+    return wrapper
 
 import requests
 import json

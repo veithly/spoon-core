@@ -2,8 +2,7 @@ import os
 from typing import Any, Dict, Iterator, List
 
 from openai import OpenAI
-from pinecone.grpc import PineconeGRPC as Pinecone
-from pinecone import ServerlessSpec
+import pinecone
 
 from spoon_ai.tools.base import BaseTool, ToolFailure, ToolResult
 
@@ -17,11 +16,17 @@ class ToolManager:
     
     def _lazy_init_pinecone(self):
         if not hasattr(self, "pc"):
-            self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+            pinecone.init(api_key=os.getenv("PINECONE_API_KEY"))
             index_name = "dex-tools"
-            if index_name not in self.pc.list_indexes().names():
-                self.pc.create_index(index_name, dimension=3072, spec=ServerlessSpec(cloud="aws", region="us-east-1"))
-            self.index = self.pc.Index(index_name)
+            
+            if index_name not in pinecone.list_indexes():
+                pinecone.create_index(
+                    name=index_name,
+                    dimension=3072,
+                    metric="cosine"
+                )
+            
+            self.index = pinecone.Index(index_name)
             self.embedding_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
     def __getitem__(self, name: str) -> BaseTool:
@@ -104,18 +109,10 @@ class ToolManager:
         doc_to_tool = {}
         for match in results["matches"]:
             doc_to_tool[match["metadata"]["description"]] = match["id"]
-        rerank_results = self.pc.inference.rerank(
-            model="bge-reranker-v2-m3",
-            query=query,
-            documents=[match["metadata"]["description"] for match in results["matches"]],
-            top_n=top_k
-        )
-        print("="* 30)
-        print(rerank_results)
-        print("="* 30)
+        
         result_tool_names = []
-        for doc in rerank_results.data:
-            result_tool_names.append(doc_to_tool[doc.document.text])
+        for match in results["matches"][:top_k]:
+            result_tool_names.append(match["id"])
         return result_tool_names
         
         

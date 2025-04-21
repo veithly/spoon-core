@@ -4,7 +4,6 @@ import logging
 
 from cli.commands import SpoonAICLI
 
-logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 

@@ -8,16 +8,12 @@ from pathlib import Path
 from typing import (Any, AsyncGenerator, Awaitable, Callable, Dict, Generator,
                     List, Optional)
 
-from langchain.callbacks import AsyncIteratorCallbackHandler
-from langchain_anthropic import ChatAnthropic
-from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.documents import Document
-from langchain_deepseek import ChatDeepSeek
-from langchain_openai import ChatOpenAI
+import anthropic
+import openai
+from openai import AsyncOpenAI, OpenAI
 
 from spoon_ai.agents.rag import RetrievalMixin
 from spoon_ai.utils.config_manager import ConfigManager
-from spoon_ai.utils.utils import to_langchain_messages
 from spoon_ai.agents.toolcall import ToolCallAgent
 from spoon_ai.schema import Role, Message
 
@@ -57,38 +53,30 @@ class SpoonChatAI(RetrievalMixin):
         self.config_dir.mkdir(exist_ok=True)
         # retrieval_client will be initialized by RetrievalMixin when needed
         
-        self.chatbot = self._generate_chatbot()
+        # Initialize native SDK client
+        self.client = self._generate_client()
     
-    def _generate_chatbot(self):
+    def _generate_client(self):
         llm_provider = self.llm_config['llm_provider']
-        
-        chatbot_config = {
-            "model" : self.llm_config['model'],
-            "temperature" : self.llm_config.get('temperature', 0.5),
-            "max_tokens" : self.llm_config.get('max_tokens', 300),
-            "streaming" : True,  
-            "verbose" : False
-        }
         
         if llm_provider == 'openai':
             api_key = self.config_manager.get_api_key('openai')
             if api_key:
-                chatbot_config["api_key"] = api_key
-            return ChatOpenAI(**chatbot_config)
-        elif llm_provider == 'deepseek':
-            api_key = self.config_manager.get_api_key('deepseek')
-            if api_key:
-                chatbot_config["api_key"] = api_key
-            return ChatDeepSeek(**chatbot_config)
+                return OpenAI(api_key=api_key)
+            return OpenAI()
         elif llm_provider == 'anthropic':
             api_key = self.config_manager.get_api_key('anthropic')
             if api_key:
-                chatbot_config["api_key"] = api_key
-            return ChatAnthropic(**chatbot_config)
+                return anthropic.Anthropic(api_key=api_key)
+            return anthropic.Anthropic()
+        elif llm_provider == 'deepseek':
+            # Note: May need to import appropriate DeepSeek SDK
+            api_key = self.config_manager.get_api_key('deepseek')
+            # Assuming DeepSeek has similar SDK structure
+            # May need to adjust based on actual DeepSeek API interface
+            return None  # Temporarily return None, to be replaced with appropriate DeepSeek client
         else:
             raise ValueError(f"Unsupported LLM provider: {llm_provider}")
-        
-        
         
     def perform_action(self, action_name: str, action_args: List[str], callback: Optional[Callable[[str], None]] = None):
         """Perform an action with the given name and arguments"""
@@ -99,104 +87,112 @@ class SpoonChatAI(RetrievalMixin):
             pass
         else:
             raise ValueError(f"Unsupported action: {action_name}")
-        
-    # RAG methods have been moved to RetrievalMixin
-            
+    
     async def astream_chat_response(self, message: str, callback: Optional[Callable[[str], Awaitable[None]]] = None) -> AsyncGenerator[str, None]:
         debug_log(f"Starting streaming response for message: {message[:30]}...")
         
         try:
-            system_message = Message(role=Role.SYSTEM, content=self.prompt_template)
-            messages = [system_message]
-            
-            # Add chat history
-            history_limit = 10
-            history_pairs = []
-            
-            # Get message list
+            # Prepare message history
+            history_messages = []
             chat_messages = []
             if isinstance(self.chat_history, dict) and 'messages' in self.chat_history:
                 chat_messages = self.chat_history.get('messages', [])
             elif isinstance(self.chat_history, list):
                 chat_messages = self.chat_history
             
-            # Retrieve relevant documents using the mixin method
+            # Get relevant documents as context
             context_str, relevant_docs = self.get_context_from_query(message)
             
-            for i in range(0, len(chat_messages) - 1, 2):
-                if i + 1 < len(chat_messages) and len(history_pairs) < history_limit:
-                    user_msg = chat_messages[i]
-                    assistant_msg = chat_messages[i + 1]
-                    if user_msg['role'] == 'user' and assistant_msg['role'] == 'assistant':
-                        history_pairs.append((user_msg, assistant_msg))
+            # Prepare message format
+            llm_provider = self.llm_config['llm_provider']
             
-            debug_log(f"Added {len(history_pairs)} history pairs to context")
+            if llm_provider == 'openai':
+                # Build OpenAI format messages
+                messages = [{"role": "system", "content": self.prompt_template}]
+                
+                # Add history messages
+                for msg in chat_messages:
+                    if msg['role'] in ['user', 'assistant', 'system']:
+                        messages.append({"role": msg['role'], "content": msg['content']})
+                
+                # Add current message, possibly with context
+                user_content = message
+                if context_str:
+                    user_content = f"{message}\n{context_str}"
+                messages.append({"role": "user", "content": user_content})
+                
+                # Create async client
+                async_client = AsyncOpenAI(api_key=self.config_manager.get_api_key('openai'))
+                
+                # Stream API call
+                stream = await async_client.chat.completions.create(
+                    model=self.llm_config['model'],
+                    messages=messages,
+                    temperature=self.llm_config.get('temperature', 0.5),
+                    max_tokens=self.llm_config.get('max_tokens', 300),
+                    stream=True
+                )
+                
+                # Handle streaming response
+                async for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        yield content
+                        if callback:
+                            await callback(content)
+                
+            elif llm_provider == 'anthropic':
+                # Build Anthropic format messages
+                system_prompt = self.prompt_template
+                messages = []
+                
+                # Add history messages
+                for msg in chat_messages:
+                    if msg['role'] == 'user':
+                        messages.append({"role": "user", "content": msg['content']})
+                    elif msg['role'] == 'assistant':
+                        messages.append({"role": "assistant", "content": msg['content']})
+                
+                # Add current message, possibly with context
+                user_content = message
+                if context_str:
+                    user_content = f"{message}\n{context_str}"
+                messages.append({"role": "user", "content": user_content})
+                
+                # Call Anthropic API
+                stream = await self.client.messages.create(
+                    model=self.llm_config['model'],
+                    system=system_prompt,
+                    messages=messages,
+                    temperature=self.llm_config.get('temperature', 0.5),
+                    max_tokens=self.llm_config.get('max_tokens', 300),
+                    stream=True
+                )
+                
+                # Handle streaming response
+                async for chunk in stream:
+                    if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text'):
+                        content = chunk.delta.text
+                        if content:
+                            yield content
+                            if callback:
+                                await callback(content)
             
-            for user_msg, assistant_msg in history_pairs:
-                messages.append(Message(role=Role.USER, content=user_msg['content']))
-                messages.append(Message(role=Role.ASSISTANT, content=assistant_msg['content']))
-            
-            # Add context from retrieved documents if available
-            if context_str:
-                message_with_context = f"{message}\n{context_str}"
-                messages.append(Message(role=Role.USER, content=message_with_context))
+            # DeepSeek and other providers can be added similarly
             else:
-                messages.append(Message(role=Role.USER, content=message))
-            
-            debug_log("Creating callback handler for streaming")
-            callback_handler = AsyncIteratorCallbackHandler()
-            
-            debug_log("Creating streaming LLM")
-            streaming_llm = self.chatbot.with_config(
-                callbacks=[callback_handler],
-                streaming=True
-            )
-            
-            debug_log("Starting LLM task")
-            langchain_messages = to_langchain_messages(messages)
-            task = asyncio.create_task(streaming_llm.ainvoke(langchain_messages))
-            
-            chunk_count = 0
-            has_yielded = False
-            
-            try:
-                debug_log("Starting to iterate through chunks")
-                async for chunk in callback_handler.aiter():
-                    if chunk:
-                        chunk_count += 1
-                        debug_log(f"Received chunk #{chunk_count}: {chunk[:20]}...")
-                        has_yielded = True
-                        yield chunk
-                        if callback:
-                            await callback(chunk)
+                # Use fallback non-streaming response for unsupported providers
+                debug_log(f"Streaming not implemented for provider {llm_provider}, using fallback")
+                fallback_response = self._generate_response(message)
                 
-                debug_log(f"Finished streaming, received {chunk_count} chunks")
+                # Simulate streaming output
+                words = fallback_response.split()
+                for i in range(0, len(words), 3):
+                    chunk = " ".join(words[i:i+3]) + " "
+                    yield chunk
+                    if callback:
+                        await callback(chunk)
+                    await asyncio.sleep(0.1)
                 
-                if not has_yielded:
-                    debug_log("No chunks yielded, generating fallback response")
-                    fallback_response = self._generate_response(message)
-                    debug_log(f"Generated fallback response of length {len(fallback_response)}")
-                    
-                    # Check if fallback response starts with agent name and remove it
-                    agent_name_prefix = f"{self.name}: "
-                    if fallback_response.startswith(agent_name_prefix):
-                        fallback_response = fallback_response[len(agent_name_prefix):]
-                        debug_log("Removed agent name prefix from fallback response")
-                    
-                    debug_log("Simulating streaming with fallback response")
-                    words = fallback_response.split()
-                    for i in range(0, len(words), 3):
-                        chunk = " ".join(words[i:i+3]) + " "
-                        debug_log(f"Yielding simulated chunk: {chunk}")
-                        yield chunk
-                        if callback:
-                            await callback(chunk)
-                        await asyncio.sleep(0.1)
-            finally:
-                debug_log("Cleaning up streaming task")
-                if not task.done():
-                    await task
-        
         except Exception as e:
             debug_log(f"Error in astream_chat_response: {e}")
             error_message = f"Error during streaming: {e}. Please try again."
@@ -205,35 +201,73 @@ class SpoonChatAI(RetrievalMixin):
                 await callback(error_message)
         
     def _generate_response(self, message: str) -> str:
-        system_message = Message(role=Role.SYSTEM, content=self.prompt_template)
-        messages = [system_message]
+        """Generate non-streaming response using native SDK"""
+        llm_provider = self.llm_config['llm_provider']
         
-        history_limit = 10
-        history_pairs = []
-        
+        # Prepare history messages
         chat_messages = []
         if isinstance(self.chat_history, dict) and 'messages' in self.chat_history:
             chat_messages = self.chat_history.get('messages', [])
         elif isinstance(self.chat_history, list):
             chat_messages = self.chat_history
-        for i in range(0, len(chat_messages) - 1, 2):
-            if i + 1 < len(chat_messages) and len(history_pairs) < history_limit:
-                user_msg = chat_messages[i]
-                assistant_msg = chat_messages[i + 1]
-                if user_msg['role'] == 'user' and assistant_msg['role'] == 'assistant':
-                    history_pairs.append((user_msg, assistant_msg))
+            
+        # Get context
+        context_str, _ = self.get_context_from_query(message)
+        user_content = message
+        if context_str:
+            user_content = f"{message}\n{context_str}"
+            
+        if llm_provider == 'openai':
+            # Build OpenAI format messages
+            messages = [{"role": "system", "content": self.prompt_template}]
+            
+            # Add history messages
+            for msg in chat_messages:
+                if msg['role'] in ['user', 'assistant', 'system']:
+                    messages.append({"role": msg['role'], "content": msg['content']})
+            
+            # Add current message
+            messages.append({"role": "user", "content": user_content})
+            
+            # Call API
+            response = self.client.chat.completions.create(
+                model=self.llm_config['model'],
+                messages=messages,
+                temperature=self.llm_config.get('temperature', 0.5),
+                max_tokens=self.llm_config.get('max_tokens', 300)
+            )
+            
+            return response.choices[0].message.content
+            
+        elif llm_provider == 'anthropic':
+            # Build Anthropic format messages
+            system_prompt = self.prompt_template
+            messages = []
+            
+            # Add history messages
+            for msg in chat_messages:
+                if msg['role'] == 'user':
+                    messages.append({"role": "user", "content": msg['content']})
+                elif msg['role'] == 'assistant':
+                    messages.append({"role": "assistant", "content": msg['content']})
+            
+            # Add current message
+            messages.append({"role": "user", "content": user_content})
+            
+            # Call API
+            response = self.client.messages.create(
+                model=self.llm_config['model'],
+                system=system_prompt,
+                messages=messages,
+                temperature=self.llm_config.get('temperature', 0.5),
+                max_tokens=self.llm_config.get('max_tokens', 300)
+            )
+            
+            return response.content[0].text
         
-        for user_msg, assistant_msg in history_pairs:
-            messages.append(Message(role=Role.USER, content=user_msg['content']))
-            messages.append(Message(role=Role.ASSISTANT, content=assistant_msg['content']))
-        
-        # Add current message
-        messages.append(Message(role=Role.USER, content=message))
-        from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
-        
-        langchain_messages = to_langchain_messages(messages)
-        res = self.chatbot.invoke(langchain_messages)
-        return res.content
+        # Can add implementation for other providers as needed
+        else:
+            raise ValueError(f"Response generation not implemented for provider: {llm_provider}")
         
     def load_chat_history(self):
         history_file = Path('chat_logs') / f'{self.name}_history.json'
@@ -371,7 +405,7 @@ class SpoonChatAI(RetrievalMixin):
     
     def reload_config(self):
         self.config_manager = ConfigManager()
-        self.chatbot = self._generate_chatbot()
+        self.client = self._generate_client()
         debug_log(f"Reloaded configuration for agent: {self.name}")
         
                 

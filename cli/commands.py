@@ -23,8 +23,6 @@ from spoon_ai.utils.config_manager import ConfigManager
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
-logging.getLogger("langchain").setLevel(logging.ERROR)
-logging.getLogger("langchain_openai").setLevel(logging.ERROR)
 logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)

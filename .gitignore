@@ -7,3 +7,5 @@ react_logs/*
 
 alembic.ini
 spoon_ai_sdk.egg-info/*
+
+.tox

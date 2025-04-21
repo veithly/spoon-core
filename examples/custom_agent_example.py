@@ -15,7 +15,7 @@ from pydantic import Field
 
 from spoon_ai.agents import ToolCallAgent
 from spoon_ai.chat import ChatBot
-from spoon_ai.tools import ToolManager
+from spoon_ai.tools import ToolManager, Terminate
 from spoon_ai.tools.base import BaseTool, ToolResult
 
 
@@ -142,13 +142,14 @@ class InfoAssistantAgent(ToolCallAgent):
     
     next_step_prompt: str = "What should be the next step?"
     
-    max_steps: int = 5
+    max_steps: int = 10
     
     # Define available tools
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
         WebSearch(),
         Calculator(),
-        WeatherInfo()
+        WeatherInfo(),
+        Terminate()
     ]))
 
 
@@ -170,7 +171,7 @@ async def create_custom_agent_directly():
         avaliable_tools=tool_manager,
         system_prompt="""You are a multi-functional assistant that can search for information, perform calculations, and check weather.
         Please choose the appropriate tool based on the user's question and provide useful answers.""",
-        max_steps=5
+        max_steps=10
     )
     
     return custom_agent
