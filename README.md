@@ -311,6 +311,61 @@ Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
+## 📡 MCP (Message Connectivity Protocol)
+
+<div align="center">
+  <h3>🌐 Connect • Orchestrate • Scale 🌐</h3>
+  <p><strong>The neural network of SpoonOS - enabling intelligent agent communication</strong></p>
+</div>
+
+MCP is a powerful messaging system that serves as the backbone for agent communication in SpoonOS. It transforms isolated agents into a collaborative, intelligent network.
+
+### ✨ Key Features
+
+- **🔄 Agent-to-Agent Communication** - Create networks of specialized agents that collaborate seamlessly
+- **⚡ Streaming Responses** - Real-time streaming output from language models
+- **📈 Horizontal Scaling** - Distribute agents across multiple processes or machines
+- **📡 Pub/Sub Messaging** - Flexible topic-based publish-subscribe pattern
+
+<div align="center">
+  <pre>
+  User → [Coordinator] → [Researcher] → [Writer] → Final Response
+             ↓               ↑
+        [Calculator] ←→ [Data Analyst]
+  </pre>
+</div>
+
+### 🚀 Quick Example
+
+```python
+from spoon_ai.mcp import MCPConfig, MCPAgentAdapter
+from spoon_ai.agents.custom_agent import CustomAgent
+
+async def main():
+    # Initialize the adapter
+    adapter = MCPAgentAdapter(config=MCPConfig(server_url="ws://localhost:8765"))
+    await adapter.connect()
+    
+    # Create and start an agent
+    agent_id = await adapter.create_custom_agent(
+        name="test_agent",
+        description="Test agent",
+        system_prompt="You are a helpful assistant."
+    )
+    await adapter.agent_subscribe(agent_id, "test_topic")
+    await adapter.start_agent(agent_id)
+    
+    # Send a message to the agent
+    await adapter.send_message_to_agent(
+        agent_id=agent_id,
+        message="Hello, can you help me?",
+        sender_id="user",
+        topic="test_topic"
+    )
+```
+
+For comprehensive documentation and examples, see the [MCP README](spoon_ai/mcp/README.md).
+
 ## 🧩 Agent Framework
 
 SDCF provides a powerful Agent framework that supports two ways of use:

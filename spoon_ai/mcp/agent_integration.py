@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-MCP Agent 集成示例
+MCP Agent Integration Example
 
-本示例演示如何使用 MCPAgentAdapter 将 SpoonAI 的 Agent 与 MCP 系统集成
+This example demonstrates how to use MCPAgentAdapter to integrate SpoonAI's Agent with the MCP system
 """
 
 import asyncio
@@ -15,7 +15,7 @@ from spoon_ai.mcp import MCPConfig, MCPAgentAdapter, SpoonMCPClient
 from spoon_ai.agents.custom_agent import CustomAgent
 from spoon_ai.agents.spoon_react import SpoonReactAI
 
-# 配置日志
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
