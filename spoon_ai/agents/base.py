@@ -6,7 +6,7 @@ import datetime
 from pathlib import Path
 from abc import ABC
 from contextlib import asynccontextmanager
-from typing import Literal, Optional, List, Union, cast
+from typing import Literal, Optional, List, Union, Dict, Any, cast
 
 from spoon_ai.schema import Message, Role
 from pydantic import BaseModel, Field
@@ -183,3 +183,76 @@ class BaseAgent(BaseModel, ABC):
                     yield await self.output_queue.get()
                 break
             yield token_or_done
+
+    async def process_mcp_message(self, content: Any, sender: str, message: Dict[str, Any], agent_id: str):
+        """
+        Process messages from the MCP system
+        
+        Args:
+            content: Message content
+            sender: Sender ID
+            message: Complete message
+            agent_id: Agent ID
+            
+        Returns:
+            The result of processing the message, either as a complete string
+            or as a generator for streaming responses
+        """
+        # Parse message content
+        if isinstance(content, dict) and "text" in content:
+            text_content = content["text"]
+        elif isinstance(content, str):
+            text_content = content
+        else:
+            text_content = str(content)
+        
+        # Record message to agent's memory
+        self.add_message("user", text_content)
+        
+        # Get message metadata
+        metadata = {}
+        if isinstance(content, dict) and "metadata" in content:
+            metadata = content.get("metadata", {})
+            
+        # Get message topic
+        topic = message.get("topic", "general")
+        
+        logger.info(f"Agent {self.name} received message from {sender}: {text_content[:50]}{'...' if len(text_content) > 50 else ''}")
+        
+        # Check if streaming is requested
+        request_stream = False
+        if isinstance(content, dict) and "metadata" in content:
+            request_stream = metadata.get("request_stream", False)
+        
+        # Process message and return result
+        try:
+            if request_stream:
+                logger.info(f"Streaming response requested for agent {self.name}")
+                # Reset task_done event and clear output queue
+                self.task_done = asyncio.Event()
+                while not self.output_queue.empty():
+                    await self.output_queue.get()
+                
+                # Start the run task in background to feed the output queue
+                asyncio.create_task(self._run_and_signal_done(request=text_content))
+                
+                # Return the stream generator
+                return self.stream()
+            else:
+                # Standard synchronous response
+                return await self.run(request=text_content)
+        except Exception as e:
+            logger.error(f"Agent {self.name} error processing message: {str(e)}")
+            return f"Error processing message: {str(e)}"
+    
+    async def _run_and_signal_done(self, request: Optional[str] = None):
+        """
+        Helper method to run the agent and signal when done for streaming purposes
+        """
+        try:
+            await self.run(request=request)
+        except Exception as e:
+            logger.error(f"Error in streaming run: {str(e)}")
+        finally:
+            # Signal that the task is done
+            self.task_done.set()
