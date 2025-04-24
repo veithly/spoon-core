@@ -4,7 +4,7 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
-DEBUG = True
+DEBUG = False
 
 def debug_log(message):
     if DEBUG:
