@@ -9,7 +9,7 @@ from spoon_ai.tools.base import BaseTool
 
 """
     Currently supported:
-    UploadFileTool, ListBucketsTool, CreateBucketTool, DownloadFileTool, 
+    UploadFileTool, ListBucketsTool, DownloadFileTool, 
     DeleteObjectTool, GeneratePresignedUrlTool
 """
 
@@ -25,13 +25,10 @@ class AiozStorageTool(BaseTool):
             raise ValueError("Missing AIOZ credentials in environment variables!")
         return boto3.client(
             's3',
-            region_name='cn-east-1',
+            # region_name='us-east-1',
             aws_access_key_id=aioz_access_key,
             aws_secret_access_key=aioz_secret_key,
-            # endpoint_url="https://gateway.aioz.storage",
-            endpoint_url="https://s3.cn-east-1.qiniucs.com",
-            # endpoint_url="https://public.aiozstorage.network",
-            # endpoint_url="https://gateway.aiozstorage.network",
+            endpoint_url="https://s3.aiozstorage.network",
             config=Config(s3={'addressing_style': 'path'}),
             # verify=False
         )
@@ -82,29 +79,6 @@ class ListBucketsTool(AiozStorageTool):
         except ClientError as e:
             return f"❌ Error listing buckets: {e}"
         except Exception as e:
-            return f"❌ Unexpected error: {e}"
-
-
-class CreateBucketTool(AiozStorageTool):
-    name: str = "create_aioz_bucket"
-    description: str = "Create a new bucket in AIOZ Storage"
-    parameters: dict = {
-        "type": "object",
-        "properties": {
-            "bucket_name": {"type": "string", "description": "Name of the new bucket"}
-        },
-        "required": ["bucket_name"]
-    }
-
-    async def execute(self, bucket_name: str) -> str:
-        s3 = self._get_s3_client()
-        try:
-            s3.create_bucket(Bucket=bucket_name)
-            return f"✅ Bucket '{bucket_name}' created successfully."
-        except ClientError as e:
-            return f"❌ Failed to create bucket: {e}"
-        except Exception as e:
-            print(traceback.format_exc())
             return f"❌ Unexpected error: {e}"
 
 
@@ -189,8 +163,8 @@ if __name__ == '__main__':
         print(os.getenv("AIOZ_ACCESS_KEY"))
         bucket_name = "neo-test-bucket2"
 
-        tool = CreateBucketTool()
-        result = await tool.execute(bucket_name)
+        tool = ListBucketsTool()
+        result = await tool.execute()
         print(result)
 
     asyncio.run(create_aioz_bucket())
