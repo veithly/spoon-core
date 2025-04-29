@@ -20,6 +20,7 @@ class FourEverlandStorageTool(BaseTool):
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             endpoint_url=endpoint_url,
+            region_name='us-east-1',
             config=Config(s3={'addressing_style': 'path'})
         )
 
@@ -33,14 +34,15 @@ class FourEverlandStorageTool(BaseTool):
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             endpoint_url=endpoint_url,
+            region_name='us-east-1',
             config=Config(s3={'addressing_style': 'path'})
         )
 
 
 class UploadFileTo4Everland(FourEverlandStorageTool):
-    name = "upload_file_to_4everland"
-    description = "Upload a file to 4EVERLAND Storage"
-    parameters = {
+    name: str = "upload_file_to_4everland"
+    description: str = "Upload a file to 4EVERLAND Storage"
+    parameters: str = {
         "type": "object",
         "properties": {
             "bucket_name": {"type": "string"},
@@ -65,9 +67,9 @@ class UploadFileTo4Everland(FourEverlandStorageTool):
 
 
 class List4EverlandBuckets(FourEverlandStorageTool):
-    name = "list_4everland_buckets"
-    description = "List all buckets in 4EVERLAND Storage"
-    parameters = {
+    name: str = "list_4everland_buckets"
+    description: str = "List all buckets in 4EVERLAND Storage"
+    parameters: str = {
         "type": "object",
         "properties": {},
         "required": []
@@ -85,9 +87,9 @@ class List4EverlandBuckets(FourEverlandStorageTool):
 
 
 class DownloadFileFrom4Everland(FourEverlandStorageTool):
-    name = "download_file_from_4everland"
-    description = "Download a file from 4EVERLAND Storage"
-    parameters = {
+    name: str = "download_file_from_4everland"
+    description: str = "Download a file from 4EVERLAND Storage"
+    parameters: str = {
         "type": "object",
         "properties": {
             "bucket_name": {"type": "string"},
@@ -107,9 +109,9 @@ class DownloadFileFrom4Everland(FourEverlandStorageTool):
 
 
 class Delete4EverlandObject(FourEverlandStorageTool):
-    name = "delete_4everland_object"
-    description = "Delete an object from 4EVERLAND Storage"
-    parameters = {
+    name: str = "delete_4everland_object"
+    description: str = "Delete an object from 4EVERLAND Storage"
+    parameters: str = {
         "type": "object",
         "properties": {
             "bucket_name": {"type": "string"},
@@ -128,9 +130,9 @@ class Delete4EverlandObject(FourEverlandStorageTool):
 
 
 class Generate4EverlandPresignedUrl(FourEverlandStorageTool):
-    name = "generate_4everland_presigned_url"
-    description = "Generate a temporary URL to access a 4EVERLAND object"
-    parameters = {
+    name: str = "generate_4everland_presigned_url"
+    description: str = "Generate a temporary URL to access a 4EVERLAND object"
+    parameters: str = {
         "type": "object",
         "properties": {
             "bucket_name": {"type": "string"},
@@ -207,5 +209,6 @@ if __name__ == '__main__':
         await test_generate_presigned_url_4everland()
         await test_download_file_from_4everland()
         await test_delete_4everland_object()
+
 
     asyncio.run(run_all_4everland_tests())
