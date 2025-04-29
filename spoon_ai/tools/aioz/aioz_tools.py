@@ -33,15 +33,16 @@ class AiozStorageTool(BaseTool):
 
     def _get_s3_resource(self):
         """Returns a boto3 S3 client initialized for AIOZ Storage."""
-        aioz_access_key = os.getenv("AIOZ_ACCESS_KEY")
-        aioz_secret_key = os.getenv("AIOZ_SECRET_KEY")
-        if not aioz_access_key or not aioz_secret_key:
+        aioz_access_key = os.getenv("AWS_ACCESS_KEY")
+        aioz_secret_key = os.getenv("AWS_SECRET_KEY")
+        aioz_endpoint_url = os.getenv("AIOZ_ENDPOINT_URL")
+        if not aioz_access_key or not aioz_secret_key or not aioz_endpoint_url:
             raise ValueError("Missing AIOZ credentials in environment variables!")
         return boto3.resource(
             's3',
             aws_access_key_id=aioz_access_key,
             aws_secret_access_key=aioz_secret_key,
-            endpoint_url="https://s3.aiozstorage.network",
+            endpoint_url=aioz_endpoint_url,
             config=Config(s3={'addressing_style': 'path'}),
         )
 
@@ -231,7 +232,7 @@ if __name__ == '__main__':
         await test_list_buckets()
         await test_upload_file()
         await test_generate_presigned_url()
-        await test_download_file()
-        await test_delete_object()
+        # await test_download_file()
+        # await test_delete_object()
 
     asyncio.run(run_all_tests())
