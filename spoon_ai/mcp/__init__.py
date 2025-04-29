@@ -1,29 +1,10 @@
 """
-MCP (Message Connectivity Protocol) client module for SpoonAI.
-Provides a client for message-based communication between agents and external services.
+MCP (Model Context Protocol) integration for SpoonAI using FastMCP.
 """
 
-from .base import MCPClient
-from .client import SpoonMCPClient, MCPMessage
-from .config import MCPConfig
-from .agent_adapter import MCPAgentAdapter
-from .exceptions import (
-    MCPError, 
-    MCPConnectionError, 
-    MCPAuthenticationError, 
-    MCPMessageError, 
-    MCPSubscriptionError
-)
+from spoon_ai.agents.base import BaseAgent
+from .client import FastMCPClient
+from .adapter import MCPAgentAdapter
 
-__all__ = [
-    'MCPClient',
-    'SpoonMCPClient',
-    'MCPMessage',
-    'MCPConfig',
-    'MCPAgentAdapter',
-    'MCPError',
-    'MCPConnectionError',
-    'MCPAuthenticationError',
-    'MCPMessageError',
-    'MCPSubscriptionError',
-]
+__version__ = "0.1.0"
+__all__ = ["FastMCPClient", "MCPAgentAdapter"] 
