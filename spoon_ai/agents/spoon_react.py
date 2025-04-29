@@ -1,15 +1,22 @@
-from typing import List
-
+from typing import List, Union, Any, Dict, Optional
+import asyncio
+from fastmcp.client.transports import (FastMCPTransport, PythonStdioTransport,
+                                       SSETransport, WSTransport)
+from fastmcp.client import Client as MCPClient
 from pydantic import Field
+import logging
 
+from spoon_ai.chat import ChatBot
+from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from spoon_ai.tools import (PredictPrice, Terminate, TokenHolders, ToolManager,
                             TradingHistory, UniswapLiquidity, WalletAnalysis)
-from spoon_ai.prompts.spoon_react import SYSTEM_PROMPT, NEXT_STEP_PROMPT
 
 from .toolcall import ToolCallAgent
-from spoon_ai.chat import ChatBot
+from .mcp_client_mixin import MCPClientMixin
 
-class SpoonReactAI(ToolCallAgent):
+logger = logging.getLogger(__name__)
+
+class SpoonReactAI(ToolCallAgent, MCPClientMixin):
     
     name: str = "spoon_react"
     description: str = "A smart ai agent in neo blockchain"
@@ -23,3 +30,28 @@ class SpoonReactAI(ToolCallAgent):
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([Terminate(), PredictPrice(), TokenHolders(), TradingHistory(), UniswapLiquidity(), WalletAnalysis()]))
     special_tools: List[str] = Field(default=["terminate"])
     llm: ChatBot = Field(default_factory=lambda: ChatBot())
+
+    mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, FastMCPTransport] = Field(default="mcp_server")
+    mcp_topics: List[str] = Field(default=["spoon_react"])
+
+    def __init__(self, **kwargs):
+        """Initialize SpoonReactAI with both ToolCallAgent and MCPClientMixin initialization"""
+        # Call parent class initializers
+        ToolCallAgent.__init__(self, **kwargs)
+        MCPClientMixin.__init__(self, mcp_transport=kwargs.get('mcp_transport', SSETransport("http://127.0.0.1:8765/sse")))
+    
+    async def initialize(self, __context: Any = None):
+        """Initialize async components and subscribe to topics"""
+        logger.info(f"Initializing SpoonReactAI agent '{self.name}'")
+        
+        # First establish connection to MCP server
+        try:
+            # Verify connection
+            await self.connect()
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize agent {self.name}: {str(e)}")
+            # If context has error handling, use it
+            if __context and hasattr(__context, 'report_error'):
+                await __context.report_error(e)
+            raise

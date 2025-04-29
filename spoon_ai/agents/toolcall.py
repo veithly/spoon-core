@@ -2,6 +2,7 @@ import json
 import asyncio
 from logging import getLogger
 from typing import Any, List
+import logging
 
 from pydantic import Field
 from termcolor import colored
@@ -12,6 +13,10 @@ from spoon_ai.prompts.toolcall import \
 from spoon_ai.prompts.toolcall import SYSTEM_PROMPT as TOOLCALL_SYSTEM_PROMPT
 from spoon_ai.schema import TOOL_CHOICE_TYPE, AgentState, ToolCall, ToolChoice
 from spoon_ai.tools import Terminate, ToolManager
+from mcp.types import Tool as MCPTool
+from spoon_ai.tools.mcp_tool import MCPTool as SpoonMCPTool
+
+logging.getLogger("spoon_ai").setLevel(logging.INFO)
 
 logger = getLogger("spoon_ai")
 
@@ -36,10 +41,21 @@ class ToolCallAgent(ReActAgent):
         if self.next_step_prompt:
             self.add_message("user", self.next_step_prompt)
         
+        mcp_tools = []
+        if hasattr(self, "list_mcp_tools"):
+            mcp_tools = await self.list_mcp_tools()
+
+        def convert_mcp_tool(tool: MCPTool) -> SpoonMCPTool:
+            return SpoonMCPTool(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.inputSchema,
+            ).to_param()
+
         response = await self.llm.ask_tool(
             messages=self.memory.messages,
             system_msg=self.system_prompt,
-            tools=self.avaliable_tools.to_params(),
+            tools=self.avaliable_tools.to_params() + [convert_mcp_tool(tool) for tool in mcp_tools],
             tool_choice=self.tool_choices,
             output_queue=self.output_queue,
         )
@@ -91,6 +107,12 @@ class ToolCallAgent(ReActAgent):
         return "\n\n".join(results)
         
     async def execute_tool(self, tool_call: ToolCall) -> str:
+        if tool_call.function.name not in self.avaliable_tools.tool_map:
+            if not hasattr(self, "call_mcp_tool"):
+                raise ValueError(f"Tool {tool_call.function.name} not found")
+            kwargs = json.loads(tool_call.function.arguments or {})
+            result = await self.call_mcp_tool(tool_call.function.name, **kwargs)
+            return result
         if not tool_call or not tool_call.function or not tool_call.function.name:
             return "Error: Invalid tool call"
         

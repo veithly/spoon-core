@@ -12,7 +12,7 @@ from .abi import ERC20_ABI
 logger = logging.getLogger(__name__)
 
 class Aggregator:
-    def __init__(self, network: str = "ethereum", rpc_url: str = None, scan_url: str = None, chain_id: int = None):
+    def __init__(self, network: str = "ethereum", rpc_url: str = None, scan_url: str = None, chain_id: int = 1):
         self.network = network
         self.rpc_url = rpc_url
         if not self.rpc_url:
@@ -26,7 +26,7 @@ class Aggregator:
                 if not self._web3.is_connected():
                     raise Exception("Failed to connect to RPC")
                 chain_id = self._web3.eth.chain_id
-                if chain_id != self.chain_id:
+                if str(chain_id) != str(self.chain_id):
                     raise Exception(f"Chain ID mismatch: {chain_id} != {self.chain_id}")
                 return
             except Exception as e:
