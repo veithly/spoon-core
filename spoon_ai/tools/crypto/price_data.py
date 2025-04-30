@@ -125,7 +125,11 @@ class UniswapPriceProvider(PriceDataProvider):
             raise ValueError("rpc_url is required")
         self.rpc_url = rpc_url
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+<<<<<<< HEAD
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+=======
+        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+>>>>>>> 645c8a5 (Merge remote-tracking branch 'origin/main')
         self.factory = self.w3.eth.contract(
             address=self.w3.to_checksum_address("0x1F98431c8aD98523631AE4a59f267346ea31F984"), 
             abi=UNISWAP_FACTORY_ABI
