@@ -115,7 +115,7 @@ google-genai>=1.11.0
 protobuf>=3.19.5
 google-api-core>=2.24.2
 grpcio>=1.71.0
-web3==6.20.0
+web3==7.10.0
 solana>=0.36.6
 nest_asyncio>=1.6.0
 python-telegram-bot>=22.0
