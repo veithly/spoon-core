@@ -280,10 +280,7 @@ class SpoonAICLI:
         
         
         self._load_agent("default")
-
-        # self._load_agent("spoon_react_mcp")
-        self._load_agent("react")
-
+    
     def _set_prompt_toolkit(self):
         self.style = Style.from_dict({
             'prompt': 'ansicyan bold',

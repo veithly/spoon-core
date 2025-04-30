@@ -28,7 +28,7 @@ class Aggregator:
                 if not self._web3.is_connected():
                     raise Exception("Failed to connect to RPC")
                 chain_id = self._web3.eth.chain_id
-                if chain_id != self.chain_id:
+                if str(chain_id) != str(self.chain_id):
                     raise Exception(f"Chain ID mismatch: {chain_id} != {self.chain_id}")
                 return
             except Exception as e:
