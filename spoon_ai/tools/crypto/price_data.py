@@ -124,7 +124,7 @@ class UniswapPriceProvider(PriceDataProvider):
         if not rpc_url:
             raise ValueError("rpc_url is required")
         self.rpc_url = rpc_url
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+        self.w3 = Web3(HTTPProvider(self.rpc_url))
         self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         self.factory = self.w3.eth.contract(
