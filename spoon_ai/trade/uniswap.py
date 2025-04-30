@@ -3,8 +3,8 @@ import logging
 import time
 from typing import Any, Dict, Optional, Tuple
 
-from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3 import Web3, HTTPProvider
+from web3.middleware import ExtraDataToPOAMiddleware
 
 
 class EthereumConfig:
@@ -277,10 +277,10 @@ class UniswapV3Client:
             raise ValueError(f"Unsupported chain: {chain_name}, available chains: {list(CHAINS.keys())}")
         
         self.config = CHAINS[chain_name]
-        self.web3 = Web3(Web3.HTTPProvider(self.config.rpc_url))
+        self.web3 = Web3(HTTPProvider(self.config.rpc_url))
         
         # Add POA middleware, suitable for testnets
-        self.web3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        self.web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         
         # Initialize contracts
         self.router = self.web3.eth.contract(

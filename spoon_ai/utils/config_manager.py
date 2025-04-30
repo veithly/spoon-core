@@ -8,8 +8,8 @@ class ConfigManager:
     
     def __init__(self):
         """Initialize the configuration manager"""
-        self.config_dir = Path.home() / ".config" / "spoonai"
-        self.config_dir.mkdir(exist_ok=True)
+        self.config_dir = Path.home()/ ".config" / "spoonai"
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "config.json"
         self.config = self._load_config()
     
