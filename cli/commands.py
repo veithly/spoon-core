@@ -15,7 +15,7 @@ from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
-from spoon_ai.agents import SpoonChatAI, SpoonReactAI
+from spoon_ai.agents import SpoonChatAI, SpoonReactAI, SpoonReactMCP
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
@@ -64,8 +64,7 @@ logging.getLogger("chroma").setLevel(logging.ERROR)
 logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("anthropic").setLevel(logging.ERROR)
 logging.getLogger("google").setLevel(logging.ERROR)
-logging.getLogger("spoon_ai").setLevel(logging.WARNING)  # Set spoon_ai log level to WARNING
-
+logging.getLogger("fastmcp").setLevel(logging.ERROR)
 from spoon_ai.schema import AgentState
 from spoon_ai.social_media.telegram import TelegramClient
 
@@ -265,6 +264,10 @@ class SpoonAICLI:
             self.agents[name] = SpoonReactAI()
             self.current_agent = self.agents[name]
             logger.info(f"Loaded agent: {self.current_agent.name}")
+        elif name == "spoon_react_mcp":
+            self.agents[name] = SpoonReactMCP()
+            self.current_agent = self.agents[name]
+            logger.info(f"Loaded agent: {self.current_agent.name}")
         else:
             logger.error(f"Agent {name} not found")
     
@@ -277,6 +280,7 @@ class SpoonAICLI:
         
         self._load_agent("react")
         self._load_agent("default")
+        self._load_agent("spoon_react_mcp")
     
     def _set_prompt_toolkit(self):
         self.style = Style.from_dict({
@@ -327,6 +331,10 @@ class SpoonAICLI:
         action_name = input_list[0]
         action_args = input_list[1:] if len(input_list) > 1 else []
         
+        if action_name == "list_mcp_tools":
+            print(await self.current_agent.list_mcp_tools())
+            return
+
         if action_name == "chat":
             try:
                 if action_args:

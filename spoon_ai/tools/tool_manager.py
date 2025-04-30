@@ -114,6 +114,3 @@ class ToolManager:
         for match in results["matches"][:top_k]:
             result_tool_names.append(match["id"])
         return result_tool_names
-        
-        
-            
