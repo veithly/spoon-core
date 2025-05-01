@@ -18,6 +18,8 @@ class Aggregator:
         if not self.rpc_url:
             raise ValueError("rpc_url is required")
         self.scan_url = scan_url
+        if not chain_id:
+            chain_id = 1
         self.chain_id = chain_id
         for i in range(3):
             try:
