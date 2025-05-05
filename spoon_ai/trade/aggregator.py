@@ -25,7 +25,7 @@ class Aggregator:
         for i in range(3):
             try:
                 logger.info(f"Attempt {i+1}/3: Connecting to RPC...")
-                self._web3 = Web3(HTTPProvider(self.rpc_url, request_kwargs={'timeout': 30}))
+                self._web3 = Web3(HTTPProvider(self.rpc_url))
                 self._web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
                 
                 try:
