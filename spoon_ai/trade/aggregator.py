@@ -21,35 +21,20 @@ class Aggregator:
         if not chain_id:
             chain_id = 1
         self.chain_id = chain_id
-        logger.info(f"Initializing Aggregator with RPC URL: {self.rpc_url}, Chain ID: {self.chain_id}")
         for i in range(3):
             try:
-                logger.info(f"Attempt {i+1}/3: Connecting to RPC...")
-                self._web3 = Web3(HTTPProvider(self.rpc_url))
+                self._web3 = Web3(Web3.HTTPProvider(self.rpc_url))
                 self._web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-                
-                try:
-                    block_number = self._web3.eth.block_number
-                    logger.info(f"Successfully got block number: {block_number}")
-                except Exception as e:
-                    logger.error(f"Failed to get block number: {str(e)}")
-                    raise Exception(f"RPC call failed: {str(e)}")
-                
                 if not self._web3.is_connected():
-                    logger.error("Web3 connection check failed")
                     raise Exception("Failed to connect to RPC")
-                
                 chain_id = self._web3.eth.chain_id
                 if str(chain_id) != str(self.chain_id):
                     raise Exception(f"Chain ID mismatch: {chain_id} != {self.chain_id}")
-                logger.info("RPC connection successful")
                 return
             except Exception as e:
-                logger.error(f"Failed to connect to {self.network} RPC: {str(e)}")
+                logger.error(f"Failed to connect to {self.network} RPC: {e}")
                 if i == 2:
-                    logger.error("All connection attempts failed")
                     raise e
-                logger.info("Retrying in 1 second...")
                 time.sleep(1)
 
     def _get_explorer_link(self, tx_hash: str) -> str:
