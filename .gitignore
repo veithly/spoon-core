@@ -11,3 +11,4 @@ spoon_ai_sdk.egg-info/*
 .tox
 
 uv.lock
+.idea/
