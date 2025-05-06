@@ -14,12 +14,11 @@ from pydantic import BaseModel, Field
 from spoon_ai.chat import ChatBot, Memory
 from spoon_ai.schema import AgentState, ToolCall
 
+logger = logging.getLogger(__name__)
 DEBUG = False
 def debug_log(message):
     if DEBUG:
         logger.info(f"DEBUG: {message}\n")
-
-logger = logging.getLogger(__name__)
 
 class BaseAgent(BaseModel, ABC):
     """

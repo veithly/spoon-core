@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from typing import Dict, Any, List, Optional, Union
+import os
 
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
@@ -118,7 +119,11 @@ class UniswapPriceProvider(PriceDataProvider):
     """Uniswap price data provider"""
     
     def __init__(self, rpc_url: Optional[str] = None):
-        self.rpc_url = rpc_url or "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY_HERE"
+        if not rpc_url:
+            rpc_url = os.getenv("RPC_URL")
+        if not rpc_url:
+            raise ValueError("rpc_url is required")
+        self.rpc_url = rpc_url
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         self.factory = self.w3.eth.contract(

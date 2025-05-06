@@ -15,18 +15,56 @@ from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
-from spoon_ai.agents import SpoonChatAI, SpoonReactAI
+from spoon_ai.agents import SpoonChatAI, SpoonReactAI, SpoonReactMCP
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
 from spoon_ai.utils.config_manager import ConfigManager
 
+# Create a log filter to filter out log messages containing specific keywords
+class KeywordFilter(logging.Filter):
+    def __init__(self, keywords):
+        super().__init__()
+        self.keywords = keywords
+        
+    def filter(self, record):
+        # If the log message contains any keywords, don't display this message
+        if record.getMessage():
+            for keyword in self.keywords:
+                if keyword.lower() in record.getMessage().lower():
+                    return False
+        return True
+
+# Set up basic logging configuration
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
+
+# Add keyword filter
+keyword_filter = KeywordFilter([
+    "telemetry", 
+    "anonymized", 
+    "n_results", 
+    "updating n_results",
+    "number of requested results",
+    "elements in index"
+])
+logger.addFilter(keyword_filter)
+
+# Also apply filter to root logger
+root_logger = logging.getLogger()
+root_logger.addFilter(keyword_filter)
+
+# Disable logs from third-party libraries by setting them to ERROR level or higher
 logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("requests").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("chromadb").setLevel(logging.ERROR) 
+logging.getLogger("chroma").setLevel(logging.ERROR)
+logging.getLogger("langchain").setLevel(logging.ERROR)
+logging.getLogger("anthropic").setLevel(logging.ERROR)
+logging.getLogger("google").setLevel(logging.ERROR)
+logging.getLogger("fastmcp").setLevel(logging.ERROR)
 from spoon_ai.schema import AgentState
 from spoon_ai.social_media.telegram import TelegramClient
 
@@ -226,6 +264,10 @@ class SpoonAICLI:
             self.agents[name] = SpoonReactAI()
             self.current_agent = self.agents[name]
             logger.info(f"Loaded agent: {self.current_agent.name}")
+        elif name == "spoon_react_mcp":
+            self.agents[name] = SpoonReactMCP()
+            self.current_agent = self.agents[name]
+            logger.info(f"Loaded agent: {self.current_agent.name}")
         else:
             logger.error(f"Agent {name} not found")
     
@@ -236,8 +278,10 @@ class SpoonAICLI:
 
     def _load_default_agent(self):
         
-        self._load_agent("react")
+        
         self._load_agent("default")
+        # self._load_agent("spoon_react_mcp")
+        self._load_agent("react")
     
     def _set_prompt_toolkit(self):
         self.style = Style.from_dict({
@@ -288,11 +332,22 @@ class SpoonAICLI:
         action_name = input_list[0]
         action_args = input_list[1:] if len(input_list) > 1 else []
         
+        if action_name == "list_mcp_tools":
+            print(await self.current_agent.list_mcp_tools())
+            return
+
         if action_name == "chat":
             try:
                 if action_args:
                     # If arguments provided, use the old behavior
-                    res = self.current_agent.perform_action(action_name, action_args)
+                    # Check if current agent is SpoonReactAI
+                    from spoon_ai.agents.spoon_react import SpoonReactAI
+                    if isinstance(self.current_agent, SpoonReactAI):
+                        # For SpoonReactAI agents, use run method
+                        res = await self.current_agent.run(action_args[0])
+                    else:
+                        # For other agents (like SpoonChatAI), use _generate_response
+                        res = self.current_agent.perform_action(action_name, action_args)
                     logger.info(res)
                 else:
                     # Start interactive chat mode
@@ -390,6 +445,10 @@ class SpoonAICLI:
                     print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {entry['content']}"), style=chat_style)
             logger.info("\n" + "-"*50 + "\n")
         
+        # Check if current agent is SpoonReactAI
+        from spoon_ai.agents.spoon_react import SpoonReactAI
+        is_react_agent = isinstance(self.current_agent, SpoonReactAI)
+        
         # Start chat loop
         try:
             while True:
@@ -441,24 +500,31 @@ class SpoonAICLI:
                             # Stream the response
                             cli_debug_log("Starting to stream response")
                             try:
-                                async for chunk in self.current_agent.astream_chat_response(user_message):
-                                    if chunk:
-                                        chunk_count += 1
-                                        cli_debug_log(f"Received chunk #{chunk_count}: {chunk[:20]}...")
-                                        
-                                        # Check if first chunk starts with agent name and remove it
-                                        if chunk_count == 1:
-                                            # Check for exact match
-                                            if chunk.startswith(agent_name_prefix):
-                                                chunk = chunk[len(agent_name_prefix):]
-                                                cli_debug_log(f"Removed agent name prefix from chunk")
-                                            # Check for case-insensitive match
-                                            elif chunk.lower().startswith(agent_name_prefix_lower):
-                                                chunk = chunk[len(agent_name_prefix):]
-                                                cli_debug_log(f"Removed case-insensitive agent name prefix from chunk")
-                                        
-                                        full_response += chunk
-                                        print(chunk, end="", flush=True)
+                                if hasattr(self.current_agent, 'astream_chat_response'):
+                                    async for chunk in self.current_agent.astream_chat_response(user_message):
+                                        if chunk:
+                                            chunk_count += 1
+                                            cli_debug_log(f"Received chunk #{chunk_count}: {chunk[:20]}...")
+                                            
+                                            # Check if first chunk starts with agent name and remove it
+                                            if chunk_count == 1:
+                                                # Check for exact match
+                                                if chunk.startswith(agent_name_prefix):
+                                                    chunk = chunk[len(agent_name_prefix):]
+                                                    cli_debug_log(f"Removed agent name prefix from chunk")
+                                                # Check for case-insensitive match
+                                                elif chunk.lower().startswith(agent_name_prefix_lower):
+                                                    chunk = chunk[len(agent_name_prefix):]
+                                                    cli_debug_log(f"Removed case-insensitive agent name prefix from chunk")
+                                            
+                                            full_response += chunk
+                                            print(chunk, end="", flush=True)
+                                else:
+                                    # For SpoonReactAI which doesn't have astream_chat_response
+                                    if is_react_agent:
+                                        full_response = await self.current_agent.run(user_message)
+                                        print(full_response)
+                                        chunk_count = 1
                                 
                                 cli_debug_log(f"Finished streaming, received {chunk_count} chunks")
                                 
@@ -471,7 +537,10 @@ class SpoonAICLI:
                                 if not full_response:
                                     cli_debug_log("No response received, using non-streaming")
                                     print("Using non-streaming response...")
-                                    full_response = self.current_agent._generate_response(user_message)
+                                    if is_react_agent:
+                                        full_response = await self.current_agent.run(user_message)
+                                    else:
+                                        full_response = self.current_agent._generate_response(user_message)
                                     print(full_response)
                             
                             return full_response
@@ -498,7 +567,10 @@ class SpoonAICLI:
                             # Fallback if streaming returned empty
                             cli_debug_log("Streaming returned empty response, falling back to non-streaming")
                             logger.info("Streaming returned empty response, falling back to non-streaming...")
-                            response = self.current_agent._generate_response(user_message)
+                            if is_react_agent:
+                                response = await self.current_agent.run(user_message)
+                            else:
+                                response = self.current_agent._generate_response(user_message)
                             cli_debug_log(f"Got non-streaming response of length {len(response)}")
                             
                             # Check if response starts with agent name and remove it
@@ -526,7 +598,10 @@ class SpoonAICLI:
                         # Fallback to non-streaming if streaming not available or failed
                         cli_debug_log(f"Streaming failed with error: {e}")
                         logger.info(f"Streaming failed: {e}. Using non-streaming response...")
-                        response = self.current_agent._generate_response(user_message)
+                        if is_react_agent:
+                            response = await self.current_agent.run(user_message)
+                        else:
+                            response = self.current_agent._generate_response(user_message)
                         cli_debug_log(f"Got non-streaming response of length {len(response)}")
                         
                         # Check if response starts with agent name and remove it

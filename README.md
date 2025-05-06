@@ -35,21 +35,52 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 
 ### Prerequisites
 
-- Python 3.12+
-- pip package manager
+- Python 3.10+
+- pip package manager (or uv as a faster alternative)
+
+### Create a Virtual Environment
+
+It is recommended to install and use SpoonOS in a virtual environment to avoid dependency conflicts.
+
+```bash
+# Create a virtual environment
+python -m venv spoon-env
+
+# Activate the virtual environment on Linux/macOS
+source spoon-env/bin/activate
+
+# Activate the virtual environment on Windows
+# spoon-env\Scripts\activate
+```
 
 ### Install from Source
+
+#### Option 1: Using pip (standard)
 
 ```bash
 # Clone the repository
 git clone git@github.com:XSpoonAi/spoon-core.git
-cd SpoonAI
+cd spoon-core
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Install in development mode (optional)
 pip install -e .
+```
+
+#### Option 2: Using uv (faster alternative)
+
+```bash
+# Clone the repository
+git clone git@github.com:XSpoonAi/spoon-core.git
+cd spoon-core
+
+# Install dependencies with uv
+uv pip install -r requirements.txt
+
+# Install in development mode (optional)
+uv pip install -e .
 ```
 
 ### Install via pip (Coming Soon)
@@ -362,6 +393,28 @@ async def main():
         sender_id="user",
         topic="test_topic"
     )
+```
+
+### 🔌 Running MCP Server and Client
+
+To use MCP with all available tools (optional), you need to run both the MCP server and client:
+
+#### Starting the MCP Server
+
+```bash
+# Start the MCP server with all available tools
+python spoon_ai/tools/mcp_tools_collcetion.py
+```
+
+#### Starting the MCP Client in CLI
+
+```bash
+# Launch the CLI
+python main.py
+
+# Load the MCP-enabled agent
+> load-agent spoon_react_mcp
+spoon_react_mcp agent loaded
 ```
 
 For comprehensive documentation and examples, see the [MCP README](spoon_ai/mcp/README.md).
