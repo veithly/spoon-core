@@ -50,7 +50,7 @@ class SpoonChatAI(RetrievalMixin):
         
         # Set up config directory for retrieval
         self.config_dir = Path.home() / ".config" / "spoonai"
-        self.config_dir.mkdir(exist_ok=True)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         # retrieval_client will be initialized by RetrievalMixin when needed
         
         # Initialize native SDK client

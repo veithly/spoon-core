@@ -93,7 +93,7 @@ class SpoonAICLI:
         self.agents = {}
         self.current_agent = None
         self.config_dir = Path.home() / ".config" / "spoonai"
-        self.config_dir.mkdir(exist_ok=True)
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         self.commands: Dict[str, SpoonCommand] = {}
         self.config_manager = ConfigManager()
         self.aggregator = Aggregator(rpc_url=os.getenv("RPC_URL"), chain_id=int(os.getenv("CHAIN_ID", 1)), scan_url=os.getenv("SCAN_URL", "https://etherscan.io"))
@@ -280,6 +280,7 @@ class SpoonAICLI:
         
         
         self._load_agent("default")
+
         # self._load_agent("spoon_react_mcp")
         self._load_agent("react")
     

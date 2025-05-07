@@ -4,8 +4,8 @@ import time
 from typing import Dict, Any, List, Optional, Union
 import os
 
-from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3 import Web3, HTTPProvider
+from web3.middleware import ExtraDataToPOAMiddleware
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
@@ -124,8 +124,9 @@ class UniswapPriceProvider(PriceDataProvider):
         if not rpc_url:
             raise ValueError("rpc_url is required")
         self.rpc_url = rpc_url
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        self.w3 = Web3(HTTPProvider(self.rpc_url))
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
         self.factory = self.w3.eth.contract(
             address=self.w3.to_checksum_address("0x1F98431c8aD98523631AE4a59f267346ea31F984"), 
             abi=UNISWAP_FACTORY_ABI
