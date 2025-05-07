@@ -342,27 +342,27 @@ Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
-## 📡 MCP (Message Connectivity Protocol)
+## 📡 MCP+ (Model Context Protocol plus)
 
 <div align="center">
   <h3>🌐 Connect • Orchestrate • Scale 🌐</h3>
-  <p><strong>The neural network of SpoonOS - enabling intelligent agent communication</strong></p>
+  <p><strong>Capture data availability and scalability of SpoonOS</strong></p>
 </div>
 
-MCP is a powerful messaging system that serves as the backbone for agent communication in SpoonOS. It transforms isolated agents into a collaborative, intelligent network.
+MCP+ is SpoonOS’s capability extension of the original MCP. It places a stronger focus on integrating MCP servers with enhanced data availability and scalability, and is deeply integrated with existing components like NeoFS and BeVec (SpoonOS’s vector database solution). This allows developers to access data and invoke tools more easily and efficiently.
 
 ### ✨ Key Features
 
-- **🔄 Agent-to-Agent Communication** - Create networks of specialized agents that collaborate seamlessly
-- **⚡ Streaming Responses** - Real-time streaming output from language models
-- **📈 Horizontal Scaling** - Distribute agents across multiple processes or machines
-- **📡 Pub/Sub Messaging** - Flexible topic-based publish-subscribe pattern
+- **🫎 Unified Data Access Layer** - Abstracts diverse data sources into a standardized interface for AI agents
+- **⚡️ Streaming Responses** - Real-time streaming output from language models
+- **📈 Modular Integration** - Enables dynamic loading of external APIs, on-chain data, or local resources
+- **📡 Access Control & Permissioning** - Supports granular permissions and scoped data/task access
 
 <div align="center">
   <pre>
-  User → [Coordinator] → [Researcher] → [Writer] → Final Response
+  User → [Reasoning] → [Planning] → [Reflecting] → Final Response
              ↓               ↑
-        [Calculator] ←→ [Data Analyst]
+        [Data Analyst] ←→ [MCP Servers]
   </pre>
 </div>
 
