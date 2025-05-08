@@ -1,10 +1,10 @@
-# 🚀 SpoonAI MCP Tools Collection
+# 🚀 SpoonOS MCP+ Tools Collection
 
-Transform your SpoonAI tools into powerful MCP-compatible services that seamlessly integrate with Claude Desktop and other AI assistants!
+Transform your SpoonOS tools into powerful MCP-compatible services that seamlessly integrate with Claude Desktop and other AI assistants!
 
 ## ✨ What is MCP?
 
-The Model Context Protocol (MCP) enables AI models to interact with external tools and services. By wrapping your SpoonAI tools in an MCP interface, you can:
+The Model Context Protocol (MCP) enables AI models to interact with external tools and services. By wrapping your SpoonOS tools in an MCP interface, you can:
 
 - Allow Claude and other AI assistants to directly use your financial tools
 - Create powerful AI workflows with real-time market data

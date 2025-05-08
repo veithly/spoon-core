@@ -6,8 +6,8 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 from decimal import Decimal
 
 import requests
-from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3 import Web3, HTTPProvider
+from web3.middleware import ExtraDataToPOAMiddleware
 from pydantic import Field, validator
 
 from spoon_ai.tools.base import BaseTool, ToolResult
@@ -82,8 +82,8 @@ class UniswapAlertProvider(PriceAlertProvider):
     
     def __init__(self, rpc_url: Optional[str] = None):
         self.rpc_url = rpc_url or "https://eth-mainnet.g.alchemy.com/v2/demo"
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        self.w3 = Web3(HTTPProvider(self.rpc_url))
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.price_provider = UniswapPriceProvider(rpc_url=self.rpc_url)
         self.position_manager = self.w3.eth.contract(
             address=self.w3.to_checksum_address(UNISWAP_POSITION_MANAGER),
