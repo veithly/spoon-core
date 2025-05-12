@@ -1,12 +1,12 @@
 from fastmcp import FastMCP
 from spoon_ai.tools.gopluslabs.cache import time_cache
-from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client
+from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client_v1
 
 mcp = FastMCP("SupportedChains")
 
 @time_cache()
 async def get_supported_chains_inner():
-    r = await go_plus_labs_client.get('/supported_chains')
+    r = await go_plus_labs_client_v1.get('/supported_chains')
     r = r.json()
     """
     r_example = {

@@ -3,7 +3,8 @@ from fastmcp import FastMCP
 from spoon_ai.tools.gopluslabs.cache import time_cache
 import string
 from spoon_ai.tools.gopluslabs.supported_chains import chain_name_to_id
-from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client
+from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client_v1
+from spoon_ai.tools.gopluslabs.utils import normalize_ethereum_contract_address
 
 mcp = FastMCP("TokenSecurity")
 
@@ -38,18 +39,12 @@ async def check_malicious_address(contract_address: str, chain_name: str = '') -
     "stealing_attack": "string"
     }
     """
-    if not contract_address.startswith('0x'):
-        contract_address = '0x' + contract_address
-    if len(contract_address) != 42:
-        raise ValueError(f'Invalid contract address {contract_address}. Length is not 42.')
-    for c in contract_address[2:]:
-        if not c in string.hexdigits:
-            raise ValueError(f'Invalid contract address {contract_address}. Non hexadecimal char {c}.')
+    contract_address = normalize_ethereum_contract_address(contract_address)
     chain_id = await chain_name_to_id(chain_name) if chain_name else ''
     if chain_id:
-        r = await go_plus_labs_client.get(f'/address_security/{contract_address}?chain_id={chain_id}')
+        r = await go_plus_labs_client_v1.get(f'/address_security/{contract_address}?chain_id={chain_id}')
     else:
-        r = await go_plus_labs_client.get(f'/address_security/{contract_address}')
+        r = await go_plus_labs_client_v1.get(f'/address_security/{contract_address}')
     r = r.json()
     r = r["result"]
     return r

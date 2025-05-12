@@ -1,9 +1,11 @@
 # from typing import Any
+import re
 from fastmcp import FastMCP
 from spoon_ai.tools.gopluslabs.cache import time_cache
 import string
 from spoon_ai.tools.gopluslabs.supported_chains import chain_name_to_id
-from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client
+from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client_v1
+from spoon_ai.tools.gopluslabs.utils import normalize_ethereum_contract_address
 
 mcp = FastMCP("TokenSecurity")
 
@@ -110,15 +112,9 @@ async def get_token_risk_and_security_data(chain_name: str, contract_address: st
       "trust_list": "string"
     }
     """
-    if not contract_address.startswith('0x'):
-        contract_address = '0x' + contract_address
-    if len(contract_address) != 42:
-        raise ValueError(f'Invalid contract address {contract_address}. Length is not 42.')
-    for c in contract_address[2:]:
-        if not c in string.hexdigits:
-            raise ValueError(f'Invalid contract address {contract_address}. Non hexadecimal char {c}.')
+    contract_address = normalize_ethereum_contract_address(contract_address)
     chain_id = await chain_name_to_id(chain_name)
-    r = await go_plus_labs_client.get(f'/token_security/{chain_id}?contract_addresses={contract_address}')
+    r = await go_plus_labs_client_v1.get(f'/token_security/{chain_id}?contract_addresses={contract_address}')
     r = r.json()
     r = r["result"]
     # for d in r:
@@ -131,3 +127,168 @@ async def get_token_risk_and_security_data(chain_name: str, contract_address: st
     #                 d[v] = True
     return r
 
+@mcp.tool()
+@time_cache()
+async def get_token_security_for_solana(contract_address: str):
+    """
+    Get token security info for Solana blockchain. The contract address should be a Solana address like HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3
+    {
+        "additionalProp": {
+          "balance_mutable_authority": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "closable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "creator": [
+            {
+              "address": "string",
+              "malicious_address": 0
+            }
+          ],
+          "default_account_state": "string",
+          "default_account_state_upgradable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "dex": [
+            {
+              "day": {
+                "price_max": "string",
+                "price_min": "string",
+                "volume": "string"
+              },
+              "dex_name": "string",
+              "fee_rate": "string",
+              "id": "string",
+              "lp_amount": "string",
+              "month": {
+                "price_max": "string",
+                "price_min": "string",
+                "volume": "string"
+              },
+              "open_time": "string",
+              "price": "string",
+              "tvl": "string",
+              "type": "string",
+              "week": {
+                "price_max": "string",
+                "price_min": "string",
+                "volume": "string"
+              }
+            }
+          ],
+          "freezable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "holders": [
+            {
+              "balance": "string",
+              "percent": "string",
+              "tag": "string",
+              "token_account": "string"
+            }
+          ],
+          "lp_holders": [
+            {
+              "balance": "string",
+              "percent": "string",
+              "tag": "string",
+              "token_account": "string"
+            }
+          ],
+          "metadata": {
+            "description": "string",
+            "name": "string",
+            "symbol": "string",
+            "uri": "string"
+          },
+          "metadata_mutable": {
+            "metadata_upgrade_authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "mintable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "none_transferable": "string",
+          "transfer_fee": {
+            "current_fee_rate": {
+              "fee_rate": "string",
+              "maximum_fee": "string"
+            },
+            "scheduled_fee_rate": [
+              {
+                "epoch": "string",
+                "fee_rate": "string",
+                "maximum_fee": "string"
+              }
+            ]
+          },
+          "transfer_fee_upgradable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "transfer_hook": [
+            {
+              "address": "string",
+              "malicious_address": 0
+            }
+          ],
+          "transfer_hook_upgradable": {
+            "authority": [
+              {
+                "address": "string",
+                "malicious_address": 0
+              }
+            ],
+            "status": "string"
+          },
+          "trusted_token": "string"
+        }
+    }
+    """
+    if not re.fullmatch(r"^[1-9A-HJ-NP-Za-km-z]{44}$", contract_address):
+        raise ValueError(f"Invalid Solana address {contract_address}")
+    r = await go_plus_labs_client_v1.get(f'/solana/token_security?contract_addresses={contract_address}')
+    r = r.json()
+    r = r["result"]
+    return r
