@@ -1,3 +1,4 @@
+import asyncio
 from fastmcp import FastMCP
 from spoon_ai.tools.gopluslabs.cache import time_cache
 from spoon_ai.tools.gopluslabs.http_client import go_plus_labs_client_v1
@@ -29,6 +30,10 @@ async def supported_chains() -> list[str]:
     r = await get_supported_chains_inner()
     names = [c["name"] for c in r["result"]]  # ["Ethereum", "BSC", ...]
     return names
+
+def test_supported_chains():
+    names = asyncio.run(supported_chains())
+    assert 'Ethereum' in names
 
 async def chain_name_to_id(name: str) -> str:
     r = await get_supported_chains_inner()
