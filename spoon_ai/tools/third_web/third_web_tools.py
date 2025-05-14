@@ -302,7 +302,7 @@ class GetWalletTransactionsFromThirdwebInsight(BaseTool):
 
 async def test_get_contract_events():
     client_id = os.getenv("THIRDWEB_CLIENT_ID")
-    chain_id = 1  # 例如 Ethereum Mainnet
+    chain_id = 1
     contract_address = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
     event_signature = "Transfer(address,address,uint256)"
 
@@ -344,7 +344,6 @@ async def test_get_contract_transactions_by_signature():
 
 if __name__ == '__main__':
     import asyncio
-
 
     async def run_all_tests():
         await test_get_contract_events()
