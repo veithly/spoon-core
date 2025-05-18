@@ -331,13 +331,13 @@ async def test_get_transactions():
 
 async def test_get_contract_transactions():
     tool = GetContractTransactionsTool()
-    result = await tool.execute(contract_address="0xYourContractAddress", chain=1, limit=5)
+    result = await tool.execute(contract_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", chain=1, limit=5)
     print("🧪 Get Contract Transactions Result:\n", result)
 
 
 async def test_get_contract_transactions_by_signature():
     tool = GetContractTransactionsBySignatureTool()
-    result = await tool.execute(contract_address="0xYourContractAddress", signature="transfer(address,uint256)",
+    result = await tool.execute(contract_address="0xA8D1eE203cbf39Dd0345398A6F75E7586e0Dd115", signature="transfer(address,uint256)",
                                 chain=1, limit=5)
     print("🧪 Get Contract Transactions by Signature Result:\n", result)
 
@@ -346,11 +346,11 @@ if __name__ == '__main__':
     import asyncio
 
     async def run_all_tests():
-        await test_get_contract_events()
-        await test_get_multichain_transfers()
-        await test_get_transactions()
+        # await test_get_contract_events()
+        # await test_get_multichain_transfers()
+        # await test_get_transactions()
         await test_get_contract_transactions()
-        await test_get_contract_transactions_by_signature()
+        # await test_get_contract_transactions_by_signature()
 
 
     asyncio.run(run_all_tests())
