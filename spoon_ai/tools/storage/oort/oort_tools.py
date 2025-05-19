@@ -1,6 +1,4 @@
 import asyncio
-import os
-from botocore.exceptions import ClientError
 
 from spoon_ai.tools.storage.base_storge_tool import S3Tool
 
