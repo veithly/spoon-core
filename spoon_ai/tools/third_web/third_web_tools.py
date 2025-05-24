@@ -16,28 +16,37 @@ class GetContractEventsFromThirdwebInsight(BaseTool):
             "chain_id": {"type": "integer"},
             "contract_address": {"type": "string"},
             "event_signature": {"type": "string"},
-            "limit": {"type": "integer", "default": 10}
+            "limit": {"type": "integer", "default": 10},
+            "page": {"type": "integer", "default": 0}
         },
         "required": ["client_id", "chain_id", "contract_address", "event_signature"]
     }
 
     async def execute(
-            self,
-            client_id: str,
-            chain_id: int,
-            contract_address: str,
-            event_signature: str,
-            limit: int = 10
+        self,
+        client_id: str,
+        chain_id: int,
+        contract_address: str,
+        event_signature: str,
+        limit: int = 10,
+        page: int = 0
     ) -> str:
         try:
             base_url = f"https://{chain_id}.insight.thirdweb.com/v1"
             url = f"{base_url}/events/{contract_address}/{event_signature}"
             headers = {"x-client-id": client_id}
-            params = {"limit": limit}
-            res = requests.get(url, headers=headers, params=params)
+            params = {
+                "limit": limit,
+                "page": page,
+                "decode": "true"
+            }
+            res = requests.get(url, headers=headers, params=params, timeout=10)
             res.raise_for_status()
             data = res.json()
-            return f"✅ Success. Found {len(data)} events.\n{data}"
+            events = data.get("data", [])
+            meta = data.get("meta", {})
+            return (f"✅ Success. Page {meta.get('page', 0)} of {meta.get('total_pages', 0)}. Found {len(events)}"
+                    f" events.\n{data}")
         except Exception as e:
             return f"❌ Failed to fetch events: {e}"
 
@@ -346,10 +355,10 @@ if __name__ == '__main__':
     import asyncio
 
     async def run_all_tests():
-        # await test_get_contract_events()
+        await test_get_contract_events()
         # await test_get_multichain_transfers()
         # await test_get_transactions()
-        await test_get_contract_transactions()
+        # await test_get_contract_transactions()
         # await test_get_contract_transactions_by_signature()
 
 
