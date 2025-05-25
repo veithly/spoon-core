@@ -55,7 +55,7 @@ class BaseAgent(BaseModel, ABC):
             self.memory.add_message(Message(role=Role.USER, content=content))
         elif role == "assistant":
             if tool_calls:
-                self.memory.add_message(Message(role=Role.ASSISTANT, content=content, tool_calls=[{"id": toolcall.id, "type": "function", "function": toolcall.function} for toolcall in tool_calls]))
+                self.memory.add_message(Message(role=Role.ASSISTANT, content=content, tool_calls=[{"id": toolcall.id, "type": "function", "function": toolcall.function.model_dump() if isinstance(toolcall.function, BaseModel) else toolcall.function} for toolcall in tool_calls]))
             else:
                 self.memory.add_message(Message(role=Role.ASSISTANT, content=content))
         elif role == "tool":

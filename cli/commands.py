@@ -15,7 +15,7 @@ from prompt_toolkit.formatted_text import HTML as PromptHTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
-from spoon_ai.agents import SpoonChatAI, SpoonReactAI, SpoonReactMCP
+from spoon_ai.agents import SpoonReactAI, SpoonReactMCP
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
@@ -256,11 +256,7 @@ class SpoonAICLI:
         self._load_agent(name)
     
     def  _load_agent(self, name: str):
-        if name == "default":
-            self.agents[name] = SpoonChatAI(name)
-            self.current_agent = self.agents[name]
-            logger.info(f"Loaded agent: {self.current_agent.name}")
-        elif name == "react":
+        if name == "react":
             self.agents[name] = SpoonReactAI()
             self.current_agent = self.agents[name]
             logger.info(f"Loaded agent: {self.current_agent.name}")
@@ -277,10 +273,6 @@ class SpoonAICLI:
             logger.info(f"  {agent.name}: {agent.description}")
 
     def _load_default_agent(self):
-        
-        
-        self._load_agent("default")
-
         # self._load_agent("spoon_react_mcp")
         self._load_agent("react")
     
@@ -347,7 +339,7 @@ class SpoonAICLI:
                         # For SpoonReactAI agents, use run method
                         res = await self.current_agent.run(action_args[0])
                     else:
-                        # For other agents (like SpoonChatAI), use _generate_response
+                        # For other agents, use perform_action method
                         res = self.current_agent.perform_action(action_name, action_args)
                     logger.info(res)
                 else:
@@ -765,7 +757,6 @@ class SpoonAICLI:
             logger.error("No agent loaded")
             return
             
-        self.current_agent.clear_chat_history()
         logger.info(f"Started new chat with {self.current_agent.name}")
     
     def _handle_list_chats(self, input_list: List[str]):

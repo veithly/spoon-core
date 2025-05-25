@@ -108,6 +108,9 @@ yarl>=1.18.3
     # via aiohttp
 prompt_toolkit>=3.0.51
 
+# Force websockets version to satisfy fastmcp requirements
+websockets==15.0.1
+
 termcolor>=3.0.1
 pinecone>=6.0.2
 google>=3.0.0
@@ -116,7 +119,8 @@ protobuf>=3.19.5
 google-api-core>=2.24.2
 grpcio>=1.71.0
 web3==7.11.0
-solana>=0.36.6
+# solana==0.35.1  # Conflicts with fastmcp websockets requirement
+# solathon>=1.0.0  # Alternative Solana SDK with more flexible dependencies
 nest_asyncio>=1.6.0
 python-telegram-bot>=22.0
 anthropic>=0.42.0

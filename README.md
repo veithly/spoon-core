@@ -25,7 +25,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
 - **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
 - **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
-- **📡 Scalable Data Access** - Supports structured and unstructured data via MCP+
+- **📡 Scalable Data Access** - Supports structured and unstructured data via MCP integration
 - **💻 Interactive CLI** - Feature-rich command line interface
 - **🔄 State Management** - Comprehensive session history and state persistence
 - **🔗Composable Agent Logic** - Create agents that can sense, reason, plan, and execute modularly — enabling use cases across DeFi, creator economy, and more
@@ -35,7 +35,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.9+
 - pip package manager (or uv as a faster alternative)
 
 ### Create a Virtual Environment
@@ -86,57 +86,253 @@ uv pip install -e .
 ### Install via pip (Coming Soon)
 
 ```bash
-pip install spoon-ai
+pip install spoon-ai-sdk
 ```
 
-## 🔑 API Key Configuration
+## 🔑 Environment Variables & API Key Configuration
 
-SDCF supports various API services that require different API keys. Here are the configuration methods for the main API keys:
+SCDF supports various API services and requires proper configuration of environment variables and API keys. This section provides comprehensive guidance on setting up your environment.
 
-### Configuration Methods
+### 📋 Environment Variables Reference
 
-1. **Via CLI Command**:
+| Variable Name | Description | Required | How to Obtain |
+|---------------|-------------|----------|---------------|
+| `OPENAI_API_KEY` | OpenAI API key for GPT models | Optional* | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | Optional* | [Anthropic Console](https://console.anthropic.com/keys) |
+| `DEEPSEEK_API_KEY` | DeepSeek API key for DeepSeek models | Optional* | [DeepSeek Platform](https://platform.deepseek.com/) |
+| `PRIVATE_KEY` | Blockchain wallet private key | Optional** | Export from your wallet (MetaMask, etc.) |
+| `DATABASE_URL` | Database connection URL | Optional | Your database provider |
+| `REDIS_HOST` | Redis server host | Optional | Redis configuration |
+| `REDIS_PORT` | Redis server port | Optional | Redis configuration |
+| `REDIS_PASSWORD` | Redis server password | Optional | Redis configuration |
+| `GITHUB_TOKEN` | GitHub API token | Optional | [GitHub Settings](https://github.com/settings/tokens) |
+| `GO_PLUS_LABS_APP_KEY` | GoPlus Labs API key | Optional | [GoPlus Labs](https://gopluslabs.io/) |
+| `GO_PLUS_LABS_APP_SECRET` | GoPlus Labs API secret | Optional | [GoPlus Labs](https://gopluslabs.io/) |
+
+*At least one LLM API key is required for the framework to function.
+**Required only for cryptocurrency-related operations.
+
+### 🔧 Configuration Methods
+
+#### Method 1: Environment Variables (Recommended)
+
+**Linux/macOS:**
 ```bash
-> config <key_name> <key_value>
+# Set environment variables in your shell
+export OPENAI_API_KEY="sk-your-openai-api-key-here"
+export ANTHROPIC_API_KEY="sk-ant-your-anthropic-api-key-here"
+export DEEPSEEK_API_KEY="your-deepseek-api-key-here"
+export PRIVATE_KEY="your-wallet-private-key-here"
+
+# Make them persistent by adding to your shell profile
+echo 'export OPENAI_API_KEY="sk-your-openai-api-key-here"' >> ~/.bashrc
+echo 'export ANTHROPIC_API_KEY="sk-ant-your-anthropic-api-key-here"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-2. **Via Environment Variables**:
-Set the corresponding environment variables in your system
+**Windows (PowerShell):**
+```powershell
+# Set environment variables
+$env:OPENAI_API_KEY="sk-your-openai-api-key-here"
+$env:ANTHROPIC_API_KEY="sk-ant-your-anthropic-api-key-here"
+$env:DEEPSEEK_API_KEY="your-deepseek-api-key-here"
+$env:PRIVATE_KEY="your-wallet-private-key-here"
 
-3. **Via Configuration File**:
-Edit the `~/.config/spoonai/config.json` file
+# Make them persistent
+[Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-openai-api-key-here", "User")
+[Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-your-anthropic-api-key-here", "User")
+```
 
-### Common API Keys
+#### Method 2: .env File (Recommended for Development)
 
-| Key Name | Description | How to Obtain |
-|------------|------|---------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT models | [OpenAI Website](https://platform.openai.com/api-keys) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | [Anthropic Website](https://console.anthropic.com/keys) |
-| `DEEPSEEK_API_KEY` | DeepSeek API key | [DeepSeek Website](https://platform.deepseek.com/) |
-| `PRIVATE_KEY` | Blockchain wallet private key for cryptocurrency transactions | Export from your wallet |
-
-### Configuration Examples
+Create a `.env` file in the project root directory. You can use the provided template:
 
 ```bash
-# Configure OpenAI API key
-> config OPENAI_API_KEY sk-your-openai-api-key
-OPENAI_API_KEY updated
+# Copy the example file and edit it
+cp .env.example .env
 
-# Configure Anthropic API key
-> config ANTHROPIC_API_KEY sk-ant-your-anthropic-api-key
-ANTHROPIC_API_KEY updated
+# Edit the .env file with your actual API keys
+nano .env  # or use your preferred editor
+```
+
+Example `.env` file content:
+```bash
+# LLM API Keys (at least one required)
+OPENAI_API_KEY=sk-your-openai-api-key-here
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-api-key-here
+DEEPSEEK_API_KEY=your-deepseek-api-key-here
+
+# Blockchain (optional - only for crypto operations)
+PRIVATE_KEY=your-wallet-private-key-here
+
+# Optional: Database and Redis configuration
+DATABASE_URL=sqlite:///./spoonai.db
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=your-redis-password
+```
+
+**Important:** Ensure your `.env` file has proper permissions:
+```bash
+chmod 600 .env
+```
+
+#### Method 3: CLI Configuration Commands
+
+After starting the CLI, use the `config` command:
+
+```bash
+# Start the CLI
+python main.py
+
+# Configure API keys using the CLI
+> config api_key openai sk-your-openai-api-key-here
+✅ OpenAI API key configured successfully
+
+> config api_key anthropic sk-ant-your-anthropic-api-key-here
+✅ Anthropic API key configured successfully
+
+> config api_key deepseek your-deepseek-api-key-here
+✅ DeepSeek API key configured successfully
 
 # Configure wallet private key
-> config PRIVATE_KEY your-private-key-here
-PRIVATE_KEY updated
+> config PRIVATE_KEY your-wallet-private-key-here
+✅ Private key configured successfully
+
+# View current configuration (keys are masked for security)
+> config
+Current configuration:
+API Keys:
+  openai: sk-12...ab34
+  anthropic: sk-an...xy89
+  deepseek: ****...****
+PRIVATE_KEY: 0x12...ab34
 ```
 
-### Key Security Considerations
+#### Method 4: Configuration File
 
-1. API keys are sensitive; never share them with others or expose them in public
-2. Wallet private keys are especially important; leakage may result in asset loss
-3. It is recommended to store keys using environment variables or configuration files rather than entering them directly in the command line
-4. Regularly change API keys to improve security
+The CLI automatically creates a configuration file at `~/.config/spoonai/config.json`:
+
+```json
+{
+  "api_keys": {
+    "openai": "sk-your-openai-api-key-here",
+    "anthropic": "sk-ant-your-anthropic-api-key-here",
+    "deepseek": "your-deepseek-api-key-here"
+  },
+  "default_agent": "spoon_react"
+}
+```
+
+### 🔍 Verification & Testing
+
+#### Check Environment Variables
+```bash
+# Verify environment variables are set
+echo $OPENAI_API_KEY
+echo $ANTHROPIC_API_KEY
+echo $DEEPSEEK_API_KEY
+
+# Test with a simple Python script
+python -c "import os; print('OpenAI:', 'SET' if os.getenv('OPENAI_API_KEY') else 'NOT SET')"
+```
+
+#### Test API Connectivity
+```bash
+# Start CLI and test
+python main.py
+
+# Load an agent and test
+> load-agent chat
+> Hello, can you respond to test the API connection?
+```
+
+### 🔒 Security Best Practices
+
+#### 🚨 Critical Security Guidelines
+
+1. **Never commit API keys to version control**
+   ```bash
+   # Ensure .env is in .gitignore
+   echo ".env" >> .gitignore
+   ```
+
+2. **Use environment variables in production**
+   - Avoid hardcoding keys in source code
+   - Use secure environment variable management in deployment
+
+3. **Wallet private key security**
+   - **NEVER share your private key with anyone**
+   - Store in secure environment variables only
+   - Consider using hardware wallets for production
+
+4. **API key rotation**
+   - Regularly rotate API keys (monthly recommended)
+   - Monitor API usage for unusual activity
+   - Use API key restrictions when available
+
+#### 🛡️ Additional Security Measures
+
+```bash
+# Set restrictive file permissions for .env
+chmod 600 .env
+
+# Use a dedicated wallet for testing with minimal funds
+# Never use your main wallet's private key
+
+# Monitor API usage regularly
+# Set up billing alerts on API provider dashboards
+```
+
+### 🚀 Quick Setup Guide
+
+For first-time users, follow this step-by-step setup:
+
+1. **Get your API keys:**
+   - Visit [OpenAI Platform](https://platform.openai.com/api-keys) or [Anthropic Console](https://console.anthropic.com/keys)
+   - Create a new API key
+   - Copy the key securely
+
+2. **Set environment variables:**
+   ```bash
+   export ANTHROPIC_API_KEY="your-key-here"
+   # OR
+   export OPENAI_API_KEY="your-key-here"
+   ```
+
+3. **Verify setup:**
+   ```bash
+   python main.py
+   > load-agent chat
+   > Hello! Please confirm you can access the API.
+   ```
+
+4. **Optional: Configure for crypto operations:**
+   ```bash
+   export PRIVATE_KEY="your-wallet-private-key"
+   ```
+
+### ❗ Troubleshooting
+
+#### Common Issues:
+
+**"API key not found" error:**
+```bash
+# Check if environment variable is set
+echo $OPENAI_API_KEY
+
+# If empty, set it:
+export OPENAI_API_KEY="your-key-here"
+```
+
+**"Invalid API key" error:**
+- Verify the key is correct and active
+- Check for extra spaces or characters
+- Ensure the key has proper permissions
+
+**Configuration not persisting:**
+- Add export commands to your shell profile (~/.bashrc, ~/.zshrc)
+- Or use the CLI config command for persistent storage
 
 ## 🚀 Quick Start
 
@@ -151,14 +347,14 @@ After entering the interactive command line interface, you can start using the v
 ### Basic Example
 
 ```python
-from spoon_ai.agents import SpoonChatAI
+from spoon_ai.agents import SpoonReactAI
 from spoon_ai.chat import ChatBot
 
-# Create a chat agent
-chat_agent = SpoonChatAI(llm=ChatBot())
+# Create a ReAct agent
+react_agent = SpoonReactAI(llm=ChatBot())
 
 # Run the agent and get a response
-response = await chat_agent.run("Hello, please introduce yourself")
+response = await react_agent.run("Hello, please introduce yourself")
 print(response)
 ```
 
@@ -181,17 +377,17 @@ print(response)
 ### Chat Assistant
 
 ```python
-from spoon_ai.agents import SpoonChatAI
+from spoon_ai.agents import SpoonReactAI
 from spoon_ai.chat import ChatBot
 
-# Create an advanced chat agent
-chat_agent = SpoonChatAI(
+# Create an advanced ReAct agent
+react_agent = SpoonReactAI(
     llm=ChatBot(model="gpt-4"),  # Use specified model
     system_prompt="You are an AI assistant focused on cryptocurrency, proficient in blockchain technology, DeFi, and NFTs."
 )
 
 # Run the agent
-response = await chat_agent.run("What are the main technical improvements in Ethereum 2.0?")
+response = await react_agent.run("What are the main technical improvements in Ethereum 2.0?")
 print(response)
 ```
 
@@ -201,20 +397,20 @@ print(response)
 from spoon_ai.agents import SpoonReactAI
 from spoon_ai.chat import ChatBot
 from spoon_ai.tools import ToolManager
-from spoon_ai.tools.crypto import TokenInfoTool, SwapTool, TransferTool
+from spoon_ai.tools import GetTokenPriceTool, TokenTransfer, WalletAnalysis
 
 # Create a tool manager and add cryptocurrency-related tools
 tool_manager = ToolManager([
-    TokenInfoTool(),
-    SwapTool(),
-    TransferTool()
+    GetTokenPriceTool(),
+    TokenTransfer(),
+    WalletAnalysis()
 ])
 
 # Create a cryptocurrency trading agent
 crypto_agent = SpoonReactAI(
     llm=ChatBot(model="gpt-4"),
     avaliable_tools=tool_manager,
-    system_prompt="You are a cryptocurrency trading assistant that can help users get token information, exchange tokens, and make transfers."
+    system_prompt="You are a cryptocurrency trading assistant that can help users get token information, transfer tokens, and analyze wallets."
 )
 
 # Run the agent
@@ -342,14 +538,14 @@ Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
-## 📡 MCP+ (Model Context Protocol plus)
+## 📡 MCP (Model Context Protocol) Integration
 
 <div align="center">
   <h3>🌐 Connect • Orchestrate • Scale 🌐</h3>
-  <p><strong>Capture data availability and scalability of SpoonOS</strong></p>
+  <p><strong>Enhanced MCP integration for SpoonOS</strong></p>
 </div>
 
-MCP+ is SpoonOS’s capability extension of the original MCP. It places a stronger focus on integrating MCP servers with enhanced data availability and scalability, and is deeply integrated with existing components like NeoFS and BeVec (SpoonOS’s vector database solution). This allows developers to access data and invoke tools more easily and efficiently.
+SpoonOS integrates with the Model Context Protocol (MCP) to provide enhanced data availability and tool access. This allows developers to access external data sources and invoke tools more easily and efficiently.
 
 ### ✨ Key Features
 
@@ -358,41 +554,20 @@ MCP+ is SpoonOS’s capability extension of the original MCP. It places a strong
 - **📈 Modular Integration** - Enables dynamic loading of external APIs, on-chain data, or local resources
 - **📡 Access Control & Permissioning** - Supports granular permissions and scoped data/task access
 
-<div align="center">
-  <pre>
-  User → [Reasoning] → [Planning] → [Reflecting] → Final Response
-             ↓               ↑
-        [Data Analyst] ←→ [MCP Servers]
-  </pre>
-</div>
-
 ### 🚀 Quick Example
 
 ```python
-from spoon_ai.mcp import MCPConfig, MCPAgentAdapter
-from spoon_ai.agents.custom_agent import CustomAgent
+from spoon_ai.agents import SpoonReactMCP
 
-async def main():
-    # Initialize the adapter
-    adapter = MCPAgentAdapter(config=MCPConfig(server_url="ws://localhost:8765"))
-    await adapter.connect()
-    
-    # Create and start an agent
-    agent_id = await adapter.create_custom_agent(
-        name="test_agent",
-        description="Test agent",
-        system_prompt="You are a helpful assistant."
-    )
-    await adapter.agent_subscribe(agent_id, "test_topic")
-    await adapter.start_agent(agent_id)
-    
-    # Send a message to the agent
-    await adapter.send_message_to_agent(
-        agent_id=agent_id,
-        message="Hello, can you help me?",
-        sender_id="user",
-        topic="test_topic"
-    )
+# Create an MCP-enabled agent
+mcp_agent = SpoonReactMCP(
+    mcp_transport=transport,
+    mcp_topics=["spoon_react", "general"]
+)
+
+# Initialize and run the agent
+await mcp_agent.initialize()
+response = await mcp_agent.run("Hello, can you help me?")
 ```
 
 ### 🔌 Running MCP Server and Client
@@ -417,13 +592,11 @@ python main.py
 spoon_react_mcp agent loaded
 ```
 
-For comprehensive documentation and examples, see the [MCP README](spoon_ai/mcp/README.md).
+For comprehensive documentation and examples, see the [MCP Tools README](spoon_ai/tools/README_MCP_TOOLS.md).
 
 ## 🧩 Agent Framework
 
-SDCF provides a powerful Agent framework that supports two ways of use:
-1. Using predefined Agents - Simple declaration and execution
-2. Custom Agents - Creating your own tools and logic
+SDCF provides a powerful Agent framework for creating custom agents with your own tools and logic.
 
 ### ReAct Intelligent Agent
 
@@ -511,7 +684,6 @@ from spoon_ai.chat import ChatBot
 # Create a tool manager
 tool_manager = ToolManager([
     MyCustomTool(),
-    AnotherTool(),
     # Add more tools...
 ])
 
@@ -536,8 +708,6 @@ from spoon_ai.tools import ToolManager
 # Create multiple tools
 tools = [
     MyCustomTool(),
-    AnotherTool(),
-    ThirdTool(),
     # More tools...
 ]
 
@@ -567,20 +737,20 @@ SpoonAI supports multiple AI service providers, including:
 
 ```python
 from spoon_ai.chat import ChatBot
-from spoon_ai.agents import SpoonChatAI
+from spoon_ai.agents import SpoonReactAI
 
 # Using OpenAI's GPT-4
-openai_agent = SpoonChatAI(
+openai_agent = SpoonReactAI(
     llm=ChatBot(model="gpt-4", provider="openai")
 )
 
 # Using Anthropic's Claude
-claude_agent = SpoonChatAI(
+claude_agent = SpoonReactAI(
     llm=ChatBot(model="claude-3-opus-20240229", provider="anthropic")
 )
 
 # Using DeepSeek
-deepseek_agent = SpoonChatAI(
+deepseek_agent = SpoonReactAI(
     llm=ChatBot(model="deepseek-llm", provider="deepseek")
 )
 ```
@@ -597,23 +767,25 @@ SpoonAI can be applied to various enterprise scenarios:
 
 ## 🔍 Advanced Features
 
-### Tool Chain Orchestration
+### Available Tools
 
-SDCF supports complex tool chain orchestration, allowing the creation of multi-step, multi-tool execution flows:
+SDCF comes with a comprehensive set of built-in tools for various use cases:
 
-```python
-from spoon_ai.tools import ToolChain
-from spoon_ai.tools.crypto import TokenInfoTool, PriceAnalysisTool
+#### Cryptocurrency Tools
+- **GetTokenPriceTool** - Get real-time token prices
+- **Get24hStatsTool** - Get 24-hour trading statistics
+- **GetKlineDataTool** - Get candlestick chart data
+- **PriceThresholdAlertTool** - Set price alerts
+- **TokenTransfer** - Transfer tokens between addresses
+- **WalletAnalysis** - Analyze wallet transactions and holdings
+- **UniswapLiquidity** - Monitor Uniswap liquidity pools
+- **LstArbitrageTool** - Liquid staking token arbitrage opportunities
 
-# Create a tool chain
-tool_chain = ToolChain([
-    (TokenInfoTool(), "Get token information"),
-    (PriceAnalysisTool(), "Analyze price trends")
-])
-
-# Execute the tool chain
-result = await tool_chain.execute("ETH")
-```
+#### Monitoring Tools
+- **PredictPrice** - Price prediction using ML models
+- **TokenHolders** - Analyze token holder distribution
+- **TradingHistory** - Track trading history and patterns
+- **LendingRateMonitorTool** - Monitor DeFi lending rates
 
 ### Event Listening and Callbacks
 

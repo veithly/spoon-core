@@ -16,11 +16,7 @@ class CustomAgent(ToolCallAgent):
     Custom Agent class allowing users to create their own agents and add custom tools
     
     Usage:
-    1. Directly instantiate and run predefined agents:
-       agent = CustomAgent.load_predefined("react")
-       result = await agent.run("Analyze this wallet address")
-       
-    2. Create custom agent and add tools:
+    Create custom agent and add tools:
        agent = CustomAgent(name="my_agent", description="My custom agent")
        agent.add_tool(MyCustomTool())
        result = await agent.run("Use my custom tool")
@@ -53,26 +49,7 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
     output_topic: Optional[str] = None
     mcp_enabled: bool = True
     
-    @classmethod
-    def load_predefined(cls, agent_type: str) -> "CustomAgent":
-        """
-        Load a predefined agent
-        
-        Args:
-            agent_type: agent type, such as "react", "chat", etc.
-            
-        Returns:
-            Predefined agent instance
-        """
-        if agent_type.lower() == "react":
-            from spoon_ai.agents import SpoonReactAI
-            return SpoonReactAI()
-        elif agent_type.lower() == "chat":
-            from spoon_ai.agents import SpoonChatAI
-            return SpoonChatAI("chat")
-        else:
-            raise ValueError(f"Unknown agent type: {agent_type}")
-    
+
     def add_tool(self, tool: BaseTool) -> None:
         """
         Add a tool to the agent

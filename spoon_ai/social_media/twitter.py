@@ -10,7 +10,24 @@ logger = getLogger(__name__)
 
 class TwitterClient:
     def __init__(self):
-        pass
+        self._oauth_session = None
+        self.config = {"timeline_read_count": 10}  # Default configuration
+    
+    def _bearer_oauth(self, r):
+        """Method required by bearer token authentication"""
+        credentials = self._get_credentials()
+        bearer_token = credentials.get('TWITTER_BEARER_TOKEN')
+        if bearer_token:
+            r.headers["Authorization"] = f"Bearer {bearer_token}"
+        return r
+    
+    def _validate_tweet_text(self, text: str, tweet_type: str = "Tweet"):
+        """Validate tweet text length and content"""
+        if not text or not text.strip():
+            raise ValueError(f"{tweet_type} text cannot be empty")
+        
+        if len(text) > 280:
+            raise ValueError(f"{tweet_type} text exceeds 280 character limit")
     
     def _make_request(self, method: str, endpoint: str,use_bearer: bool = False, stream: bool = False, **kwargs) -> dict:
         """

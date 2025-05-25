@@ -1,4 +1,5 @@
 from spoon_ai.agents.base import BaseAgent
+from spoon_ai.schema import AgentState
 from abc import abstractmethod
 
 class ReActAgent(BaseAgent):
@@ -14,6 +15,7 @@ class ReActAgent(BaseAgent):
     async def step(self) -> str:
         should_act = await self.think()
         if not should_act:
-            return "Thinking completed. No action needed."
+            self.state = AgentState.FINISHED
+            return "Thinking completed. No action needed. Task finished."
         
         return await self.act()
