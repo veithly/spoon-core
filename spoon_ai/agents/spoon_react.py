@@ -8,8 +8,7 @@ import logging
 
 from spoon_ai.chat import ChatBot
 from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT, SYSTEM_PROMPT
-from spoon_ai.tools import (PredictPrice, Terminate, TokenHolders, ToolManager,
-                            TradingHistory, UniswapLiquidity, WalletAnalysis)
+from spoon_ai.tools import Terminate, ToolManager
 
 from .toolcall import ToolCallAgent
 from .mcp_client_mixin import MCPClientMixin
@@ -27,7 +26,7 @@ class SpoonReactAI(ToolCallAgent, MCPClientMixin):
     max_steps: int = 10
     tool_choice: str = "auto"
     
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([Terminate(), PredictPrice(), TokenHolders(), TradingHistory(), UniswapLiquidity(), WalletAnalysis()]))
+    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([Terminate()]))
     special_tools: List[str] = Field(default=["terminate"])
     llm: ChatBot = Field(default_factory=lambda: ChatBot())
 

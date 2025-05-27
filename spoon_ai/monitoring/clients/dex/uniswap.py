@@ -5,7 +5,10 @@ import time
 import asyncio
 
 from .base import DEXClient
-from spoon_ai.tools.crypto.price_data import UniswapPriceProvider
+try:
+    from spoon_toolkits.crypto.price_data import UniswapPriceProvider
+except ImportError:
+    from spoon_ai.tools.crypto.price_data import UniswapPriceProvider
 import nest_asyncio
 
 # Apply nest_asyncio to allow nested event loops

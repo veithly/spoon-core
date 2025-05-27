@@ -3,7 +3,10 @@ from typing import Dict, Any, List, Optional
 import asyncio
 import time
 
-from spoon_ai.tools.crypto.price_data import RaydiumPriceProvider
+try:
+    from spoon_toolkits.crypto.price_data import RaydiumPriceProvider
+except ImportError:
+    from spoon_ai.tools.crypto.price_data import RaydiumPriceProvider
 from .base import DEXClient
 
 logger = logging.getLogger(__name__)
