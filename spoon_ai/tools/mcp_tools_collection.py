@@ -3,26 +3,8 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 # Import base tool classes and tool manager
-from spoon_ai.tools.base import BaseTool, ToolResult
-from spoon_ai.tools.tool_manager import ToolManager
+from spoon_ai.tools import BaseTool, ToolManager, Terminate
 
-# Import all available tools
-from spoon_ai.tools import (
-    PredictPrice,
-    TokenHolders,
-    TradingHistory,
-    UniswapLiquidity,
-    WalletAnalysis,
-    GetTokenPriceTool,
-    Get24hStatsTool,
-    GetKlineDataTool,
-    PriceThresholdAlertTool,
-    LpRangeCheckTool,
-    SuddenPriceIncreaseTool,
-    LendingRateMonitorTool,
-    LstArbitrageTool,
-    TokenTransfer,
-)
 
 mcp = FastMCP("SpoonAI MCP Tools")
 
@@ -42,20 +24,7 @@ class MCPToolsCollection:
         """Set up all available tools as MCP tools"""
         # Create all tool instances
         tools = [
-            PredictPrice(),
-            TokenHolders(),
-            TradingHistory(),
-            UniswapLiquidity(),
-            WalletAnalysis(),
-            GetTokenPriceTool(),
-            Get24hStatsTool(),
-            GetKlineDataTool(),
-            PriceThresholdAlertTool(),
-            LpRangeCheckTool(),
-            SuddenPriceIncreaseTool(),
-            LendingRateMonitorTool(),
-            LstArbitrageTool(),
-            TokenTransfer()
+            Terminate()
         ]
         
         # Create tool manager
@@ -72,6 +41,10 @@ class MCPToolsCollection:
             **kwargs: Parameters passed to FastMCP.run()
         """
         await self.mcp.run_async(transport="sse", port=8765, **kwargs)
+    
+    async def add_tool(self, tool: BaseTool):
+        """Add a tool to the MCP server"""
+        self.mcp.add_tool(tool.execute, name=tool.name, description=tool.description)
 
 # Create default instance that can be imported directly
 mcp_tools = MCPToolsCollection()
