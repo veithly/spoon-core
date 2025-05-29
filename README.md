@@ -363,13 +363,17 @@ print(response)
 ```python
 from spoon_ai.agents import SpoonReactAI
 from spoon_ai.chat import ChatBot
+import asyncio
 
-# Create a ReAct agent
-react_agent = SpoonReactAI(llm=ChatBot())
+async def main():
+    # Create a ReAct agent
+    react_agent = SpoonReactAI(llm=ChatBot())
 
-# Run the ReAct agent and get a response
-response = await react_agent.run("Analyze the transaction history of this wallet address: 0x123...")
-print(response)
+    # Run the ReAct agent and get a response
+    response = await react_agent.run("Analyze the transaction history of this wallet address: 0x123...")
+    print(response)
+
+asyncio.run(main())
 ```
 
 ## 💡 Usage Examples
