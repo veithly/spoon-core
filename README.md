@@ -376,6 +376,68 @@ async def main():
 asyncio.run(main())
 ```
 
+### Create an MCP-Enabled Agent
+
+To use an MCP-enabled agent, you need to first declare your tools and start the MCP server. The MCP (Model Context Protocol) allows your agent to interact with external tools and services through a standardized interface.
+
+#### Prerequisites
+
+1. **Declare and Configure Your Tools**
+
+First, ensure you have your tools properly configured. You can either use the built-in tools or create custom ones:
+
+```python
+from spoon_toolkits import (
+    GetTokenPriceTool, 
+    TokenTransfer, 
+    WalletAnalysis,
+    PredictPrice,
+    TokenHolders
+)
+```
+
+2. **Start the MCP Server**
+
+Before using the MCP-enabled agent, you must start the MCP server with your tools:
+
+```bash
+# Start the MCP server with all available tools
+python -m spoon_ai.tools.mcp_tools_collection
+
+# The server will start and display:
+# MCP Server running on stdio transport
+# Available tools: [list of tools]
+```
+
+3. **Create and Use the MCP Agent**
+
+Once the server is running, you can create an MCP-enabled agent:
+
+```python
+from spoon_ai.agents import SpoonReactMCP
+import asyncio
+
+async def main():
+    # Create an MCP-enabled agent
+    mcp_agent = SpoonReactMCP(
+        mcp_transport="stdio",  # or "websocket", "sse"
+        mcp_topics=["spoon_react", "general"]
+    )
+    
+    # Initialize the MCP connection
+    await mcp_agent.initialize()
+    
+    # Use the agent with all available tools
+    response = await mcp_agent.run(
+        "Analyze the current ETH price and predict the next 24h movement"
+    )
+    print(response)
+
+asyncio.run(main())
+```
+
+**Note:** For detailed information on configuring MCP tools, creating custom MCP-compatible tools, and advanced usage, please refer to the [MCP Tools Documentation](spoon_ai/tools/README_MCP_TOOLS.md).
+
 ## 💡 Usage Examples
 
 ### Chat Assistant
