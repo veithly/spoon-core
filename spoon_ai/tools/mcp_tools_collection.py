@@ -5,6 +5,22 @@ from typing import Any, Dict, List, Optional
 # Import base tool classes and tool manager
 from spoon_ai.tools import BaseTool, ToolManager, Terminate
 
+from spoon_toolkits import (
+    PredictPrice,
+    TokenHolders,
+    TradingHistory,
+    UniswapLiquidity,
+    WalletAnalysis,
+    GetTokenPriceTool,
+    Get24hStatsTool,
+    GetKlineDataTool,
+    PriceThresholdAlertTool,
+    LpRangeCheckTool,
+    SuddenPriceIncreaseTool,
+    LendingRateMonitorTool,
+    # LstArbitrageTool,
+    # TokenTransfer,
+)
 
 mcp = FastMCP("SpoonAI MCP Tools")
 
@@ -24,7 +40,22 @@ class MCPToolsCollection:
         """Set up all available tools as MCP tools"""
         # Create all tool instances
         tools = [
-            Terminate()
+            Terminate(),
+            PredictPrice(),
+            TokenHolders(),
+            TradingHistory(),
+            UniswapLiquidity(),
+            WalletAnalysis(),
+            GetTokenPriceTool(),
+            Get24hStatsTool(),
+            GetKlineDataTool(),
+            PriceThresholdAlertTool(),
+            LpRangeCheckTool(),
+            SuddenPriceIncreaseTool(),
+            LendingRateMonitorTool(),
+            # LstArbitrageTool(),
+            # TokenTransfer()
+
         ]
         
         # Create tool manager
