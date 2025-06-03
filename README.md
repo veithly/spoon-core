@@ -35,7 +35,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - pip package manager (or uv as a faster alternative)
 
 ### Create a Virtual Environment
@@ -95,28 +95,32 @@ SCDF supports various API services and requires proper configuration of environm
 
 ### 📋 Environment Variables Reference
 
-| Variable Name | Description | Required | How to Obtain |
-|---------------|-------------|----------|---------------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT models | Optional* | [OpenAI Platform](https://platform.openai.com/api-keys) |
-| `ANTHROPIC_API_KEY` | Anthropic API key for Claude models | Optional* | [Anthropic Console](https://console.anthropic.com/keys) |
-| `DEEPSEEK_API_KEY` | DeepSeek API key for DeepSeek models | Optional* | [DeepSeek Platform](https://platform.deepseek.com/) |
-| `PRIVATE_KEY` | Blockchain wallet private key | Optional** | Export from your wallet (MetaMask, etc.) |
-| `DATABASE_URL` | Database connection URL | Optional | Your database provider |
-| `REDIS_HOST` | Redis server host | Optional | Redis configuration |
-| `REDIS_PORT` | Redis server port | Optional | Redis configuration |
-| `REDIS_PASSWORD` | Redis server password | Optional | Redis configuration |
-| `GITHUB_TOKEN` | GitHub API token | Optional | [GitHub Settings](https://github.com/settings/tokens) |
-| `GO_PLUS_LABS_APP_KEY` | GoPlus Labs API key | Optional | [GoPlus Labs](https://gopluslabs.io/) |
-| `GO_PLUS_LABS_APP_SECRET` | GoPlus Labs API secret | Optional | [GoPlus Labs](https://gopluslabs.io/) |
+| Variable Name             | Description                                        | Required     | How to Obtain                                           |
+| ------------------------- | -------------------------------------------------- | ------------ | ------------------------------------------------------- |
+| `OPENAI_API_KEY`          | OpenAI API key for GPT models                      | Optional\*   | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY`       | Anthropic API key for Claude models                | Optional\*   | [Anthropic Console](https://console.anthropic.com/keys) |
+| `DEEPSEEK_API_KEY`        | DeepSeek API key for DeepSeek models               | Optional\*   | [DeepSeek Platform](https://platform.deepseek.com/)     |
+| `PRIVATE_KEY`             | Blockchain wallet private key                      | Optional\*\* | Export from your wallet (MetaMask, etc.)                |
+| `RPC_URL`                 | RPC endpoint for interacting with blockchain nodes | Optional     | Provided by your RPC provider (e.g., BaneLabs, Infura)  |
+| `SCAN_URL`                | URL of the blockchain explorer                     | Optional     | Provided by your explorer service (e.g., Blockscout)    |
+| `CHAIN_ID`                | Numeric chain ID for your target network           | Optional     | Refer to your network documentation                     |
+| `DATABASE_URL`            | Database connection URL                            | Optional     | Your database provider                                  |
+| `REDIS_HOST`              | Redis server host                                  | Optional     | Redis configuration                                     |
+| `REDIS_PORT`              | Redis server port                                  | Optional     | Redis configuration                                     |
+| `REDIS_PASSWORD`          | Redis server password                              | Optional     | Redis configuration                                     |
+| `GITHUB_TOKEN`            | GitHub API token                                   | Optional     | [GitHub Settings](https://github.com/settings/tokens)   |
+| `GO_PLUS_LABS_APP_KEY`    | GoPlus Labs API key                                | Optional     | [GoPlus Labs](https://gopluslabs.io/)                   |
+| `GO_PLUS_LABS_APP_SECRET` | GoPlus Labs API secret                             | Optional     | [GoPlus Labs](https://gopluslabs.io/)                   |
 
-*At least one LLM API key is required for the framework to function.
-**Required only for cryptocurrency-related operations.
+\*At least one LLM API key is required for the framework to function.
+\*\*Required only for cryptocurrency-related operations.
 
 ### 🔧 Configuration Methods
 
 #### Method 1: Environment Variables (Recommended)
 
 **Linux/macOS:**
+
 ```bash
 # Set environment variables in your shell
 export OPENAI_API_KEY="sk-your-openai-api-key-here"
@@ -131,6 +135,7 @@ source ~/.bashrc
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 # Set environment variables
 $env:OPENAI_API_KEY="sk-your-openai-api-key-here"
@@ -156,6 +161,7 @@ nano .env  # or use your preferred editor
 ```
 
 Example `.env` file content:
+
 ```bash
 # LLM API Keys (at least one required)
 OPENAI_API_KEY=sk-your-openai-api-key-here
@@ -165,6 +171,12 @@ DEEPSEEK_API_KEY=your-deepseek-api-key-here
 # Blockchain (optional - only for crypto operations)
 PRIVATE_KEY=your-wallet-private-key-here
 
+# Optional: RPC and network configuration
+RPC_URL=https://mainnet-1.rpc.banelabs.org
+SCAN_URL=https://xt4scan.ngd.network/
+CHAIN_ID=47763
+
+
 # Optional: Database and Redis configuration
 DATABASE_URL=sqlite:///./spoonai.db
 REDIS_HOST=localhost
@@ -173,6 +185,7 @@ REDIS_PASSWORD=your-redis-password
 ```
 
 **Important:** Ensure your `.env` file has proper permissions:
+
 ```bash
 chmod 600 .env
 ```
@@ -227,6 +240,7 @@ The CLI automatically creates a configuration file at `~/.config/spoonai/config.
 ### 🔍 Verification & Testing
 
 #### Check Environment Variables
+
 ```bash
 # Verify environment variables are set
 echo $OPENAI_API_KEY
@@ -238,6 +252,7 @@ python -c "import os; print('OpenAI:', 'SET' if os.getenv('OPENAI_API_KEY') else
 ```
 
 #### Test API Connectivity
+
 ```bash
 # Start CLI and test
 python main.py
@@ -252,16 +267,19 @@ python main.py
 #### 🚨 Critical Security Guidelines
 
 1. **Never commit API keys to version control**
+
    ```bash
    # Ensure .env is in .gitignore
    echo ".env" >> .gitignore
    ```
 
 2. **Use environment variables in production**
+
    - Avoid hardcoding keys in source code
    - Use secure environment variable management in deployment
 
 3. **Wallet private key security**
+
    - **NEVER share your private key with anyone**
    - Store in secure environment variables only
    - Consider using hardware wallets for production
@@ -289,11 +307,13 @@ chmod 600 .env
 For first-time users, follow this step-by-step setup:
 
 1. **Get your API keys:**
+
    - Visit [OpenAI Platform](https://platform.openai.com/api-keys) or [Anthropic Console](https://console.anthropic.com/keys)
    - Create a new API key
    - Copy the key securely
 
 2. **Set environment variables:**
+
    ```bash
    export ANTHROPIC_API_KEY="your-key-here"
    # OR
@@ -301,6 +321,7 @@ For first-time users, follow this step-by-step setup:
    ```
 
 3. **Verify setup:**
+
    ```bash
    python main.py
    > load-agent chat
@@ -317,6 +338,7 @@ For first-time users, follow this step-by-step setup:
 #### Common Issues:
 
 **"API key not found" error:**
+
 ```bash
 # Check if environment variable is set
 echo $OPENAI_API_KEY
@@ -326,11 +348,13 @@ export OPENAI_API_KEY="your-key-here"
 ```
 
 **"Invalid API key" error:**
+
 - Verify the key is correct and active
 - Check for extra spaces or characters
 - Ensure the key has proper permissions
 
 **Configuration not persisting:**
+
 - Add export commands to your shell profile (~/.bashrc, ~/.zshrc)
 - Or use the CLI config command for persistent storage
 
@@ -388,8 +412,8 @@ First, ensure you have your tools properly configured. You can either use the bu
 
 ```python
 from spoon_toolkits import (
-    GetTokenPriceTool, 
-    TokenTransfer, 
+    GetTokenPriceTool,
+    TokenTransfer,
     WalletAnalysis,
     PredictPrice,
     TokenHolders
@@ -423,10 +447,10 @@ async def main():
         mcp_transport="stdio",  # or "websocket", "sse"
         mcp_topics=["spoon_react", "general"]
     )
-    
+
     # Initialize the MCP connection
     await mcp_agent.initialize()
-    
+
     # Use the agent with all available tools
     response = await mcp_agent.run(
         "Analyze the current ETH price and predict the next 24h movement"
@@ -512,56 +536,59 @@ SCDF CLI is a powerful command-line tool that provides rich functionality, inclu
 
 ### Basic Commands
 
-| Command | Aliases | Description |
-|------|------|------|
-| `help` | `h`, `?` | Display help information |
-| `exit` | `quit`, `q` | Exit the CLI |
-| `load-agent <name>` | `load` | Load an agent with the specified name |
-| `list-agents` | `agents` | List all available agents |
-| `config` | `cfg`, `settings` | Configure settings (such as API keys) |
-| `reload-config` | `reload` | Reload the current agent's configuration |
-| `action <action>` | `a` | Perform a specific action using the current agent |
+| Command             | Aliases           | Description                                                                                                               |
+| ------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `help`              | `h`, `?`          | Display help information                                                                                                  |
+| `exit`              | `quit`, `q`       | Exit the CLI                                                                                                              |
+| `load-agent <name>` | `load`            | Load an agent with the specified name                                                                                     |
+| `list-agents`       | `agents`          | List all available agents                                                                                                 |
+| `config`            | `cfg`, `settings` | Configure settings (such as API keys)                                                                                     |
+| `reload-config`     | `reload`          | Reload the current agent's configuration                                                                                  |
+| `action <action>`   | `a`               | Perform a specific action using the current agent. For example, `action react` to start a step-by-step reasoning session. |
 
 ### Chat Management Commands
 
-| Command | Aliases | Description |
-|------|------|------|
-| `new-chat` | `new` | Start a new chat (clear history) |
-| `list-chats` | `chats` | List available chat history records |
-| `load-chat <ID>` | - | Load a specific chat history record |
+| Command          | Aliases | Description                         |
+| ---------------- | ------- | ----------------------------------- |
+| `new-chat`       | `new`   | Start a new chat (clear history)    |
+| `list-chats`     | `chats` | List available chat history records |
+| `load-chat <ID>` | -       | Load a specific chat history record |
 
 ### Cryptocurrency-Related Commands
 
-| Command | Aliases | Description |
-|------|------|------|
-| `transfer <address> <amount> <token>` | `send` | Transfer tokens to a specified address |
-| `swap <source_token> <target_token> <amount>` | - | Exchange tokens using an aggregator |
-| `token-info <address>` | `token` | Get token information by address |
-| `token-by-symbol <symbol>` | `symbol` | Get token information by symbol |
+| Command                                       | Aliases  | Description                            |
+| --------------------------------------------- | -------- | -------------------------------------- |
+| `transfer <address> <amount> <token>`         | `send`   | Transfer tokens to a specified address |
+| `swap <source_token> <target_token> <amount>` | -        | Exchange tokens using an aggregator    |
+| `token-info <address>`                        | `token`  | Get token information by address       |
+| `token-by-symbol <symbol>`                    | `symbol` | Get token information by symbol        |
 
 ### Document Management Commands
 
-| Command | Aliases | Description |
-|------|------|------|
-| `load-docs <directory_path>` | `docs` | Load documents from the specified directory to the current agent |
+| Command                      | Aliases | Description                                                      |
+| ---------------------------- | ------- | ---------------------------------------------------------------- |
+| `load-docs <directory_path>` | `docs`  | Load documents from the specified directory to the current agent |
 
 ### CLI Usage Examples
 
 #### Basic Interaction
 
 1. Start the CLI and load an agent:
+
 ```
 > load-agent chat
 chat agent loaded
 ```
 
 2. Start a new chat:
+
 ```
 > new-chat
 New chat session started
 ```
 
 3. Directly input text to interact with the AI agent:
+
 ```
 > Hello, please introduce yourself
 [AI reply will be displayed here]
@@ -570,6 +597,7 @@ New chat session started
 #### Configure Settings
 
 1. View current configuration:
+
 ```
 > config
 Current configuration:
@@ -579,6 +607,7 @@ MODEL: gpt-4
 ```
 
 2. Modify configuration:
+
 ```
 > config API_KEY sk-your-new-api-key
 API_KEY updated
@@ -587,6 +616,7 @@ API_KEY updated
 #### Cryptocurrency Operations
 
 1. View token information:
+
 ```
 > token-by-symbol SPO
 Token information:
@@ -598,6 +628,7 @@ Decimals: 18
 ```
 
 2. Transfer operation:
+
 ```
 > transfer 0x123... 0.1 SPO
 Preparing to transfer 0.1 SPO to 0x123...
@@ -725,14 +756,14 @@ from pydantic import Field
 class MyCustomAgent(ToolCallAgent):
     name: str = "my_custom_agent"
     description: str = "This is my custom Agent"
-    
+
     system_prompt: str = """You are an AI assistant specialized in performing specific tasks.
     You can use the provided tools to complete tasks."""
-    
+
     next_step_prompt: str = "What should be the next step?"
-    
+
     max_steps: int = 8
-    
+
     # Define available tools
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
         MyCustomTool(),
@@ -785,7 +816,7 @@ tool_manager.index_tools()
 
 # Find the most relevant tools based on a query
 relevant_tools = tool_manager.query_tools(
-    query="I need to analyze this data", 
+    query="I need to analyze this data",
     top_k=3  # Return the top 3 most relevant tools
 )
 ```
@@ -838,6 +869,7 @@ SpoonAI can be applied to various enterprise scenarios:
 SDCF comes with a comprehensive set of built-in tools for various use cases:
 
 #### Cryptocurrency Tools
+
 - **GetTokenPriceTool** - Get real-time token prices
 - **Get24hStatsTool** - Get 24-hour trading statistics
 - **GetKlineDataTool** - Get candlestick chart data
@@ -848,6 +880,7 @@ SDCF comes with a comprehensive set of built-in tools for various use cases:
 - **LstArbitrageTool** - Liquid staking token arbitrage opportunities
 
 #### Monitoring Tools
+
 - **PredictPrice** - Price prediction using ML models
 - **TokenHolders** - Analyze token holder distribution
 - **TradingHistory** - Track trading history and patterns

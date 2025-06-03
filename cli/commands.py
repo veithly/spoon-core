@@ -97,6 +97,7 @@ class SpoonAICLI:
         self.commands: Dict[str, SpoonCommand] = {}
         self.config_manager = ConfigManager()
         self.aggregator = Aggregator(rpc_url=os.getenv("RPC_URL"), chain_id=int(os.getenv("CHAIN_ID", 1)), scan_url=os.getenv("SCAN_URL", "https://etherscan.io"))
+        self._should_exit = False
         self._init_commands()
         self._set_prompt_toolkit()
         
@@ -324,43 +325,49 @@ class SpoonAICLI:
         
         action_name = input_list[0]
         action_args = input_list[1:] if len(input_list) > 1 else []
-        
-        if action_name == "list_mcp_tools":
-            print(await self.current_agent.list_mcp_tools())
-            return
-
-        if action_name == "chat":
-            try:
-                if action_args:
-                    # If arguments provided, use the old behavior
-                    # Check if current agent is SpoonReactAI
-                    from spoon_ai.agents.spoon_react import SpoonReactAI
-                    if isinstance(self.current_agent, SpoonReactAI):
-                        # For SpoonReactAI agents, use run method
-                        res = await self.current_agent.run(action_args[0])
-                    else:
-                        # For other agents, use perform_action method
-                        res = self.current_agent.perform_action(action_name, action_args)
-                    logger.info(res)
-                else:
-                    # Start interactive chat mode
-                    await self._start_interactive_chat()
-            except Exception as e:
-                logger.error(f"Error during action: {e}")
-                logger.error(traceback.format_exc())
-        elif action_name == "react":
-            await self._start_interactive_react()
-        elif action_name == "new":
-            self._handle_new_chat([])
-        elif action_name == "list":
-            self._handle_list_chats([])
-        elif action_name == "load":
-            if len(action_args) != 1:
-                logger.error("Usage: action load <agent_name>")
+        try:
+            if action_name == "list_mcp_tools":
+                print(await self.current_agent.list_mcp_tools())
                 return
-            self._handle_load_chat(action_args)
-        else:
-            self.current_agent.perform_action(action_name, action_args)
+
+            if action_name == "chat":
+                try:
+                    if action_args:
+                        # If arguments provided, use the old behavior
+                        # Check if current agent is SpoonReactAI
+                        from spoon_ai.agents.spoon_react import SpoonReactAI
+                        if isinstance(self.current_agent, SpoonReactAI):
+                            # For SpoonReactAI agents, use run method
+                            res = await self.current_agent.run(action_args[0])
+                        else:
+                            # For other agents, use perform_action method
+                            res = self.current_agent.perform_action(action_name, action_args)
+                        logger.info(res)
+                    else:
+                        # Start interactive chat mode
+                        await self._start_interactive_chat()
+                except Exception as e:
+                    logger.error(f"Error during action: {e}")
+                    logger.error(traceback.format_exc())
+            elif action_name == "react":
+                await self._start_interactive_react()
+            elif action_name == "new":
+                self._handle_new_chat([])
+            elif action_name == "list":
+                self._handle_list_chats([])
+            elif action_name == "load":
+                if len(action_args) != 1:
+                    logger.error("Usage: action load <agent_name>")
+                    return
+                self._handle_load_chat(action_args)
+            else:
+                if hasattr(self.current_agent, "perform_action") and callable(getattr(self.current_agent, "perform_action", None)):
+                    self.current_agent.perform_action(action_name, action_args)
+                else:
+                    logger.warning(f"command '{action_name}' is invalid, the current Agent does not support custom actions")
+        except Exception as e:
+            logger.error(f"Error during action '{action_name}': {e}")
+            logger.debug(traceback.format_exc())
 
     async def _start_interactive_chat(self):
         """Start an interactive chat session with the current agent."""
@@ -730,27 +737,28 @@ class SpoonAICLI:
 
     async def run(self):
         self._load_default_agent()
-        
-        while True:
+        self._should_exit = False
+
+        while not self._should_exit:
             try:
-                input_text = await (self.session.prompt_async(
+                input_text = await self.session.prompt_async(
                     self._get_prompt(),
                     style=self.style,
-                ))
+                )
                 input_text = input_text.strip()
-                
                 if not input_text:
                     continue
-                
                 await self._handle_input(input_text)
             except KeyboardInterrupt:
                 continue
             except EOFError:
-                self._exit([])
+                self._should_exit = True  
+        
+
             
     def _exit(self, input_list: List[str]):
         logger.info("Exiting Spoon AI")
-        sys.exit(0)
+        self._should_exit = True  
 
     def _handle_new_chat(self, input_list: List[str]):
         if not self.current_agent:
