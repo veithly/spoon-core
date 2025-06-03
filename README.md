@@ -171,11 +171,10 @@ DEEPSEEK_API_KEY=your-deepseek-api-key-here
 # Blockchain (optional - only for crypto operations)
 PRIVATE_KEY=your-wallet-private-key-here
 
-# Optional: RPC and network configuration
+# RPC and network configuration
 RPC_URL=https://mainnet-1.rpc.banelabs.org
 SCAN_URL=https://xt4scan.ngd.network/
 CHAIN_ID=47763
-
 
 # Optional: Database and Redis configuration
 DATABASE_URL=sqlite:///./spoonai.db
