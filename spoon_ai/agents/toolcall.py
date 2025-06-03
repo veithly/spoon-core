@@ -51,11 +51,19 @@ class ToolCallAgent(ReActAgent):
                 description=tool.description,
                 parameters=tool.inputSchema,
             ).to_param()
+        
+        all_tools = self.avaliable_tools.to_params()
+        mcp_tools_params = [convert_mcp_tool(tool) for tool in mcp_tools]
+        unique_tools = {}
+        for tool in all_tools + mcp_tools_params:
+            tool_name = tool["function"]["name"]
+            unique_tools[tool_name] = tool
+        unique_tools_list = list(unique_tools.values())
 
         response = await self.llm.ask_tool(
             messages=self.memory.messages,
             system_msg=self.system_prompt,
-            tools=self.avaliable_tools.to_params() + [convert_mcp_tool(tool) for tool in mcp_tools],
+            tools=unique_tools_list,
             tool_choice=self.tool_choices,
             output_queue=self.output_queue,
         )
