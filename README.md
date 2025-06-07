@@ -359,6 +359,19 @@ export OPENAI_API_KEY="your-key-here"
 
 ## 🚀 Quick Start
 
+##**Start the MCP Server**
+
+Before using the MCP-enabled agent, you must start the MCP server with your tools:
+
+```bash
+# Start the MCP server with all available tools
+python -m spoon_ai.tools.mcp_tools_collection
+
+# The server will start and display:
+# MCP Server running on stdio transport
+# Available tools: [list of tools]
+```
+
 ### Start the CLI
 
 ```bash
@@ -366,20 +379,6 @@ python main.py
 ```
 
 After entering the interactive command line interface, you can start using the various features of SpoonAI.
-
-### Basic Example
-
-```python
-from spoon_ai.agents import SpoonReactAI
-from spoon_ai.chat import ChatBot
-
-# Create a ReAct agent
-react_agent = SpoonReactAI(llm=ChatBot())
-
-# Run the agent and get a response
-response = await react_agent.run("Hello, please introduce yourself")
-print(response)
-```
 
 ### Create a ReAct Agent
 
@@ -397,136 +396,6 @@ async def main():
     print(response)
 
 asyncio.run(main())
-```
-
-### Create an MCP-Enabled Agent
-
-To use an MCP-enabled agent, you need to first declare your tools and start the MCP server. The MCP (Model Context Protocol) allows your agent to interact with external tools and services through a standardized interface.
-
-#### Prerequisites
-
-1. **Declare and Configure Your Tools**
-
-First, ensure you have your tools properly configured. You can either use the built-in tools or create custom ones:
-
-```python
-from spoon_toolkits import (
-    GetTokenPriceTool,
-    TokenTransfer,
-    WalletAnalysis,
-    PredictPrice,
-    TokenHolders
-)
-```
-
-2. **Start the MCP Server**
-
-Before using the MCP-enabled agent, you must start the MCP server with your tools:
-
-```bash
-# Start the MCP server with all available tools
-python -m spoon_ai.tools.mcp_tools_collection
-
-# The server will start and display:
-# MCP Server running on stdio transport
-# Available tools: [list of tools]
-```
-
-3. **Create and Use the MCP Agent**
-
-Once the server is running, you can create an MCP-enabled agent:
-
-```python
-from spoon_ai.agents import SpoonReactMCP
-import asyncio
-
-async def main():
-    # Create an MCP-enabled agent
-    mcp_agent = SpoonReactMCP(
-        mcp_transport="stdio",  # or "websocket", "sse"
-        mcp_topics=["spoon_react", "general"]
-    )
-
-    # Initialize the MCP connection
-    await mcp_agent.initialize()
-
-    # Use the agent with all available tools
-    response = await mcp_agent.run(
-        "Analyze the current ETH price and predict the next 24h movement"
-    )
-    print(response)
-
-asyncio.run(main())
-```
-
-**Note:** For detailed information on configuring MCP tools, creating custom MCP-compatible tools, and advanced usage, please refer to the [MCP Tools Documentation](spoon_ai/tools/README_MCP_TOOLS.md).
-
-## 💡 Usage Examples
-
-### Chat Assistant
-
-```python
-from spoon_ai.agents import SpoonReactAI
-from spoon_ai.chat import ChatBot
-
-# Create an advanced ReAct agent
-react_agent = SpoonReactAI(
-    llm=ChatBot(model="gpt-4"),  # Use specified model
-    system_prompt="You are an AI assistant focused on cryptocurrency, proficient in blockchain technology, DeFi, and NFTs."
-)
-
-# Run the agent
-response = await react_agent.run("What are the main technical improvements in Ethereum 2.0?")
-print(response)
-```
-
-### Cryptocurrency Trading Assistant
-
-```python
-from spoon_ai.agents import SpoonReactAI
-from spoon_ai.chat import ChatBot
-from spoon_ai.tools import ToolManager
-from spoon_ai.tools import GetTokenPriceTool, TokenTransfer, WalletAnalysis
-
-# Create a tool manager and add cryptocurrency-related tools
-tool_manager = ToolManager([
-    GetTokenPriceTool(),
-    TokenTransfer(),
-    WalletAnalysis()
-])
-
-# Create a cryptocurrency trading agent
-crypto_agent = SpoonReactAI(
-    llm=ChatBot(model="gpt-4"),
-    avaliable_tools=tool_manager,
-    system_prompt="You are a cryptocurrency trading assistant that can help users get token information, transfer tokens, and analyze wallets."
-)
-
-# Run the agent
-response = await crypto_agent.run("Help me check the current price of ETH and analyze if it's a good time to buy")
-print(response)
-```
-
-### Document Analysis Assistant
-
-```python
-from spoon_ai.agents import SpoonReactAI
-from spoon_ai.chat import ChatBot
-from spoon_ai.tools.docs import LoadDocsTool, QueryDocsTool
-
-# Create a document analysis agent
-docs_agent = SpoonReactAI(
-    llm=ChatBot(),
-    avaliable_tools=ToolManager([
-        LoadDocsTool(),
-        QueryDocsTool()
-    ]),
-    system_prompt="You are a document analysis assistant who can help users load and analyze various documents."
-)
-
-# Run the agent
-response = await docs_agent.run("Load all PDF files in the './docs' directory, then summarize their main content")
-print(response)
 ```
 
 ## 🛠️ CLI Tools
@@ -570,29 +439,6 @@ SCDF CLI is a powerful command-line tool that provides rich functionality, inclu
 
 ### CLI Usage Examples
 
-#### Basic Interaction
-
-1. Start the CLI and load an agent:
-
-```
-> load-agent chat
-chat agent loaded
-```
-
-2. Start a new chat:
-
-```
-> new-chat
-New chat session started
-```
-
-3. Directly input text to interact with the AI agent:
-
-```
-> Hello, please introduce yourself
-[AI reply will be displayed here]
-```
-
 #### Configure Settings
 
 1. View current configuration:
@@ -610,6 +456,22 @@ MODEL: gpt-4
 ```
 > config API_KEY sk-your-new-api-key
 API_KEY updated
+```
+
+#### Basic Interaction
+
+1. Start a new chat:
+
+```
+> action react
+New chat session started
+```
+
+3. Directly input text to interact with the AI agent:
+
+```
+> Hello, please introduce yourself
+[AI reply will be displayed here]
 ```
 
 #### Cryptocurrency Operations
@@ -649,46 +511,6 @@ SpoonOS integrates with the Model Context Protocol (MCP) to provide enhanced dat
 - **⚡️ Streaming Responses** - Real-time streaming output from language models
 - **📈 Modular Integration** - Enables dynamic loading of external APIs, on-chain data, or local resources
 - **📡 Access Control & Permissioning** - Supports granular permissions and scoped data/task access
-
-### 🚀 Quick Example
-
-```python
-from spoon_ai.agents import SpoonReactMCP
-
-# Create an MCP-enabled agent
-mcp_agent = SpoonReactMCP(
-    mcp_transport=transport,
-    mcp_topics=["spoon_react", "general"]
-)
-
-# Initialize and run the agent
-await mcp_agent.initialize()
-response = await mcp_agent.run("Hello, can you help me?")
-```
-
-### 🔌 Running MCP Server and Client
-
-To use MCP with all available tools (optional), you need to run both the MCP server and client:
-
-#### Starting the MCP Server
-
-```bash
-# Start the MCP server with all available tools
-python spoon_ai/tools/mcp_tools_collcetion.py
-```
-
-#### Starting the MCP Client in CLI
-
-```bash
-# Launch the CLI
-python main.py
-
-# Load the MCP-enabled agent
-> load-agent spoon_react_mcp
-spoon_react_mcp agent loaded
-```
-
-For comprehensive documentation and examples, see the [MCP Tools README](spoon_ai/tools/README_MCP_TOOLS.md).
 
 ## 🧩 Agent Framework
 
@@ -884,24 +706,6 @@ SDCF comes with a comprehensive set of built-in tools for various use cases:
 - **TokenHolders** - Analyze token holder distribution
 - **TradingHistory** - Track trading history and patterns
 - **LendingRateMonitorTool** - Monitor DeFi lending rates
-
-### Event Listening and Callbacks
-
-SDCF provides a powerful event system that supports registering callbacks at different stages of agent execution:
-
-```python
-from spoon_ai.callbacks import register_callback
-
-# Register before execution callback
-@register_callback("before_execution")
-async def before_execution_callback(agent, query):
-    print(f"Agent {agent.name} is about to execute query: {query}")
-
-# Register after execution callback
-@register_callback("after_execution")
-async def after_execution_callback(agent, query, result):
-    print(f"Agent {agent.name} completed execution with result: {result}")
-```
 
 ## 🎯 Project Roadmap
 
