@@ -29,7 +29,7 @@ Here's how to navigate it:
 
 - [📄 License](#license): Standard license information.
 
-By the end of this README, you’ll not only understand what SCDF is—but you’ll be ready to build and run your own intelligent agents. **Have fun!**
+By the end of this README, you’ll not only understand what SCDF is—but you’ll be ready to build and run your own AI agents and will gain ideas on scenarios what SCDF could empower. **Have fun!**
 
 ## Features
 
