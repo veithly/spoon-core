@@ -8,7 +8,7 @@
 <div align="center">
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
-  <a href="#Environment Variables and API Key Configuration">Environment and API Key Config</a> •
+  <a href="#environment-variables-and-api-key-Configuration">Environment and API Key Config</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#usage-examples">Usage Examples</a> •
   <a href="#cli-tools">CLI Tools</a> •
