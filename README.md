@@ -18,6 +18,32 @@
   <a href="#license">License</a>
 </div>
 
+## 📘 How to Use This README
+
+This README is your guide to getting started with the **SpoonOS Core Developer Framework (SCDF)**. It walks you through everything you need—from understanding core capabilities to actually running your own agents.
+
+Here's how to navigate it:
+
+- [✨ Features](#features): Start here to understand what SpoonOS can do. This section gives you a high-level overview of its agentic, composable, and interoperable architecture.
+
+- [🔧 Installation](#installation): As of **June 2025**, SpoonOS currently supports **Python only**. This section tells you which Python version to use and how to set up a virtual environment.
+
+- [🔐 Environment & API Key Configuration](#environment--api-key-configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, Gemini). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and explorers.
+
+- [🚀 Quick Start](#quick-start): Once your environment is ready, start calling our **MCP server**, which bundles a wide range of tools. Other servers are also available.
+
+- [🛠️ CLI Tools](#cli-tools): This section shows how to use the CLI to run LLM-powered tasks with ease.
+
+- [🧩 Agent Framework](#agent-framework): Learn how to create your own agents, register custom tools, and extend SpoonOS with minimal setup.
+
+- [🔌 API Integration](#api-integration): Plug in external APIs to enhance your agent workflows.
+
+- [🤝 Contributing](#contributing): Want to get involved? Check here for contribution guidelines.
+
+- [📄 License](#license): Standard license information.
+
+By the end of this README, you’ll not only understand what SCDF is—but you’ll be ready to build and run your own intelligent agents. **Have fun!**
+
 ## Features
 
 SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-built to meet the growing demands of Web3 developers — offering a complete toolkit for building sentient, composable, and interoperable AI agents.
