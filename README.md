@@ -5,19 +5,33 @@
   <p><strong>Core developer framework of SpoonOS ——Agentic OS for the sentient economy. Next-Generation AI Agent Framework | Powerful Interactive CLI | Web3 infrastructure optimized Support</strong></p>
 </div>
 
-<div align="center">
-  <a href="#✨-features">Features</a> •
-  <a href="#🔧-installation">Installation</a> •
-  <a href="#🚀-quick-start">Quick Start</a> •
-  <a href="#💡-usage-examples">Usage Examples</a> •
-  <a href="#🛠️-cli-tools">CLI Tools</a> •
-  <a href="#🧩-agent-framework">Agent Framework</a> •
-  <a href="#🔌-api-integration">API Integration</a> •
-  <a href="#🤝-contributing">Contributing</a> •
-  <a href="#📄-license">License</a>
-</div>
+## 📘 How to Use This README
 
-## ✨ Features
+This README is your guide to getting started with the **SpoonOS Core Developer Framework (SCDF)**. It walks you through everything you need—from understanding core capabilities to actually running your own agents.
+
+Here's how to navigate it:
+
+- [✨ Features](#features): Start here to understand what SpoonOS can do. This section gives you a high-level overview of its agentic, composable, and interoperable architecture.
+
+- [🔧 Installation](#installation): As of **June 2025**, SpoonOS currently supports **Python only**. This section tells you which Python version to use and how to set up a virtual environment.
+
+- [🔐 Environment & API Key Config](#environment-variables-and-api-key-Configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, deepseek). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and blockchain explorers.
+
+- [🚀 Quick Start](#quick-start): Once your environment is ready, start calling our **MCP server**, which bundles a wide range of tools. Other servers are also available.
+
+- [🛠️ CLI Tools](#cli-tools): This section shows how to use the CLI to run LLM-powered tasks with ease.
+
+- [🧩 Agent Framework](#agent-framework): Learn how to create your own agents, register custom tools, and extend SpoonOS with minimal setup.
+
+- [🔌 API Integration](#api-integration): Plug in external APIs to enhance your agent workflows.
+
+- [🤝 Contributing](#contributing): Want to get involved? Check here for contribution guidelines.
+
+- [📄 License](#license): Standard license information.
+
+By the end of this README, you’ll not only understand what SCDF is—but you’ll be ready to build and run your own AI agents and will gain ideas on scenarios what SCDF could empower. **Have fun!**
+
+## Features
 
 SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-built to meet the growing demands of Web3 developers — offering a complete toolkit for building sentient, composable, and interoperable AI agents.
 
@@ -31,7 +45,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔗Composable Agent Logic** - Create agents that can sense, reason, plan, and execute modularly — enabling use cases across DeFi, creator economy, and more
 - **🚀 Easy to Use** - Well-designed API for rapid development and integration
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
 
@@ -89,7 +103,7 @@ uv pip install -e .
 pip install spoon-ai-sdk
 ```
 
-## 🔑 Environment Variables & API Key Configuration
+## Environment Variables and API Key Configuration
 
 SCDF supports various API services and requires proper configuration of environment variables and API keys. This section provides comprehensive guidance on setting up your environment.
 
@@ -357,7 +371,7 @@ export OPENAI_API_KEY="your-key-here"
 - Add export commands to your shell profile (~/.bashrc, ~/.zshrc)
 - Or use the CLI config command for persistent storage
 
-## 🚀 Quick Start
+## Quick Start
 
 ##**Start the MCP Server**
 
@@ -398,7 +412,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## 🛠️ CLI Tools
+## CLI Tools
 
 SCDF CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
@@ -496,10 +510,9 @@ Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
-## 📡 MCP (Model Context Protocol) Integration
+## Model Context Protocol Integration
 
 <div align="center">
-  <h3>🌐 Connect • Orchestrate • Scale 🌐</h3>
   <p><strong>Enhanced MCP integration for SpoonOS</strong></p>
 </div>
 
@@ -512,7 +525,7 @@ SpoonOS integrates with the Model Context Protocol (MCP) to provide enhanced dat
 - **📈 Modular Integration** - Enables dynamic loading of external APIs, on-chain data, or local resources
 - **📡 Access Control & Permissioning** - Supports granular permissions and scoped data/task access
 
-## 🧩 Agent Framework
+## Agent Framework
 
 SDCF provides a powerful Agent framework for creating custom agents with your own tools and logic.
 
@@ -644,7 +657,7 @@ relevant_tools = tool_manager.query_tools(
 
 ## Advanced Usage
 
-## 🔌 API Integration
+## API Integration
 
 SpoonAI supports multiple AI service providers, including:
 
@@ -1161,7 +1174,7 @@ SDCF comes with a comprehensive set of built-in tools for various use cases:
 - [ ] **Multi-Language Support** - Extend support for more languages
 - [ ] **Cloud Deployment** - Simplify cloud environment deployment process
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions of all forms!
 
@@ -1173,11 +1186,11 @@ We welcome contributions of all forms!
 
 Please ensure you follow our code style and contribution guidelines.
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
-## 🌟 Acknowledgements
+## Acknowledgements
 
 - Thanks to all developers who have contributed to this project
 - Special thanks to the major AI model providers for their support
