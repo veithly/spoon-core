@@ -8,6 +8,7 @@
 <div align="center">
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
+  <a href="#Environment Variables and API Key Configuration">Environment and API Key Config</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#usage-examples">Usage Examples</a> •
   <a href="#cli-tools">CLI Tools</a> •
@@ -89,7 +90,7 @@ uv pip install -e .
 pip install spoon-ai-sdk
 ```
 
-## Environment Variables & API Key Configuration
+## Environment Variables and API Key Configuration
 
 SCDF supports various API services and requires proper configuration of environment variables and API keys. This section provides comprehensive guidance on setting up your environment.
 
