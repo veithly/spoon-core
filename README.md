@@ -28,7 +28,7 @@ Here's how to navigate it:
 
 - [🔧 Installation](#installation): As of **June 2025**, SpoonOS currently supports **Python only**. This section tells you which Python version to use and how to set up a virtual environment.
 
-- [🔐 Environment & API Key Configuration](#environment--api-key-configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, Gemini). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and explorers.
+- [🔐 Environment & API Key Config](#environment-variables-and-api-key-Configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, Gemini). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and explorers.
 
 - [🚀 Quick Start](#quick-start): Once your environment is ready, start calling our **MCP server**, which bundles a wide range of tools. Other servers are also available.
 
