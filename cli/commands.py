@@ -594,6 +594,15 @@ class SpoonAICLI:
                             # Display response
                             print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {response}"), style=chat_style)
                         
+                        # Reset agent state to IDLE after response is processed
+                        cli_debug_log("Resetting agent state to IDLE")
+                        if hasattr(self.current_agent, 'reset_state'):
+                            self.current_agent.reset_state()
+                        elif hasattr(self.current_agent, 'state'):
+                            from spoon_ai.schema import AgentState
+                            self.current_agent.state = AgentState.IDLE
+                            self.current_agent.current_step = 0
+                        
                     except Exception as e:
                         # Fallback to non-streaming if streaming not available or failed
                         cli_debug_log(f"Streaming failed with error: {e}")
@@ -624,6 +633,15 @@ class SpoonAICLI:
                         
                         # Display response
                         print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {response}"), style=chat_style)
+                        
+                        # Reset agent state to IDLE after response is processed
+                        cli_debug_log("Resetting agent state to IDLE")
+                        if hasattr(self.current_agent, 'reset_state'):
+                            self.current_agent.reset_state()
+                        elif hasattr(self.current_agent, 'state'):
+                            from spoon_ai.schema import AgentState
+                            self.current_agent.state = AgentState.IDLE
+                            self.current_agent.current_step = 0
                     
                 except (KeyboardInterrupt, EOFError):
                     logger.info("\nExiting chat mode...")
@@ -713,15 +731,18 @@ class SpoonAICLI:
                     # Get response from agent
                     print_formatted_text(PromptHTML(f"<thinking>{self.current_agent.name} is thinking...</thinking>"), style=react_style)
                     
-                    self.current_agent.state = AgentState.IDLE
-                    
                     # Run the ReAct agent's step method
                     result = await self.current_agent.run(user_message)
                     
                     # Display the result
                     print_formatted_text(PromptHTML(f"<agent>{self.current_agent.name}:</agent> {result}"), style=react_style)
                     
-                    self.current_agent.clear()
+                    # Reset the agent state
+                    if hasattr(self.current_agent, 'reset_state'):
+                        self.current_agent.reset_state()
+                    else:
+                        self.current_agent.state = AgentState.IDLE
+                        self.current_agent.current_step = 0
                     
                 except (KeyboardInterrupt, EOFError):
                     logger.info("\nExiting react mode...")
