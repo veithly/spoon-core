@@ -6,18 +6,18 @@
 </div>
 
 <div align="center">
-  <a href="#✨-features">Features</a> •
-  <a href="#🔧-installation">Installation</a> •
-  <a href="#🚀-quick-start">Quick Start</a> •
-  <a href="#💡-usage-examples">Usage Examples</a> •
-  <a href="#🛠️-cli-tools">CLI Tools</a> •
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#usage-examples">Usage Examples</a> •
+  <a href="#cli-tools">CLI Tools</a> •
   <a href="#🧩-agent-framework">Agent Framework</a> •
   <a href="#🔌-api-integration">API Integration</a> •
   <a href="#🤝-contributing">Contributing</a> •
   <a href="#📄-license">License</a>
 </div>
 
-## ✨ Features
+## Features
 
 SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-built to meet the growing demands of Web3 developers — offering a complete toolkit for building sentient, composable, and interoperable AI agents.
 
@@ -31,7 +31,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔗Composable Agent Logic** - Create agents that can sense, reason, plan, and execute modularly — enabling use cases across DeFi, creator economy, and more
 - **🚀 Easy to Use** - Well-designed API for rapid development and integration
 
-## 🔧 Installation
+## Installation
 
 ### Prerequisites
 
@@ -89,7 +89,7 @@ uv pip install -e .
 pip install spoon-ai-sdk
 ```
 
-## 🔑 Environment Variables & API Key Configuration
+## Environment Variables & API Key Configuration
 
 SCDF supports various API services and requires proper configuration of environment variables and API keys. This section provides comprehensive guidance on setting up your environment.
 
@@ -357,7 +357,7 @@ export OPENAI_API_KEY="your-key-here"
 - Add export commands to your shell profile (~/.bashrc, ~/.zshrc)
 - Or use the CLI config command for persistent storage
 
-## 🚀 Quick Start
+## Quick Start
 
 ##**Start the MCP Server**
 
@@ -398,7 +398,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## 🛠️ CLI Tools
+## CLI Tools
 
 SCDF CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
