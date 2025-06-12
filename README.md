@@ -5,19 +5,6 @@
   <p><strong>Core developer framework of SpoonOS ——Agentic OS for the sentient economy. Next-Generation AI Agent Framework | Powerful Interactive CLI | Web3 infrastructure optimized Support</strong></p>
 </div>
 
-<div align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#environment-variables-and-api-key-Configuration">Environment and API Key Config</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#cli-tools">CLI Tools</a> •
-  <a href="#model-context-protocol-integration">MCP Integration</a> •
-  <a href="#agent-framework">Agent Framework</a> •
-  <a href="#api-integration">API Integration</a> •
-  <a href="#contributing">Contributing</a> •
-  <a href="#license">License</a>
-</div>
-
 ## 📘 How to Use This README
 
 This README is your guide to getting started with the **SpoonOS Core Developer Framework (SCDF)**. It walks you through everything you need—from understanding core capabilities to actually running your own agents.
@@ -28,7 +15,7 @@ Here's how to navigate it:
 
 - [🔧 Installation](#installation): As of **June 2025**, SpoonOS currently supports **Python only**. This section tells you which Python version to use and how to set up a virtual environment.
 
-- [🔐 Environment & API Key Config](#environment-variables-and-api-key-Configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, Gemini). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and explorers.
+- [🔐 Environment & API Key Config](#environment-variables-and-api-key-Configuration): Learn how to configure the API keys for various LLMs (e.g., OpenAI, Claude, deepseek). We also provide configuration methods for Web3 infrastructure such as chains, RPC endpoints, databases, and blockchain explorers.
 
 - [🚀 Quick Start](#quick-start): Once your environment is ready, start calling our **MCP server**, which bundles a wide range of tools. Other servers are also available.
 
