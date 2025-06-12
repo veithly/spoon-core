@@ -12,10 +12,11 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#usage-examples">Usage Examples</a> •
   <a href="#cli-tools">CLI Tools</a> •
-  <a href="#🧩-agent-framework">Agent Framework</a> •
-  <a href="#🔌-api-integration">API Integration</a> •
-  <a href="#🤝-contributing">Contributing</a> •
-  <a href="#📄-license">License</a>
+  <a href="#model-context-protocol-integration">MCP Integration</a> •
+  <a href="#agent-framework">Agent Framework</a> •
+  <a href="#api-integration">API Integration</a> •
+  <a href="#contributing">Contributing</a> •
+  <a href="#license">License</a>
 </div>
 
 ## Features
@@ -497,10 +498,9 @@ Preparing to transfer 0.1 SPO to 0x123...
 [Transfer details will be displayed here]
 ```
 
-## 📡 MCP (Model Context Protocol) Integration
+## Model Context Protocol Integration
 
 <div align="center">
-  <h3>🌐 Connect • Orchestrate • Scale 🌐</h3>
   <p><strong>Enhanced MCP integration for SpoonOS</strong></p>
 </div>
 
@@ -513,7 +513,7 @@ SpoonOS integrates with the Model Context Protocol (MCP) to provide enhanced dat
 - **📈 Modular Integration** - Enables dynamic loading of external APIs, on-chain data, or local resources
 - **📡 Access Control & Permissioning** - Supports granular permissions and scoped data/task access
 
-## 🧩 Agent Framework
+## Agent Framework
 
 SDCF provides a powerful Agent framework for creating custom agents with your own tools and logic.
 
@@ -645,7 +645,7 @@ relevant_tools = tool_manager.query_tools(
 
 ## Advanced Usage
 
-## 🔌 API Integration
+## API Integration
 
 SpoonAI supports multiple AI service providers, including:
 
@@ -1162,7 +1162,7 @@ SDCF comes with a comprehensive set of built-in tools for various use cases:
 - [ ] **Multi-Language Support** - Extend support for more languages
 - [ ] **Cloud Deployment** - Simplify cloud environment deployment process
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions of all forms!
 
@@ -1174,11 +1174,11 @@ We welcome contributions of all forms!
 
 Please ensure you follow our code style and contribution guidelines.
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
-## 🌟 Acknowledgements
+## Acknowledgements
 
 - Thanks to all developers who have contributed to this project
 - Special thanks to the major AI model providers for their support
