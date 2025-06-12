@@ -10,7 +10,6 @@
   <a href="#installation">Installation</a> •
   <a href="#environment-variables-and-api-key-Configuration">Environment and API Key Config</a> •
   <a href="#quick-start">Quick Start</a> •
-  <a href="#usage-examples">Usage Examples</a> •
   <a href="#cli-tools">CLI Tools</a> •
   <a href="#model-context-protocol-integration">MCP Integration</a> •
   <a href="#agent-framework">Agent Framework</a> •
