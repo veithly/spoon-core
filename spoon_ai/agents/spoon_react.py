@@ -15,7 +15,7 @@ from .mcp_client_mixin import MCPClientMixin
 
 logger = logging.getLogger(__name__)
 
-class SpoonReactAI(ToolCallAgent, MCPClientMixin):
+class SpoonReactAI(ToolCallAgent):
     
     name: str = "spoon_react"
     description: str = "A smart ai agent in neo blockchain"
