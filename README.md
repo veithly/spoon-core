@@ -29,7 +29,7 @@ Here's how to navigate it:
 
 - [📄 License](#license): Standard license information.
 
-By the end of this README, you’ll not only understand what SCDF is—but you’ll be ready to build and run your own AI agents and will gain ideas on scenarios what SCDF could empower. **Have fun!**
+By the end of this README, you'll not only understand what SCDF is—but you'll be ready to build and run your own AI agents and will gain ideas on scenarios what SCDF could empower. **Have fun!**
 
 ## Features
 
@@ -221,6 +221,8 @@ python main.py
 > config api_key deepseek your-deepseek-api-key-here
 ✅ DeepSeek API key configured successfully
 
+
+
 # Configure wallet private key
 > config PRIVATE_KEY your-wallet-private-key-here
 ✅ Private key configured successfully
@@ -316,13 +318,51 @@ chmod 600 .env
 # Set up billing alerts on API provider dashboards
 ```
 
+### 🌐 OpenRouter Configuration Guide
+
+OpenRouter provides an OpenAI-compatible API interface that allows you to access multiple AI models through a single API key. To use OpenRouter:
+
+1. **Get your OpenRouter API key:**
+   - Visit [OpenRouter Platform](https://openrouter.ai/keys)
+   - Register an account and create an API key
+
+2. **Set environment variables:**
+   ```bash
+   # Use OPENAI_API_KEY environment variable to store OpenRouter API key
+   export OPENAI_API_KEY="sk-or-your-openrouter-api-key-here"
+   ```
+
+3. **Use OpenRouter in your code:**
+   ```python
+   from spoon_ai.chat import ChatBot
+   from spoon_ai.agents import SpoonReactAI
+
+   # Configure to use OpenRouter
+   openrouter_agent = SpoonReactAI(
+       llm=ChatBot(
+           model="anthropic/claude-3.5-sonnet",  # Model name supported by OpenRouter
+           provider="openai",                    # Use openai provider
+           base_url="https://openrouter.ai/api/v1"  # OpenRouter API endpoint
+           # Automatically uses OpenRouter API key from OPENAI_API_KEY environment variable
+       )
+   )
+   ```
+
+4. **Supported model examples:**
+   - `openai/gpt-4` - GPT-4 model
+   - `openai/gpt-3.5-turbo` - GPT-3.5 Turbo
+   - `anthropic/claude-3.5-sonnet` - Claude 3.5 Sonnet
+   - `anthropic/claude-3-opus` - Claude 3 Opus
+   - `meta-llama/llama-3.1-8b-instruct` - Llama 3.1 8B
+   - For more models, see [OpenRouter Models List](https://openrouter.ai/models)
+
 ### 🚀 Quick Setup Guide
 
 For first-time users, follow this step-by-step setup:
 
 1. **Get your API keys:**
 
-   - Visit [OpenAI Platform](https://platform.openai.com/api-keys) or [Anthropic Console](https://console.anthropic.com/keys)
+   - Visit [OpenAI Platform](https://platform.openai.com/api-keys), [Anthropic Console](https://console.anthropic.com/keys), or [OpenRouter Platform](https://openrouter.ai/keys)
    - Create a new API key
    - Copy the key securely
 
@@ -332,6 +372,8 @@ For first-time users, follow this step-by-step setup:
    export ANTHROPIC_API_KEY="your-key-here"
    # OR
    export OPENAI_API_KEY="your-key-here"
+   # OR (for OpenRouter, use OPENAI_API_KEY with OpenRouter API key)
+   export OPENAI_API_KEY="sk-or-your-openrouter-api-key-here"
    ```
 
 3. **Verify setup:**
@@ -665,6 +707,7 @@ SpoonAI supports multiple AI service providers, including:
 - **OpenAI** - GPT-3.5/GPT-4 series models
 - **Anthropic** - Claude series models
 - **DeepSeek** - DeepSeek series models
+- **OpenRouter** - Access to multiple AI models through OpenAI-compatible API
 - **More...** - Easily extendable to support other AI providers
 
 ### Integration Examples
@@ -686,6 +729,16 @@ claude_agent = SpoonReactAI(
 # Using DeepSeek
 deepseek_agent = SpoonReactAI(
     llm=ChatBot(model="deepseek-llm", provider="deepseek")
+)
+
+# Using OpenRouter (OpenAI-compatible API)
+openrouter_agent = SpoonReactAI(
+    llm=ChatBot(
+        model="anthropic/claude-3.5-sonnet",  # or any model available on OpenRouter
+        provider="openai",  # Use openai provider for compatibility
+        base_url="https://openrouter.ai/api/v1"  # OpenRouter API endpoint
+        # Uses OPENAI_API_KEY environment variable with your OpenRouter API key
+    )
 )
 ```
 
