@@ -718,13 +718,26 @@ spoon_toolkits/                ← This is a standalone tool library (installabl
 
 ##### 0. Install Dependencies
 
-If you haven't already installed the `spoon-toolkits` package, clone and install it locally:
+You have two ways to install the spoon-toolkits package:
+
+Option 1: Install from GitHub source (for development or latest changes):
 
 ```bash
 git clone https://github.com/XSpoonAi/spoon-toolkit.git
 cd spoon-toolkit
 pip install -e .
 ```
+
+Option 2: Install from PyPI (recommended for general use):
+
+```bash
+pip install spoon-toolkits
+
+```
+
+👉 Tip:
+
+Use Option 1 if you want to modify the toolkit source code or track the latest updates.
 
 ##### 1. Register the tool to the MCP service（Take the third_web tool as an example）
 
