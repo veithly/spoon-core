@@ -1,7 +1,8 @@
 import json
 import asyncio
+import time
 from logging import getLogger
-from typing import Any, List
+from typing import Any, List, Optional
 import logging
 
 from pydantic import Field
@@ -21,29 +22,58 @@ logging.getLogger("spoon_ai").setLevel(logging.INFO)
 logger = getLogger("spoon_ai")
 
 class ToolCallAgent(ReActAgent):
-    
+
     name: str = "toolcall"
     description: str = "Useful when you need to call a tool"
-    
+
     system_prompt: str = TOOLCALL_SYSTEM_PROMPT
     next_step_prompt: str = TOOLCALL_NEXT_STEP_PROMPT
-    
+
     avaliable_tools: ToolManager = Field(default_factory=ToolManager)
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
-    
+
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO # type: ignore
-    
+
     tool_calls: List[ToolCall] = Field(default_factory=list)
-    
+
     output_queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
-    
+
+    # MCP Tools Caching
+    mcp_tools_cache: Optional[List[MCPTool]] = Field(default=None, exclude=True)
+    mcp_tools_cache_timestamp: Optional[float] = Field(default=None, exclude=True)
+    mcp_tools_cache_ttl: float = Field(default=300.0, exclude=True)  # 5 minutes TTL
+
+    async def _get_cached_mcp_tools(self) -> List[MCPTool]:
+        """Get MCP tools with caching to avoid repeated server calls."""
+        current_time = time.time()
+
+        # Check if cache is valid
+        if (self.mcp_tools_cache is not None and
+            self.mcp_tools_cache_timestamp is not None and
+            current_time - self.mcp_tools_cache_timestamp < self.mcp_tools_cache_ttl):
+            logger.info(f"♻️ {self.name} using cached MCP tools ({len(self.mcp_tools_cache)} tools)")
+            return self.mcp_tools_cache
+
+        # Cache miss or expired - fetch fresh tools
+        if hasattr(self, "list_mcp_tools"):
+            logger.info(f"🔄 {self.name} fetching MCP tools from server...")
+            mcp_tools = await self.list_mcp_tools()
+
+            # Update cache
+            self.mcp_tools_cache = mcp_tools
+            self.mcp_tools_cache_timestamp = current_time
+
+            logger.info(f"📋 {self.name} received {len(mcp_tools)} MCP tools (cached)")
+            return mcp_tools
+
+        return []
+
     async def think(self) -> bool:
         if self.next_step_prompt:
             self.add_message("user", self.next_step_prompt)
-        
-        mcp_tools = []
-        if hasattr(self, "list_mcp_tools"):
-            mcp_tools = await self.list_mcp_tools()
+
+        # Use cached MCP tools to avoid repeated server calls
+        mcp_tools = await self._get_cached_mcp_tools()
 
         def convert_mcp_tool(tool: MCPTool) -> SpoonMCPTool:
             return SpoonMCPTool(
@@ -51,7 +81,7 @@ class ToolCallAgent(ReActAgent):
                 description=tool.description,
                 parameters=tool.inputSchema,
             ).to_param()
-        
+
         all_tools = self.avaliable_tools.to_params()
         mcp_tools_params = [convert_mcp_tool(tool) for tool in mcp_tools]
         unique_tools = {}
@@ -69,11 +99,11 @@ class ToolCallAgent(ReActAgent):
         )
 
         self.tool_calls = response.tool_calls
-        
+
         logger.info(colored(f"🤔 {self.name}'s thoughts: {response.content}", "cyan"))
         tool_count = len(self.tool_calls) if self.tool_calls else 0
         logger.info(colored(f"🛠️ {self.name} selected {tool_count} tools: {self.tool_calls}", "green" if tool_count else "yellow"))
-        
+
         if self.output_queue:
             self.output_queue.put_nowait({"content": response.content})
             self.output_queue.put_nowait({"tool_calls": response.tool_calls})
@@ -99,13 +129,13 @@ class ToolCallAgent(ReActAgent):
             logger.error(traceback.format_exc())
             self.add_message("assistant", f"Error encountered while thinking: {e}")
             return False
-        
+
     async def act(self) -> str:
         if not self.tool_calls:
             if self.tool_choices == ToolChoice.REQUIRED:
                 raise ValueError("No tools to call")
             return self.memory.messages[-1].content or "No response from assistant"
-        
+
         results = []
         for tool_call in self.tool_calls:
             result = await self.execute_tool(tool_call)
@@ -162,22 +192,25 @@ class ToolCallAgent(ReActAgent):
             print(f"❌ Tool execution error for {name}: {e}")
             raise
 
-        
+
     def _handle_special_tool(self, name: str, result:Any, **kwargs):
         if not self._is_special_tool(name):
             return
         if self._should_finish_execution(name, result, **kwargs):
             self.state = AgentState.FINISHED
         return
-    
+
     def _is_special_tool(self, name: str) -> bool:
         return name.lower() in [n.lower() for n in self.special_tool_names]
-    
+
     def _should_finish_execution(self, name: str, result: Any, **kwargs) -> bool:
         return True
-    
+
     def clear(self):
         self.memory.clear()
         self.tool_calls = []
         self.state = AgentState.IDLE
         self.current_step = 0
+        # Clear MCP tools cache when agent is reset
+        self.mcp_tools_cache = None
+        self.mcp_tools_cache_timestamp = None
