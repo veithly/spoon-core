@@ -220,6 +220,9 @@ class ChatBot:
                 buffer_type = ""
                 current_tool = None
                 tool_calls = []
+                finish_reason = None
+                native_finish_reason = None
+
                 async with self.llm.messages.stream(
                     model=self.model_name,
                     max_tokens=4096,
@@ -230,9 +233,23 @@ class ChatBot:
                     **kwargs
                 ) as stream:
                     async for chunk in stream:
-                        if chunk.type in ["message_start", "text", "input_json", "message_delta", "message_stop"]:
+                        if chunk.type == "message_start":
                             continue
-                        if chunk.type == "content_block_start":
+                        elif chunk.type == "message_delta":
+                            # Extract finish_reason from message delta
+                            if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'stop_reason'):
+                                finish_reason = chunk.delta.stop_reason
+                                native_finish_reason = chunk.delta.stop_reason
+                            continue
+                        elif chunk.type == "message_stop":
+                            # Extract finish_reason from message stop
+                            if hasattr(chunk, 'message') and hasattr(chunk.message, 'stop_reason'):
+                                finish_reason = chunk.message.stop_reason
+                                native_finish_reason = chunk.message.stop_reason
+                            continue
+                        elif chunk.type in ["text", "input_json"]:
+                            continue
+                        elif chunk.type == "content_block_start":
                             buffer_type = chunk.content_block.type
                             if output_queue:
                                     output_queue.put_nowait({"type": "start", "content_block": chunk.content_block.model_dump(), "index": self.output_index})
@@ -246,17 +263,17 @@ class ChatBot:
                                 }
 
                                 continue
-                        if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
+                        elif chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
                             buffer += chunk.delta.text
                             if output_queue:
                                 output_queue.put_nowait({"type": "text_delta", "delta": chunk.delta.text, "index": self.output_index})
                             continue
-                        if chunk.type == "content_block_delta" and chunk.delta.type == "input_json_delta":
+                        elif chunk.type == "content_block_delta" and chunk.delta.type == "input_json_delta":
                             buffer += chunk.delta.partial_json
                             if output_queue:
                                 output_queue.put_nowait({"type": "input_json_delta", "delta": chunk.delta.partial_json, "index": self.output_index})
 
-                        if chunk.type == "content_block_stop":
+                        elif chunk.type == "content_block_stop":
                             content += buffer
                             if buffer_type == "tool_use":
                                 current_tool["function"]["arguments"] = buffer
@@ -268,7 +285,21 @@ class ChatBot:
                             if output_queue:
                                 output_queue.put_nowait({"type": "stop", "content_block": chunk.content_block.model_dump(), "index": self.output_index})
                             self.output_index += 1
-                return LLMResponse(content=content, tool_calls=tool_calls)
+
+                # Map Anthropic stop reasons to standard finish reasons
+                if finish_reason == "end_turn":
+                    finish_reason = "stop"
+                elif finish_reason == "max_tokens":
+                    finish_reason = "length"
+                elif finish_reason == "tool_use":
+                    finish_reason = "tool_calls"
+
+                return LLMResponse(
+                    content=content,
+                    tool_calls=tool_calls,
+                    finish_reason=finish_reason,
+                    native_finish_reason=native_finish_reason
+                )
         except Exception as e:
             logger.error(f"Error during tool call: {e}")
             raise e
