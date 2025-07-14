@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 import json
 
 from spoon_ai.schema import Message, LLMResponse, ToolCall
+from spoon_ai.utils.config_manager import ConfigManager
 
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -44,15 +45,18 @@ def to_dict(message: Message) -> dict:
 class ChatBot:
     # def __init__(self, model_name: str = "gpt-4.5-preview", llm_config: dict = None, llm_provider: str = "openai", api_key: str = None):
     def __init__(self, model_name: str = None, llm_config: dict = None, llm_provider: str = None, api_key: str = None, base_url: str = None):
-        # Use parameters provided by user first
-        self.llm_provider = llm_provider
-        self.model_name = model_name
+        # Initialize configuration manager
+        config_manager = ConfigManager()
+
+        # Use parameters provided by user first, then fall back to config, then environment
+        self.model_name = model_name or config_manager.get_model_name()
+        self.llm_provider = llm_provider or config_manager.get_llm_provider()
+        self.base_url = base_url or config_manager.get_base_url() or os.getenv("BASE_URL")
         self.api_key = api_key
         self.llm_config = llm_config
         self.output_index = 0
-        self.base_url = base_url
 
-        # If llm_provider is not specified, determine it from environment variables
+        # If llm_provider is still not specified, determine it from environment variables
         if self.llm_provider is None:
             if os.getenv("OPENAI_API_KEY"):
                 logger.info("Using OpenAI API")
@@ -65,11 +69,44 @@ class ChatBot:
             else:
                 raise ValueError("No API key provided, please set OPENAI_API_KEY or ANTHROPIC_API_KEY")
 
-        if self.llm_provider == "openai":
-            self.llm = AsyncOpenAI(api_key=api_key if api_key else os.getenv("OPENAI_API_KEY"), base_url=base_url if base_url else os.getenv("BASE_URL"))
-        elif self.llm_provider == "anthropic":
+        # Get API key from config if not provided
+        # When using a custom base_url (like OpenRouter), use the openai API key
+        # since these services typically use OpenAI-compatible APIs
+        if not self.api_key:
+            if self.base_url:
+                # For custom base URLs (like OpenRouter), use openai API key
+                self.api_key = config_manager.get_api_key("openai")
+            else:
+                # For native APIs, use the provider-specific API key
+                self.api_key = config_manager.get_api_key(self.llm_provider)
+
+        # Set default model names if still not specified
+        if not self.model_name:
+            if self.llm_provider == "openai":
+                self.model_name = "gpt-4.1"
+            elif self.llm_provider == "anthropic":
+                self.model_name = "claude-3-7-sonnet-20250219"
+
+        logger.info(f"Initializing ChatBot with provider: {self.llm_provider}, model: {self.model_name}, base_url: {self.base_url}")
+
+        # Determine API logic to use based on base_url and provider
+        # If base_url is specified (like OpenRouter), use OpenAI-compatible API regardless of model name
+        # Only use native Anthropic API when using official Anthropic endpoint
+        if self.base_url or self.llm_provider == "openai":
+            # Use OpenAI-compatible API (works for OpenAI, OpenRouter, and other compatible providers)
+            self.api_logic = "openai"
+            self.llm = AsyncOpenAI(
+                api_key=self.api_key or os.getenv("OPENAI_API_KEY"),
+                base_url=self.base_url
+            )
+        elif self.llm_provider == "anthropic" and not self.base_url:
+            # Use native Anthropic API only when no custom base_url is specified
+            self.api_logic = "anthropic"
             http_client = AsyncClient(follow_redirects=True)
-            self.llm = AsyncAnthropic(api_key=api_key if api_key else os.getenv("ANTHROPIC_API_KEY"), http_client=http_client)
+            self.llm = AsyncAnthropic(
+                api_key=self.api_key or os.getenv("ANTHROPIC_API_KEY"),
+                http_client=http_client
+            )
         else:
             raise ValueError(f"Invalid LLM provider: {llm_provider}")
 
@@ -83,10 +120,10 @@ class ChatBot:
             else:
                 raise ValueError(f"Invalid message type: {type(message)}")
 
-        if self.llm_provider == "openai":
+        if self.api_logic == "openai":
             response = await self.llm.chat.completions.create(messages=formatted_messages, model=self.model_name, max_tokens=4096, temperature=0.3, stream=False)
             return response.choices[0].message.content
-        elif self.llm_provider == "anthropic":
+        elif self.api_logic == "anthropic":
             response = await self.llm.messages.create(
                 model=self.model_name,
                 max_tokens=4096,
@@ -111,7 +148,7 @@ class ChatBot:
                 raise ValueError(f"Invalid message type: {type(message)}")
 
         try:
-            if self.llm_provider == "openai":
+            if self.api_logic == "openai":
                 response = await self.llm.chat.completions.create(
                     messages=formatted_messages,
                     model=self.model_name,
@@ -122,17 +159,8 @@ class ChatBot:
                     tool_choice=tool_choice,
                     **kwargs
                 )
-                choice = response.choices[0]
-                message = choice.message
-
-                # Create LLMResponse with finish_reason information
-                return LLMResponse(
-                    content=message.content or "",
-                    tool_calls=message.tool_calls or [],
-                    finish_reason=choice.finish_reason,
-                    native_finish_reason=getattr(choice, 'native_finish_reason', None)
-                )
-            elif self.llm_provider == "anthropic":
+                return response.choices[0].message
+            elif self.api_logic == "anthropic":
                 def to_anthropic_tools(tools: List[dict]) -> List[dict]:
                     return [{"name": tool["function"]["name"], "description": tool["function"]["description"], "input_schema": tool["function"]["parameters"]} for tool in tools]
 
