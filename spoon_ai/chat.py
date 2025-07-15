@@ -159,24 +159,60 @@ class ChatBot:
                     tool_choice=tool_choice,
                     **kwargs
                 )
-                return response.choices[0].message
+
+                # Extract message and finish_reason from OpenAI response
+                message = response.choices[0].message
+                finish_reason = response.choices[0].finish_reason
+
+                # Convert OpenAI tool calls to our ToolCall format
+                tool_calls = []
+                if message.tool_calls:
+                    from spoon_ai.schema import Function
+                    for tool_call in message.tool_calls:
+                        tool_calls.append(ToolCall(
+                            id=tool_call.id,
+                            type=tool_call.type,
+                            function=Function(
+                                name=tool_call.function.name,
+                                arguments=tool_call.function.arguments
+                            )
+                        ))
+
+                # Map OpenAI finish reasons to standardized values
+                standardized_finish_reason = finish_reason
+                if finish_reason == "stop":
+                    standardized_finish_reason = "stop"
+                elif finish_reason == "length":
+                    standardized_finish_reason = "length"
+                elif finish_reason == "tool_calls":
+                    standardized_finish_reason = "tool_calls"
+                elif finish_reason == "content_filter":
+                    standardized_finish_reason = "content_filter"
+
+                # Return consistent LLMResponse object
+                return LLMResponse(
+                    content=message.content or "",
+                    tool_calls=tool_calls,
+                    finish_reason=standardized_finish_reason,
+                    native_finish_reason=finish_reason
+                )
             elif self.api_logic == "anthropic":
                 def to_anthropic_tools(tools: List[dict]) -> List[dict]:
                     return [{"name": tool["function"]["name"], "description": tool["function"]["description"], "input_schema": tool["function"]["parameters"]} for tool in tools]
 
-                # 转换消息格式为 Anthropic 格式
+                # Convert message format to Anthropic format
                 anthropic_messages = []
                 system_content = system_msg or ""
 
                 for message in formatted_messages:
                     role = message.get("role")
 
-                    # Anthropic 只支持 user 和 assistant 角色
+                    # Anthropic only supports user and assistant roles
                     if role == "system":
-                        # 系统消息已在上面处理，这里跳过
+                        # System messages are handled above, skip here
                         continue
                     elif role == "tool":
-                        # 工具消息转换为用户消息，内容包含tool_result
+                        # Tool messages are converted to user messages, content contains tool_result
                         anthropic_messages.append({
                             "role": "user",
                             "content": [{
