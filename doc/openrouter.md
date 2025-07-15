@@ -58,16 +58,16 @@ openrouter_agent = SpoonReactAI(
 
 ## 5. 🧪 Example model_name Values
 
-- `openai/gpt-4` - GPT-4 model
-- `openai/gpt-3.5-turbo` - GPT-3.5 Turbo
-- `anthropic/claude-sonnet-4` - claude-sonnet-4
-- `anthropic/claude-3-opus` - Claude 3 Opus
-- `meta-llama/llama-3.1-8b-instruct` - Llama 3.1 8B
+- `openai/gpt-4o` - GPT-4o model
+- `openai/gpt-4.1` - GPT-4.1 model
+- `anthropic/claude-sonnet-4` - Claude 4 sonnet model
+- `anthropic/claude-opus-4` - Claude 4 opus model
+- `deepseek/deepseek-r1` - DeepSeek R1 model
 - For more models, see [OpenRouter Models List](https://openrouter.ai/models)
 
 ## ✅ Next Steps
 
 Once OpenRouter is set up:
 
-- 🧩 [Learn to build your own agent](./agent.md)
-- - 🌐 [Integrate Web3 tools with MCP](./mcp_mode_usage.md)
+🧩 [Learn to build your own agent](./agent.md)
+🌐 [Integrate Web3 tools with MCP](./mcp_mode_usage.md)
