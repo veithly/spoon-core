@@ -2,12 +2,13 @@
 
 This guide introduces three integration modes for using Web3 tools with SpoonOS via the MCP protocol, along with code structure and example commands.
 
-### Mode 1: Built-in Agent Mode
+## Mode 1: Built-in Agent Mode
 
 In this mode, you encapsulate your custom tools into the MCP tool collection (such as creating a new mcp_thirdweb_collection, or directly changing the mcp_tools_collection.py file), and then call it through an Agent that inherits from SpoonReactAI and MCPClientMixin (such as SpoonThirdWebMCP). This mode is maintained by the platform Agent configuration and can be used directly by users.
 
-#### Structural diagram
+### Structural diagram
 
+```markdown
 [User Prompt]
 ↓
 [SpoonThirdWebMCP Agent] 🧠
@@ -17,8 +18,9 @@ In this mode, you encapsulate your custom tools into the MCP tool collection (su
 [GetBlocksFromThirdwebInsight / GetWalletTransactionsTool / etc.]
 ↓
 [Thirdweb Insight API]
+```
 
-#### 📁 Examples Directory
+### 📁 Examples Directory
 
 The following directory contains runnable examples:
 
@@ -29,7 +31,7 @@ examples/
 │   └── mcp_thirdweb_collection.py
 ```
 
-##### Step 0. Install Dependencies
+#### Step1. Install Dependencies
 
 You have two ways to install the spoon-toolkits package:
 
@@ -52,7 +54,7 @@ pip install spoon-toolkits
 
 Use Option 1 if you want to modify the toolkit source code or track the latest updates.
 
-##### Step 1. Start the MCP Tool Server
+#### Step2. Start the MCP Tool Server
 
 Sample: examples/mcp_thirdweb_collection.py
 
@@ -133,9 +135,9 @@ Before calling the agent, make sure the MCP service is running:
 python mcp_thirdweb_collection.py
 ```
 
-##### Step 2
+#### Step 3
 
-###### 2.1 Define Agent and connect to MCP
+###### 3.1 Define Agent and connect to MCP
 
 ```python
 from spoon_ai.agents.spoon_react import SpoonReactAI
@@ -186,7 +188,7 @@ class SpoonThirdWebAgent(SpoonReactAI, MCPClientMixin):
         MCPClientMixin.__init__(self, mcp_transport=kwargs.get('mcp_transport', SSETransport("http://127.0.0.1:8765/sse")))
 ```
 
-###### 2.2 User operation mode
+###### 3.2 User operation mode
 
 Get client_id from https://thirdweb.com/login
 
@@ -225,7 +227,7 @@ Expected Result:
 ]
 ```
 
-### Mode 2: Community Agent Mode
+## Mode 2: Community Agent Mode
 
 In this mode, you can reuse agents published by others in the community, without writing your own tool code. These agents are registered via GitHub using the MCP protocol, and called via mcp-proxy.
 
@@ -239,7 +241,7 @@ You want to orchestrate many agents from different repos
 
 Register the tool to the MCP service
 
-#### Step-by-Step: Community Agent Mode
+### Step-by-Step: Community Agent Mode
 
 Use Community Agent Mode to connect with agents hosted on GitHub via the MCP protocol — without writing custom tool or agent code.
 

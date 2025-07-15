@@ -93,9 +93,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 ```
 
-
 For advanced config methods (CLI setup, config.json, PowerShell), see docs/configuration.md.
-
 
 ## Using OpenRouter (Multi-LLM Gateway)
 
@@ -144,9 +142,7 @@ python -m spoon_ai.tools.mcp_tools_collection
 python main.py
 ```
 
-
 Try chatting with your agent:
-
 
 ```bash
 > action chat
@@ -208,30 +204,22 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-
 Register your own tools, override run(), or extend with MCP integrations. See docs/agents.md or docs/mcp_mode_usage.md
 
+## 🗂️ Project Structure
 
-## 📁 Repository Structure
-
-```yaml
-spoon-core/
-├── README.md
-├── .env.example
-├── requirements.txt
-├── main.py
-│
-├── examples/             # 🧪 Examples
-│   ├── agents/           # 🧠 Agent demos (GitHub,Weather)
-│   └── mcp/              # 🔌 Tool server examples
-│
-├── spoon_ai/             # 🍴 Core agent framework
-│
-├── docs/                 # 📚 Documentation
-│   ├── installation.md
-│   ├── configuration.md
-│   ├── openrouter.md
-│   ├── cli.md
-│   ├── agents.md
-│   └── mcp_mode_usage.md
-```
+- [README.md](./README.md)
+- [.env.example](./.env.example)
+- [requirements.txt](./requirements.txt)
+- [main.py](./main.py)
+- [examples/](./examples)
+  - [agent/](./examples/agent/) – 🧠 Agent demos ( Weather)
+  - [mcp/](./examples/mcp/) – 🔌 Tool server examples
+- [spoon_ai/](./spoon_ai) – 🍴 Core agent framework
+- [docs/](./doc)
+  - [installation.md](./doc/installation.md)
+  - [configuration.md](./doc/configuration.md)
+  - [openrouter.md](./doc/openrouter.md)
+  - [cli.md](./do/cli.md)
+  - [agent.md](./doc/agent.md)
+  - [mcp_mode_usage.md](./doc/mcp_mode_usage.md)
