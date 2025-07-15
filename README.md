@@ -93,7 +93,9 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 ```
 
+
 For advanced config methods (CLI setup, config.json, PowerShell), see docs/configuration.md.
+
 
 ## Using OpenRouter (Multi-LLM Gateway)
 
@@ -142,7 +144,9 @@ python -m spoon_ai.tools.mcp_tools_collection
 python main.py
 ```
 
+
 Try chatting with your agent:
+
 
 ```bash
 > action chat
@@ -204,7 +208,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+
 Register your own tools, override run(), or extend with MCP integrations. See docs/agents.md or docs/mcp_mode_usage.md
+
 
 ## 📁 Repository Structure
 
