@@ -39,7 +39,8 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
 - **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
 - **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
-- **📡 Scalable Data Access** - Supports structured and unstructured data via MCP integration
+- **🔌 MCP (Message Connectivity Protocol)** – Dynamic, protocol-driven tool invocation system. Agents can discover and execute tools at runtime over `stdio`, `http`, or `websocket` transports — without hardcoding or restarts.
+- **📡 Scalable Data Access** – Combined with MCP, agents gain seamless access to structured/unstructured data, including databases, Web3 RPCs, external APIs, and more.
 - **💻 Interactive CLI** - Feature-rich command line interface
 - **🔄 State Management** - Comprehensive session history and state persistence
 - **🔗Composable Agent Logic** - Create agents that can sense, reason, plan, and execute modularly — enabling use cases across DeFi, creator economy, and more
@@ -204,7 +205,24 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Register your own tools, override run(), or extend with MCP integrations. See docs/agents.md or docs/mcp_mode_usage.md
+Register your own tools, override run(), or extend with MCP integrations. See docs/agent.md or docs/mcp_mode_usage.md
+📖 [Full guide](.doc/agent.md)
+
+📁 [Example agent](./examples/agent/my_agent_demo)
+
+## 🔌 Advanced: Use Web3 Tools via MCP
+
+SpoonOS supports runtime pluggable agents using the MCP (Message Connectivity Protocol) — allowing your agent to connect to a live tool server (via SSE/WebSocket/HTTP) and call tools like get_contract_events or get_wallet_activity with no extra code.
+
+Two ways to build MCP-powered agents:
+
+Built-in Agent Mode: Build and run your own MCP server (e.g., mcp_thirdweb_collection.py) and connect to it using an MCPClientMixin agent.
+
+Community Agent Mode: Use mcp-proxy to connect to open-source agents hosted on GitHub.
+
+📖 [Full guide](.doc/mcp_mode_usage.md)
+
+📁 [Example mcp](./examples/mcp/)
 
 ## 🗂️ Project Structure
 
