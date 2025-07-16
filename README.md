@@ -206,9 +206,10 @@ if __name__ == "__main__":
 ```
 
 Register your own tools, override run(), or extend with MCP integrations. See docs/agent.md or docs/mcp_mode_usage.md
-📖 [Full guide](.doc/agent.md)
 
-📁 [Example agent](./examples/agent/my_agent_demo)
+📖 [Full guide](/doc/agent.md)
+
+📁 [Example agent](/examples/agent/my_agent_demo)
 
 ## 🔌 Advanced: Use Web3 Tools via MCP
 
@@ -220,9 +221,9 @@ Built-in Agent Mode: Build and run your own MCP server (e.g., mcp_thirdweb_colle
 
 Community Agent Mode: Use mcp-proxy to connect to open-source agents hosted on GitHub.
 
-📖 [Full guide](.doc/mcp_mode_usage.md)
+📁 [Full guide](/doc/mcp_mode_usage.md)
 
-📁 [Example mcp](./examples/mcp/)
+📁 [Example mcp](/examples/mcp/)
 
 ## 🗂️ Project Structure
 
@@ -234,7 +235,7 @@ Community Agent Mode: Use mcp-proxy to connect to open-source agents hosted on G
   - [agent/](./examples/agent/) – 🧠 Agent demos ( Weather)
   - [mcp/](./examples/mcp/) – 🔌 Tool server examples
 - [spoon_ai/](./spoon_ai) – 🍴 Core agent framework
-- [docs/](./doc)
+- [doc/](./doc)
   - [installation.md](./doc/installation.md)
   - [configuration.md](./doc/configuration.md)
   - [openrouter.md](./doc/openrouter.md)
