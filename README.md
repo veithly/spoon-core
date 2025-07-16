@@ -242,7 +242,3 @@ Community Agent Mode: Use mcp-proxy to connect to open-source agents hosted on G
   - [cli.md](./do/cli.md)
   - [agent.md](./doc/agent.md)
   - [mcp_mode_usage.md](./doc/mcp_mode_usage.md)
-
-```
-
-```
