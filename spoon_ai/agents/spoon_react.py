@@ -9,11 +9,18 @@ import logging
 from spoon_ai.chat import ChatBot
 from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from spoon_ai.tools import ToolManager
+from spoon_ai.utils.config_manager import ConfigManager
 
 from .toolcall import ToolCallAgent
 from .mcp_client_mixin import MCPClientMixin
 
 logger = logging.getLogger(__name__)
+
+def create_configured_chatbot():
+    """Create a ChatBot instance with proper configuration from ConfigManager"""
+    # Simply create ChatBot with no parameters to let it handle its own configuration
+    # This ensures the exact same provider selection logic is used
+    return ChatBot()
 
 class SpoonReactAI(ToolCallAgent):
 
@@ -27,7 +34,7 @@ class SpoonReactAI(ToolCallAgent):
     tool_choice: str = "auto"
 
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
-    llm: ChatBot = Field(default_factory=lambda: ChatBot())
+    llm: ChatBot = Field(default_factory=create_configured_chatbot)
 
     mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, FastMCPTransport] = Field(default="mcp_server")
     mcp_topics: List[str] = Field(default=["spoon_react"])
