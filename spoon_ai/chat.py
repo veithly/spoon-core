@@ -56,18 +56,48 @@ class ChatBot:
         self.llm_config = llm_config
         self.output_index = 0
 
-        # If llm_provider is still not specified, determine it from environment variables
+        # If llm_provider is still not specified, determine it from config first, then environment variables
         if self.llm_provider is None:
-            if os.getenv("OPENAI_API_KEY"):
-                logger.info("Using OpenAI API")
-                self.model_name = self.model_name or "gpt-4.1"
-                self.llm_provider = "openai"
-            elif os.getenv("ANTHROPIC_API_KEY"):
-                logger.info("Using Anthropic API")
-                self.model_name = self.model_name or "claude-3-7-sonnet-20250219"
-                self.llm_provider = "anthropic"
+            # Get configured providers from config.json (ignore environment variables)
+            config_data = config_manager._load_config()
+            configured_providers = []
+
+            # Only consider providers that are explicitly configured in config.json
+            api_keys = config_data.get("api_keys", {})
+
+            if "anthropic" in api_keys and not config_manager._is_placeholder_value(api_keys["anthropic"]):
+                configured_providers.append("anthropic")
+            if "openai" in api_keys and not config_manager._is_placeholder_value(api_keys["openai"]):
+                configured_providers.append("openai")
+            if "deepseek" in api_keys and not config_manager._is_placeholder_value(api_keys["deepseek"]):
+                configured_providers.append("deepseek")
+
+            # If config.json has explicit providers, only use those (ignore environment)
+            if configured_providers:
+                if "anthropic" in configured_providers:
+                    logger.info("Using Anthropic API from config")
+                    self.model_name = self.model_name or "claude-sonnet-4-20250514"
+                    self.llm_provider = "anthropic"
+                elif "openai" in configured_providers:
+                    logger.info("Using OpenAI API from config")
+                    self.model_name = self.model_name or "gpt-4.1"
+                    self.llm_provider = "openai"
+                elif "deepseek" in configured_providers:
+                    logger.info("Using DeepSeek API from config")
+                    self.model_name = self.model_name or "deepseek-chat"
+                    self.llm_provider = "openai"  # DeepSeek uses OpenAI-compatible API
             else:
-                raise ValueError("No API key provided, please set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+                # Fallback to environment variables only if no config providers
+                if os.getenv("ANTHROPIC_API_KEY"):
+                    logger.info("Using Anthropic API from environment")
+                    self.model_name = self.model_name or "claude-sonnet-4-20250514"
+                    self.llm_provider = "anthropic"
+                elif os.getenv("OPENAI_API_KEY"):
+                    logger.info("Using OpenAI API from environment")
+                    self.model_name = self.model_name or "gpt-4.1"
+                    self.llm_provider = "openai"
+                else:
+                    raise ValueError("No API key found in config or environment. Please configure API keys in config.json or set OPENAI_API_KEY/ANTHROPIC_API_KEY environment variables")
 
         # Get API key from config if not provided
         # When using a custom base_url (like OpenRouter), use the openai API key
@@ -85,7 +115,7 @@ class ChatBot:
             if self.llm_provider == "openai":
                 self.model_name = "gpt-4.1"
             elif self.llm_provider == "anthropic":
-                self.model_name = "claude-3-7-sonnet-20250219"
+                self.model_name = "claude-sonnet-4-20250514"
 
         logger.info(f"Initializing ChatBot with provider: {self.llm_provider}, model: {self.model_name}, base_url: {self.base_url}")
 

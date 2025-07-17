@@ -149,7 +149,7 @@ openai_agent = SpoonReactAI(
 
 # Using Anthropic's Claude
 claude_agent = SpoonReactAI(
-    llm=ChatBot(model_name="claude-3-7-sonnet-20250219", llm_provider="anthropic")
+    llm=ChatBot(model_name="claude-sonnet-4-20250514", llm_provider="anthropic")
 )
 
 
