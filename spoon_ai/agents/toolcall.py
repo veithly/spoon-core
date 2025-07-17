@@ -288,8 +288,15 @@ class ToolCallAgent(ReActAgent):
 
     def _should_terminate_on_finish_reason(self, response) -> bool:
         """Check if agent should terminate based on finish_reason signals."""
-        return (getattr(response, 'finish_reason', None) == "stop" and
-                getattr(response, 'native_finish_reason', None) == "stop")
+        # For Anthropic: native_finish_reason="end_turn" maps to finish_reason="stop"
+        # For OpenAI: both finish_reason and native_finish_reason are "stop"
+        finish_reason = getattr(response, 'finish_reason', None)
+        native_finish_reason = getattr(response, 'native_finish_reason', None)
+
+        if finish_reason == "stop":
+            # Accept either "stop" (OpenAI) or "end_turn" (Anthropic) as valid termination signals
+            return native_finish_reason in ["stop", "end_turn"]
+        return False
 
     def clear(self):
         self.memory.clear()
