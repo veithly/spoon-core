@@ -96,6 +96,46 @@ load_dotenv(override=True)
 
 For advanced config methods (CLI setup, config.json, PowerShell), see docs/configuration.md.
 
+### Configuration Model
+
+SpoonOS uses a hybrid configuration system that combines a `.env` file for initial setup with a dynamic `config.json` for runtime settings. This provides flexibility for both static environment setup and on-the-fly adjustments via the CLI.
+
+#### Loading Priority
+
+The configuration is loaded with the following priority:
+
+1.  **`config.json` (Highest Priority)**: This file is the primary source of configuration at runtime. If it exists, its values are used directly, **overriding** any corresponding environment variables set in `.env`. You can modify this file using the `config` command in the CLI.
+
+2.  **Environment Variables (`.env`) (Lowest Priority)**: This file is used for initial setup. On the first run, if `config.json` is not found, the system will read the variables from your `.env` file to generate a new `config.json`. Any changes to `.env` after `config.json` has been created will **not** be reflected unless you delete `config.json` and restart the application.
+
+This model ensures that sensitive keys and environment-specific settings are kept in `.env` (which should not be committed to version control), while `config.json` handles user-level customizations and runtime state.
+
+#### `config.json` Parameters
+
+The `config.json` file manages agent and API settings. Below are the supported parameters:
+
+| Parameter       | Type     | Description                                                                                               | Default                               |
+|-----------------|----------|-----------------------------------------------------------------------------------------------------------|---------------------------------------|
+| `api_keys`      | `object` | A dictionary containing API keys for different LLM providers (e.g., `openai`, `anthropic`, `deepseek`).      | `{}`                                  |
+| `base_url`      | `string` | The base URL for the API endpoint, particularly useful for custom or proxy servers like OpenRouter.           | `""`                                  |
+| `default_agent` | `string` | The default agent to use for tasks.                                                                       | `"default"`                           |
+| `llm_provider`  | `string` | The name of the LLM provider to use (e.g., `openai`, `anthropic`). Overrides provider detection from model name. | `"openai"`                            |
+| `model_name`    | `string` | The specific model to use for the selected provider (e.g., `gpt-4.1`, `claude-sonnet-4-20250514`).           | `null`                                |
+
+Here is an example `config.json` where a user wants to use OpenAI. You only need to provide the key for the service you intend to use.
+
+```json
+{
+  "api_keys": {
+    "openai": "sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  "base_url": "https://api.openai.com/v1",
+  "default_agent": "default",
+  "llm_provider": "openai",
+  "model_name": "gpt-4"
+}
+```
+
 ## Using OpenRouter (Multi-LLM Gateway)
 
 ```python
