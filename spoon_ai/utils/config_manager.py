@@ -28,19 +28,6 @@ class ConfigManager:
                 "default_agent": "default"
             }
 
-        # Create default configuration if loading fails or file doesn't exist
-        default_config = {
-            "api_keys": {
-                "openai": "sk-your-openai-api-key-here",
-                "anthropic": "sk-ant-your-anthropic-api-key-here",
-                "deepseek": "your-deepseek-api-key-here"
-            },
-            "base_url": "",
-            "default_agent": "default"
-        }
-        self._save_config(default_config)
-        return default_config
-
     def _is_placeholder_value(self, value: str) -> bool:
         """
         Check if the given value is a placeholder API key.
