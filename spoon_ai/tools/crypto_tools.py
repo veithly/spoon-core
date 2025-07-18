@@ -38,6 +38,14 @@ def get_crypto_tools() -> List[BaseTool]:
         from spoon_toolkits.crypto.predict_price import PredictPrice
         from spoon_toolkits.crypto.token_holders import TokenHolders
 
+        # Import crypto_powerdata tools from spoon-toolkit
+        from spoon_toolkits.crypto_powerdata import (
+            CryptoPowerDataCEXTool,
+            CryptoPowerDataDEXTool,
+            CryptoPowerDataIndicatorsTool,
+            CryptoPowerDataPriceTool,
+        )
+
         # Instantiate all crypto tools
         tool_classes = [
             GetTokenPriceTool,
@@ -49,7 +57,11 @@ def get_crypto_tools() -> List[BaseTool]:
             LendingRateMonitorTool,
             CryptoMarketMonitor,
             PredictPrice,
-            TokenHolders
+            TokenHolders,
+            CryptoPowerDataCEXTool,
+            CryptoPowerDataDEXTool,
+            CryptoPowerDataIndicatorsTool,
+            CryptoPowerDataPriceTool,
         ]
 
         for tool_class in tool_classes:
@@ -117,14 +129,21 @@ class CryptoToolsConfig:
         "lending_rate_monitor",
         "crypto_market_monitor",
         "predict_price",
-        "token_holders"
+        "token_holders",
+        "crypto_powerdata_cex",
+        "crypto_powerdata_dex",
+        "crypto_powerdata_indicators",
+        "crypto_powerdata_price",
     ]
 
     # Tools that require special configuration
     TOOLS_REQUIRING_CONFIG = [
         "lending_rate_monitor",  # May need API keys
         "predict_price",         # Requires ML dependencies
-        "token_holders"          # Requires Bitquery API key
+        "token_holders",          # Requires Bitquery API key
+        "crypto_powerdata_cex", # May need API keys for private data
+        "crypto_powerdata_dex", # Requires OKX API Key
+        "crypto_powerdata_price", # Requires OKX/CEX API Keys
     ]
 
     @classmethod

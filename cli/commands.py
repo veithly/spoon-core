@@ -283,7 +283,9 @@ class SpoonAICLI:
                           any(tool.name == crypto_name for crypto_name in [
                               "get_token_price", "get_24h_stats", "get_kline_data",
                               "price_threshold_alert", "lp_range_check", "monitor_sudden_price_increase",
-                              "lending_rate_monitor", "crypto_market_monitor", "predict_price", "token_holders"
+                              "lending_rate_monitor", "crypto_market_monitor", "predict_price", "token_holders",
+                              "crypto_powerdata_cex", "crypto_powerdata_dex",
+                              "crypto_powerdata_indicators", "crypto_powerdata_price"
                           ])]
 
             if crypto_tools:
