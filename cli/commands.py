@@ -250,11 +250,16 @@ class SpoonAICLI:
         return f"Spoon AI {agent_part} > "
 
     def _handle_load_agent(self, input_list: List[str]):
-        if len(input_list) != 1:
-            logger.error("Usage: load-agent <agent_name>")
-            return
-        name = input_list[0]
-        self._load_agent(name)
+    if not input_list:
+        logger.error("Missing agent name. Usage: load-agent <agent_name>")
+        return
+
+    name = input_list[0]
+    if name not in ["react", "spoon_react_mcp"]:
+        logger.error(f"Invalid agent name: '{name}'. Use 'list-agents' to see available agents.")
+        return
+
+    self._load_agent(name)
 
     def _get_available_agents(self) -> Dict[str, Dict[str, Any]]:
         """Get available agents from configuration and built-in definitions"""
@@ -1162,11 +1167,21 @@ class SpoonAICLI:
         self._should_exit = True
 
     def _handle_new_chat(self, input_list: List[str]):
-        if not self.current_agent:
-            logger.error("No agent loaded")
-            return
+    if not self.current_agent:
+        logger.error("No agent loaded")
+        return
 
-        logger.info(f"Started new chat with {self.current_agent.name}")
+    # Reset chat history with metadata
+    self.current_agent.chat_history = {
+        'metadata': {
+            'agent_name': self.current_agent.name,
+            'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        },
+        'messages': []
+    }
+
+    logger.info(f"Started new chat with {self.current_agent.name} (chat history cleared)")
 
     def _handle_list_chats(self, input_list: List[str]):
         chat_logs_dir = Path('chat_logs')
@@ -1297,7 +1312,6 @@ class SpoonAICLI:
         logger.info("  config api_key openai sk-xxxx")
         logger.info("  config api_key anthropic sk-ant-xxxx")
         logger.info("  config default_agent my_agent")
-
 
 
     def _handle_reload_config(self, input_list: List[str]):
