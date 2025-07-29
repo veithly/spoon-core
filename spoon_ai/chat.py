@@ -5,6 +5,7 @@ import json
 
 from spoon_ai.schema import Message, LLMResponse, ToolCall
 from spoon_ai.utils.config_manager import ConfigManager
+from spoon_ai.llm.manager import LLMManager, get_llm_manager
 
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -43,8 +44,19 @@ def to_dict(message: Message) -> dict:
     return messages
 
 class ChatBot:
-    def __init__(self, model_name: str = None, llm_config: dict = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_prompt_cache: bool = True):
-        # Initialize configuration manager
+    def __init__(self, model_name: str = None, llm_config: dict = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_prompt_cache: bool = True, use_llm_manager: bool = False):
+        # Check if we should use the new LLM manager architecture
+        self.use_llm_manager = use_llm_manager
+        
+        if self.use_llm_manager:
+            # Use new LLM manager architecture
+            self.llm_manager = get_llm_manager()
+            self.model_name = model_name
+            self.llm_provider = llm_provider
+            logger.info("ChatBot initialized with LLM Manager architecture")
+            return
+        
+        # Initialize configuration manager (legacy path)
         config_manager = ConfigManager()
         
         # Configure prompt caching
@@ -164,6 +176,35 @@ class ChatBot:
         return self.cache_metrics.copy()
 
     async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        if self.use_llm_manager:
+            return await self._ask_with_manager(messages, system_msg, output_queue)
+        return await self._ask_legacy(messages, system_msg, output_queue)
+    
+    async def _ask_with_manager(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        """Ask method using the new LLM manager architecture."""
+        # Convert messages to the expected format
+        formatted_messages = []
+        if system_msg:
+            formatted_messages.append(Message(role="system", content=system_msg))
+        
+        for message in messages:
+            if isinstance(message, dict):
+                formatted_messages.append(Message(**message))
+            elif isinstance(message, Message):
+                formatted_messages.append(message)
+            else:
+                raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Use LLM manager for the request
+        response = await self.llm_manager.chat(
+            messages=formatted_messages,
+            provider=self.llm_provider
+        )
+        
+        return response.content
+    
+    async def _ask_legacy(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        """Legacy ask method using the original ChatBot logic."""
         formatted_messages = [] if system_msg is None else [{"role": "system", "content": system_msg}]
         for message in messages:
             if isinstance(message, dict):
@@ -204,6 +245,36 @@ class ChatBot:
 
     # @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=60))
     async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
+        if self.use_llm_manager:
+            return await self._ask_tool_with_manager(messages, system_msg, tools, tool_choice, output_queue, **kwargs)
+        return await self._ask_tool_legacy(messages, system_msg, tools, tool_choice, output_queue, **kwargs)
+    
+    async def _ask_tool_with_manager(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
+        """Ask tool method using the new LLM manager architecture."""
+        # Convert messages to the expected format
+        formatted_messages = []
+        if system_msg:
+            formatted_messages.append(Message(role="system", content=system_msg))
+        
+        for message in messages:
+            if isinstance(message, dict):
+                formatted_messages.append(Message(**message))
+            elif isinstance(message, Message):
+                formatted_messages.append(message)
+            else:
+                raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Use LLM manager for the tool request
+        response = await self.llm_manager.chat_with_tools(
+            messages=formatted_messages,
+            tools=tools or [],
+            provider=self.llm_provider,
+            **kwargs
+        )
+        
+        return response
+    
+    async def _ask_tool_legacy(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
         if tool_choice not in ["auto", "none", "required"]:
             tool_choice = "auto"
 

@@ -19,9 +19,13 @@ logger = logging.getLogger(__name__)
 
 def create_configured_chatbot():
     """Create a ChatBot instance with proper configuration from ConfigManager"""
-    # Simply create ChatBot with no parameters to let it handle its own configuration
-    # This ensures the exact same provider selection logic is used
-    return ChatBot()
+    # Use the new LLM manager architecture by default for better extensibility
+    # Falls back to legacy mode if needed for compatibility
+    try:
+        return ChatBot(use_llm_manager=True)
+    except Exception as e:
+        logger.warning(f"Failed to initialize with LLM manager, falling back to legacy mode: {e}")
+        return ChatBot(use_llm_manager=False)
 
 class SpoonReactAI(ToolCallAgent):
 

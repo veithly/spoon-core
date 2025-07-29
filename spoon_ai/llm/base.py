@@ -3,12 +3,19 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union
 
-import toml
 from pydantic import BaseModel, Field
 
 from logging import getLogger
 
 from spoon_ai.schema import Message
+
+# Try to import toml, but make it optional
+try:
+    import toml
+    HAS_TOML = True
+except ImportError:
+    HAS_TOML = False
+
 logger = getLogger(__name__)
 
 
@@ -64,7 +71,17 @@ class LLMBase(ABC):
             return LLMConfig()
             
         try:
-            config_data = toml.load(config_path)
+            if config_path.endswith('.toml'):
+                if not HAS_TOML:
+                    logger.warning("TOML configuration file found but 'toml' package not installed")
+                    return LLMConfig()
+                config_data = toml.load(config_path)
+            else:
+                # Assume JSON format
+                import json
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+            
             llm_config = config_data.get(config_name, {})
             return LLMConfig(**llm_config)
         except Exception as e:

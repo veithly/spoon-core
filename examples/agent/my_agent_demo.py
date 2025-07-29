@@ -110,16 +110,51 @@ class MyInfoAgent(ToolCallAgent):
 
 
 async def main():
-    # Create an InfoAssistantAgent instance
-    info_agent = MyInfoAgent(llm=ChatBot(llm_provider="openai",model_name="anthropic/claude-sonnet-4", base_url="https://openrouter.ai/api/v1"))
-    print("=== Using InfoAssistantAgent ===")
+    print("=== Using InfoAssistantAgent with New LLM Architecture ===")
+    
+    # Option 1: Use new LLM manager architecture (recommended)
+    try:
+        info_agent = MyInfoAgent(
+            llm=ChatBot(
+                use_llm_manager=True,
+                llm_provider="openai",
+                model_name="anthropic/claude-sonnet-4"
+            )
+        )
+        print("✓ Using new LLM manager architecture")
+    except Exception as e:
+        print(f"⚠ Falling back to legacy mode: {e}")
+        # Option 2: Fallback to legacy mode for compatibility
+        info_agent = MyInfoAgent(
+            llm=ChatBot(
+                llm_provider="openai",
+                model_name="anthropic/claude-sonnet-4", 
+                base_url="https://openrouter.ai/api/v1",
+                use_llm_manager=False
+            )
+        )
+        print("✓ Using legacy ChatBot architecture")
 
     # Reset the Agent state
     info_agent.clear()
 
     # Run the Agent
+    print("\n🤖 Agent is processing your request...")
     response = await info_agent.run("What is the weather like in hongkong today?")
-    print(f"Answer: {response}\n")
+    print(f"\n📋 Answer: {response}\n")
+    
+    # Show agent statistics if using new architecture
+    if hasattr(info_agent.llm, 'use_llm_manager') and info_agent.llm.use_llm_manager:
+        try:
+            from spoon_ai.llm.manager import get_llm_manager
+            manager = get_llm_manager()
+            stats = manager.get_stats()
+            print("📊 LLM Manager Statistics:")
+            print(f"  - Default provider: {stats['manager']['default_provider']}")
+            print(f"  - Fallback chain: {stats['manager']['fallback_chain']}")
+            print(f"  - Load balancing: {stats['manager']['load_balancing_enabled']}")
+        except Exception as e:
+            print(f"⚠ Could not retrieve statistics: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

@@ -111,7 +111,39 @@ The CLI creates a configuration file at `config.json` in the project root direct
     "deepseek": "your-deepseek-api-key-here"
   },
   "base_url": "your_base_url_here",
-  "default_agent": "default"
+  "default_agent": "default",
+  "llm_providers": {
+    "openai": {
+      "api_key": "sk-your-openai-key",
+      "model": "gpt-4.1",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 30,
+      "retry_attempts": 3
+    },
+    "anthropic": {
+      "api_key": "sk-ant-your-key",
+      "model": "claude-sonnet-4-20250514",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 30,
+      "retry_attempts": 3
+    },
+    "gemini": {
+      "api_key": "your-gemini-key",
+      "model": "gemini-2.5-pro",
+      "max_tokens": 4096,
+      "temperature": 0.3
+    }
+  },
+  "llm_settings": {
+    "default_provider": "openai",
+    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "enable_monitoring": true,
+    "enable_caching": true,
+    "enable_debug_logging": false,
+    "max_concurrent_requests": 10
+  }
 }
 ```
 
@@ -181,6 +213,318 @@ chmod 600 .env
 
 # Monitor API usage regularly
 # Set up billing alerts on API provider dashboards
+```
+
+## 🏗️ LLM Provider Configuration
+
+SpoonOS supports multiple LLM providers through a unified configuration system. You can configure providers individually and set up fallback chains for high availability.
+
+### Provider Configuration Options
+
+Each provider supports the following configuration options:
+
+| Option | Type | Description | Default |
+|--------|------|-------------|---------|
+| `api_key` | string | Provider API key | Required |
+| `model` | string | Model name to use | Provider default |
+| `max_tokens` | integer | Maximum tokens per request | 4096 |
+| `temperature` | float | Response randomness (0.0-1.0) | 0.3 |
+| `timeout` | integer | Request timeout in seconds | 30 |
+| `retry_attempts` | integer | Number of retry attempts | 3 |
+| `base_url` | string | Custom API endpoint | Provider default |
+| `custom_headers` | object | Additional HTTP headers | {} |
+
+### Provider-Specific Configuration
+
+#### OpenAI Configuration
+```json
+{
+  "llm_providers": {
+    "openai": {
+      "api_key": "sk-your-openai-key",
+      "model": "gpt-4.1",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 30,
+      "retry_attempts": 3,
+      "base_url": "https://api.openai.com/v1"
+    }
+  }
+}
+```
+
+#### Anthropic Configuration
+```json
+{
+  "llm_providers": {
+    "anthropic": {
+      "api_key": "sk-ant-your-key",
+      "model": "claude-sonnet-4-20250514",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 30,
+      "retry_attempts": 3
+    }
+  }
+}
+```
+
+#### Gemini Configuration
+```json
+{
+  "llm_providers": {
+    "gemini": {
+      "api_key": "your-gemini-key",
+      "model": "gemini-2.5-pro",
+      "max_tokens": 4096,
+      "temperature": 0.3,
+      "timeout": 30
+    }
+  }
+}
+```
+
+### Global LLM Settings
+
+Configure global LLM behavior:
+
+```json
+{
+  "llm_settings": {
+    "default_provider": "openai",
+    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "enable_monitoring": true,
+    "enable_caching": true,
+    "enable_debug_logging": false,
+    "max_concurrent_requests": 10,
+    "cache_ttl": 3600,
+    "health_check_interval": 300
+  }
+}
+```
+
+### Fallback Configuration
+
+Set up automatic fallback between providers:
+
+```json
+{
+  "llm_settings": {
+    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "fallback_on_errors": ["rate_limit", "timeout", "authentication"],
+    "fallback_delay": 1.0
+  }
+}
+```
+
+### Environment Variable Mapping
+
+You can also configure providers using environment variables:
+
+```bash
+# OpenAI
+OPENAI_API_KEY=sk-your-key
+OPENAI_MODEL=gpt-4.1
+OPENAI_MAX_TOKENS=4096
+OPENAI_TEMPERATURE=0.3
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-your-key
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MAX_TOKENS=4096
+
+# Gemini
+GEMINI_API_KEY=your-key
+GEMINI_MODEL=gemini-2.5-pro
+```
+
+### CLI Provider Commands
+
+Manage providers through the CLI:
+
+```bash
+# List available providers
+> config providers
+
+# Configure a provider
+> config provider openai api_key sk-your-new-key
+> config provider openai model gpt-4.1-turbo
+
+# Set default provider
+> config llm_settings default_provider anthropic
+
+# Configure fallback chain
+> config llm_settings fallback_chain openai,anthropic,gemini
+
+# Test provider connectivity
+> test-provider openai
+> test-provider all
+```
+
+### Provider Switching
+
+Switch providers dynamically:
+
+```python
+from spoon_ai.llm import LLMManager
+
+llm_manager = LLMManager()
+
+# Use specific provider
+response = await llm_manager.chat(
+    messages=[{"role": "user", "content": "Hello"}],
+    provider="anthropic"
+)
+
+# Use default provider (with fallback)
+response = await llm_manager.chat(
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+## 🔧 Troubleshooting LLM Provider Issues
+
+### Common Provider Configuration Issues
+
+#### 1. Provider Not Found
+**Error:** `Provider 'openai' not found`
+
+**Solutions:**
+- Check provider name spelling in configuration
+- Ensure provider is properly configured in `llm_providers` section
+- Verify provider module is imported
+
+```bash
+# Check available providers
+> list-providers
+
+# Test provider configuration
+> test-provider openai
+```
+
+#### 2. API Key Authentication Errors
+**Error:** `AuthenticationError: Invalid API key`
+
+**Solutions:**
+- Verify API key is correct and active
+- Check API key format (OpenAI: `sk-...`, Anthropic: `sk-ant-...`)
+- Ensure API key has sufficient permissions
+
+```bash
+# Update API key
+> config provider openai api_key sk-your-new-key
+
+# Test authentication
+> test-provider openai
+```
+
+#### 3. Rate Limit Errors
+**Error:** `RateLimitError: Rate limit exceeded`
+
+**Solutions:**
+- Configure retry attempts and delays
+- Set up fallback providers
+- Reduce concurrent requests
+
+```json
+{
+  "llm_providers": {
+    "openai": {
+      "retry_attempts": 5,
+      "retry_delay": 2.0
+    }
+  },
+  "llm_settings": {
+    "fallback_chain": ["openai", "anthropic"],
+    "max_concurrent_requests": 5
+  }
+}
+```
+
+#### 4. Model Not Available
+**Error:** `ModelNotFoundError: Model 'gpt-5' not available`
+
+**Solutions:**
+- Check available models for provider
+- Use correct model names
+- Update to supported model versions
+
+```bash
+# Check provider capabilities
+> provider-status openai
+
+# Update model
+> config provider openai model gpt-4.1-turbo
+```
+
+#### 5. Network Connectivity Issues
+**Error:** `NetworkError: Connection timeout`
+
+**Solutions:**
+- Check internet connectivity
+- Verify firewall settings
+- Increase timeout values
+
+```json
+{
+  "llm_providers": {
+    "openai": {
+      "timeout": 60,
+      "retry_attempts": 3
+    }
+  }
+}
+```
+
+#### 6. Configuration Validation Errors
+**Error:** `ConfigurationError: Invalid configuration format`
+
+**Solutions:**
+- Validate JSON syntax
+- Check required fields are present
+- Verify data types match expected format
+
+```bash
+# Validate configuration
+python -c "import json; json.load(open('config.json'))"
+
+# Reset to default configuration
+> config reset
+```
+
+### Debug Mode
+
+Enable debug logging for detailed troubleshooting:
+
+```json
+{
+  "llm_settings": {
+    "enable_debug_logging": true
+  }
+}
+```
+
+```bash
+# Enable debug mode via CLI
+> config llm_settings enable_debug_logging true
+
+# View debug logs
+> show-logs llm
+```
+
+### Health Monitoring
+
+Monitor provider health:
+
+```bash
+# Check all providers
+> provider-status
+
+# Monitor specific provider
+> provider-stats openai
+
+# Test connectivity
+> test-provider all
 ```
 
 ## ✅ Next Steps

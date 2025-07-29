@@ -213,9 +213,12 @@ Once configured, custom agents will appear in the CLI:
 
 ## 🧪 Run the Agent
 
+### Basic Agent Usage
+
 ```python
 import asyncio
 from spoon_ai.chat import ChatBot
+
 async def main():
     # Create an InfoAssistantAgent instance
     info_agent = MyCustomAgent(llm=ChatBot(llm_provider="openai",model_name="anthropic/claude-sonnet-4", base_url="https://openrouter.ai/api/v1"))
@@ -228,6 +231,148 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
+
+### Using Different LLM Providers
+
+SpoonOS supports multiple LLM providers through the unified architecture. Here are examples of using different providers:
+
+#### OpenAI Provider
+```python
+from spoon_ai.chat import ChatBot
+from spoon_ai.agents import SpoonReactAI
+
+# Using OpenAI GPT-4
+openai_agent = SpoonReactAI(
+    llm=ChatBot(
+        llm_provider="openai",
+        model_name="gpt-4.1",
+        api_key="sk-your-openai-key"  # Optional if set in config
+    )
+)
+
+response = await openai_agent.run("Analyze the current crypto market")
+```
+
+#### Anthropic Provider
+```python
+# Using Anthropic Claude
+anthropic_agent = SpoonReactAI(
+    llm=ChatBot(
+        llm_provider="anthropic",
+        model_name="claude-sonnet-4-20250514",
+        api_key="sk-ant-your-key"  # Optional if set in config
+    )
+)
+
+response = await anthropic_agent.run("Help me understand DeFi protocols")
+```
+
+#### Gemini Provider
+```python
+# Using Google Gemini
+gemini_agent = SpoonReactAI(
+    llm=ChatBot(
+        llm_provider="gemini",
+        model_name="gemini-2.5-pro",
+        api_key="your-gemini-key"  # Optional if set in config
+    )
+)
+
+response = await gemini_agent.run("Explain blockchain consensus mechanisms")
+```
+
+#### Using LLM Manager for Advanced Features
+
+```python
+from spoon_ai.llm import LLMManager, ConfigurationManager
+from spoon_ai.agents import ToolCallAgent
+
+class AdvancedAgent(ToolCallAgent):
+    def __init__(self, **kwargs):
+        # Initialize with LLM Manager for advanced features
+        config_manager = ConfigurationManager()
+        llm_manager = LLMManager(config_manager)
+        
+        # Set up fallback chain
+        llm_manager.set_fallback_chain(["openai", "anthropic", "gemini"])
+        
+        super().__init__(llm=llm_manager, **kwargs)
+
+# Usage
+advanced_agent = AdvancedAgent()
+response = await advanced_agent.run("Complex analysis task")
+# Will automatically use fallback if primary provider fails
+```
+
+#### Provider-Specific Configuration
+
+```python
+# Custom configuration per provider
+openai_config = {
+    "llm_provider": "openai",
+    "model_name": "gpt-4.1-turbo",
+    "temperature": 0.1,  # More deterministic
+    "max_tokens": 8192
+}
+
+anthropic_config = {
+    "llm_provider": "anthropic", 
+    "model_name": "claude-3-opus-20240229",
+    "temperature": 0.7,  # More creative
+    "max_tokens": 4096
+}
+
+# Create specialized agents
+analytical_agent = SpoonReactAI(llm=ChatBot(**openai_config))
+creative_agent = SpoonReactAI(llm=ChatBot(**anthropic_config))
+```
+
+#### Multi-Provider Agent
+
+```python
+class MultiProviderAgent(ToolCallAgent):
+    def __init__(self):
+        # Initialize with default provider
+        super().__init__(llm=ChatBot(llm_provider="openai"))
+        
+        # Create additional providers for specific tasks
+        self.creative_llm = ChatBot(
+            llm_provider="anthropic",
+            model_name="claude-3-opus-20240229",
+            temperature=0.8
+        )
+        
+        self.analytical_llm = ChatBot(
+            llm_provider="openai",
+            model_name="gpt-4.1",
+            temperature=0.1
+        )
+    
+    async def run_creative_task(self, prompt):
+        # Switch to creative provider for this task
+        original_llm = self.llm
+        self.llm = self.creative_llm
+        try:
+            response = await self.run(prompt)
+            return response
+        finally:
+            self.llm = original_llm
+    
+    async def run_analytical_task(self, prompt):
+        # Switch to analytical provider
+        original_llm = self.llm
+        self.llm = self.analytical_llm
+        try:
+            response = await self.run(prompt)
+            return response
+        finally:
+            self.llm = original_llm
+
+# Usage
+multi_agent = MultiProviderAgent()
+creative_response = await multi_agent.run_creative_task("Write a creative story about DeFi")
+analytical_response = await multi_agent.run_analytical_task("Analyze gas optimization strategies")
 ```
 
 ## 🛠️ Agent Debugging Tips
