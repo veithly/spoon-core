@@ -6,14 +6,12 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from google import genai
 from google.genai import types
-from pydantic import Field
+from pydantic import Field, model_validator
 import logging
 
 from spoon_ai.schema import Message
 from spoon_ai.llm.base import LLMBase, LLMConfig, LLMResponse
 from spoon_ai.llm.factory import LLMFactory
-from logging import getLogger
-logger = getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,17 @@ class GeminiConfig(LLMConfig):
     """Gemini Configuration"""
     
     model: str = "gemini-pro"
-    api_key: str = ""
+    api_key: str = Field(default_factory=lambda: os.getenv('GEMINI_API_KEY', ''))
+    
+    @model_validator(mode='after')
+    def validate_api_key(self):
+        """Validate that API key is provided"""
+        if not self.api_key:
+            raise ValueError(
+                "GEMINI_API_KEY environment variable is required but not set. "
+                "Please set the GEMINI_API_KEY environment variable with your Gemini API key."
+            )
+        return self
 
 
 @LLMFactory.register("gemini")
@@ -34,8 +42,19 @@ class GeminiProvider(LLMBase):
         Args:
             config_path: Configuration file path
             config_name: Configuration name
+            
+        Raises:
+            ValueError: If GEMINI_API_KEY environment variable is not set
         """
         super().__init__(config_path, config_name)
+        
+        # Validate API key is available
+        if not self.config.api_key:
+            raise ValueError(
+                "GEMINI_API_KEY environment variable is required but not set. "
+                "Please set the GEMINI_API_KEY environment variable with your Gemini API key."
+            )
+        
         # Initialize Gemini API client
         self.client = genai.Client(api_key=self.config.api_key)
     
