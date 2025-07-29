@@ -22,8 +22,8 @@ def get_crypto_tools() -> List[BaseTool]:
     crypto_tools = []
 
     try:
-        # Import crypto tools from spoon-toolkit
-        from spoon_toolkits.crypto import (
+        # Import crypto data tools from the updated structure
+        from spoon_toolkits.crypto.crypto_data_tools import (
             GetTokenPriceTool,
             Get24hStatsTool,
             GetKlineDataTool,
@@ -33,13 +33,16 @@ def get_crypto_tools() -> List[BaseTool]:
             LendingRateMonitorTool
         )
 
-        # Import additional crypto tools
-        from spoon_toolkits.crypto.blockchain_monitor import CryptoMarketMonitor
-        from spoon_toolkits.crypto.predict_price import PredictPrice
-        from spoon_toolkits.crypto.token_holders import TokenHolders
+        # Import additional crypto tools from the updated structure
+        from spoon_toolkits.crypto.crypto_data_tools.blockchain_monitor import CryptoMarketMonitor
+        from spoon_toolkits.crypto.crypto_data_tools.predict_price import PredictPrice
+        from spoon_toolkits.crypto.crypto_data_tools.token_holders import TokenHolders
+        from spoon_toolkits.crypto.crypto_data_tools.trading_history import TradingHistory
+        from spoon_toolkits.crypto.crypto_data_tools.uniswap_liquidity import UniswapLiquidity
+        from spoon_toolkits.crypto.crypto_data_tools.wallet_analysis import WalletAnalysis
 
         # Import crypto_powerdata tools from spoon-toolkit
-        from spoon_toolkits.crypto_powerdata import (
+        from spoon_toolkits.crypto.crypto_powerdata import (
             CryptoPowerDataCEXTool,
             CryptoPowerDataDEXTool,
             CryptoPowerDataIndicatorsTool,
@@ -58,6 +61,9 @@ def get_crypto_tools() -> List[BaseTool]:
             CryptoMarketMonitor,
             PredictPrice,
             TokenHolders,
+            TradingHistory,
+            UniswapLiquidity,
+            WalletAnalysis,
             CryptoPowerDataCEXTool,
             CryptoPowerDataDEXTool,
             CryptoPowerDataIndicatorsTool,
@@ -130,6 +136,9 @@ class CryptoToolsConfig:
         "crypto_market_monitor",
         "predict_price",
         "token_holders",
+        "trading_history",
+        "uniswap_liquidity",
+        "wallet_analysis",
         "crypto_powerdata_cex",
         "crypto_powerdata_dex",
         "crypto_powerdata_indicators",
@@ -138,12 +147,14 @@ class CryptoToolsConfig:
 
     # Tools that require special configuration
     TOOLS_REQUIRING_CONFIG = [
-        "lending_rate_monitor",  # May need API keys
-        "predict_price",         # Requires ML dependencies
-        "token_holders",          # Requires Bitquery API key
-        "crypto_powerdata_cex", # May need API keys for private data
-        "crypto_powerdata_dex", # Requires OKX API Key
-        "crypto_powerdata_price", # Requires OKX/CEX API Keys
+        "lending_rate_monitor",     # May need API keys
+        "predict_price",           # Requires ML dependencies
+        "token_holders",           # Requires Bitquery API key
+        "trading_history",         # May require API keys
+        "wallet_analysis",         # May require API keys
+        "crypto_powerdata_cex",    # May need API keys for private data
+        "crypto_powerdata_dex",    # Requires OKX API Key
+        "crypto_powerdata_price",  # Requires OKX/CEX API Keys
     ]
 
     @classmethod
