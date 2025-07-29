@@ -258,6 +258,14 @@ class SpoonAICLI:
             aliases=["load-tools"]
         ))
 
+        # System Info Command
+        self.add_command(SpoonCommand(
+            name="system-info",
+            description="Display system information, environment status, and health checks",
+            handler=self._handle_system_info,
+            aliases=["sysinfo", "status", "info"]
+        ))
+
     def add_command(self, command: SpoonCommand):
         self.commands[command.name] = command
 
@@ -1760,10 +1768,196 @@ class SpoonAICLI:
                 logger.info("Available categories: " + ", ".join(available_categories))
                 return
                 
-            # Load tools from specified categories
-            self._add_toolkit_tools_to_agent(self.current_agent, categories)
-            logger.info(f"Successfully loaded tools from categories: {', '.join(categories)}")
+            # Load toolkit tools
+            tool_manager = get_all_toolkit_tools(categories=categories)
+            add_all_toolkit_tools_to_manager(self.current_agent.avaliable_tools, categories=categories)
+            
+            logger.info(f"✅ Successfully loaded {len(tool_manager.tools)} toolkit tools from categories: {', '.join(categories)}")
             
         except Exception as e:
-            logger.error(f"Failed to load toolkit tools: {e}")
-            logger.debug(f"Load toolkit tools error details: {e}", exc_info=True)
+            logger.error(f"Error loading toolkit tools: {e}")
+
+    def _handle_system_info(self, input_list: List[str]):
+        """Display comprehensive system information and health checks"""
+        import platform
+        import sys
+        from datetime import datetime
+        
+        print_formatted_text(PromptHTML("<ansiblue><b>🔍 SpoonAI System Information</b></ansiblue>"))
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+        
+        # System Information
+        print_formatted_text(PromptHTML("<ansiyellow><b>📊 System Details:</b></ansiyellow>"))
+        print_formatted_text(f"  Platform: {platform.system()} {platform.release()}")
+        print_formatted_text(f"  Python Version: {sys.version}")
+        print_formatted_text(f"  Architecture: {platform.machine()}")
+        print_formatted_text(f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print()
+        
+        # Environment Variables Status
+        print_formatted_text(PromptHTML("<ansiyellow><b>🔑 Environment Variables:</b></ansiyellow>"))
+        env_vars = [
+            ("OPENAI_API_KEY", "OpenAI API"),
+            ("ANTHROPIC_API_KEY", "Anthropic API"),
+            ("DEEPSEEK_API_KEY", "DeepSeek API"),
+            ("TAVILY_API_KEY", "Tavily Search API"),
+            ("SECRET_KEY", "JWT Secret Key"),
+            ("TELEGRAM_BOT_TOKEN", "Telegram Bot"),
+            ("GITHUB_TOKEN", "GitHub API"),
+            ("PRIVATE_KEY", "Wallet Private Key"),
+            ("RPC_URL", "Blockchain RPC"),
+            ("DATABASE_URL", "Database"),
+            ("REDIS_HOST", "Redis Host"),
+        ]
+        
+        for var_name, description in env_vars:
+            value = os.getenv(var_name)
+            if value:
+                # Don't show actual secret values, just indicate they're set
+                if "KEY" in var_name or "TOKEN" in var_name or "SECRET" in var_name:
+                    masked_value = f"{'*' * min(len(value), 8)}... (length: {len(value)})"
+                    status = f"<ansigreen>✓ Set</ansigreen> - {masked_value}"
+                else:
+                    status = f"<ansigreen>✓ Set</ansigreen> - {value}"
+            else:
+                status = "<ansired>✗ Not set</ansired>"
+            print_formatted_text(PromptHTML(f"  {description:20} {status}"))
+        print()
+        
+        # Configuration Status
+        print_formatted_text(PromptHTML("<ansiyellow><b>⚙️  Configuration Status:</b></ansiyellow>"))
+        config_file = Path("config.json")
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+                print_formatted_text(PromptHTML("  <ansigreen>✓ config.json found</ansigreen>"))
+                
+                # Check API keys in config
+                api_keys = config_data.get("api_keys", {})
+                if api_keys:
+                    print_formatted_text(f"  API Keys in config: {len(api_keys)}")
+                    for provider, key in api_keys.items():
+                        if key and not self.config_manager._is_placeholder_value(key):
+                            print_formatted_text(PromptHTML(f"    <ansigreen>✓ {provider}</ansigreen>"))
+                        else:
+                            print_formatted_text(PromptHTML(f"    <ansired>✗ {provider} (placeholder/empty)</ansired>"))
+                else:
+                    print_formatted_text(PromptHTML("  <ansiyellow>! No API keys in config</ansiyellow>"))
+                    
+            except Exception as e:
+                print_formatted_text(PromptHTML(f"  <ansired>✗ Error reading config.json: {e}</ansired>"))
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ config.json not found</ansired>"))
+        print()
+        
+        # Current Agent Status
+        print_formatted_text(PromptHTML("<ansiyellow><b>🤖 Agent Status:</b></ansiyellow>"))
+        if self.current_agent:
+            print_formatted_text(PromptHTML(f"  <ansigreen>✓ Active agent: {self.current_agent.name}</ansigreen>"))
+            print_formatted_text(f"  Agent type: {type(self.current_agent).__name__}")
+            if hasattr(self.current_agent, 'avaliable_tools'):
+                tool_count = len(self.current_agent.avaliable_tools.tools)
+                print_formatted_text(f"  Available tools: {tool_count}")
+            if hasattr(self.current_agent, 'llm') and self.current_agent.llm:
+                llm_info = f"{getattr(self.current_agent.llm, 'llm_provider', 'unknown')}"
+                model_name = getattr(self.current_agent.llm, 'model_name', 'unknown')
+                print_formatted_text(f"  LLM Provider: {llm_info}")
+                print_formatted_text(f"  Model: {model_name}")
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ No agent loaded</ansired>"))
+        print()
+        
+        # Available Commands
+        print_formatted_text(PromptHTML("<ansiyellow><b>📝 CLI Commands:</b></ansiyellow>"))
+        print_formatted_text(f"  Total commands: {len(self.commands)}")
+        print_formatted_text("  Categories:")
+        
+        # Group commands by category
+        categories = {
+            "Core": ["help", "exit", "system-info"],
+            "Agent": ["load-agent", "list-agents", "action", "reload-config"],
+            "Chat": ["new-chat", "list-chats", "load-chat"],
+            "Config": ["config"],
+            "Crypto": ["transfer", "swap", "token-info", "token-by-symbol"],
+            "Tools": ["load-docs", "list-toolkit-categories", "list-toolkit-tools", "load-toolkit-tools"],
+            "Social": ["telegram"],
+        }
+        
+        for category, cmd_list in categories.items():
+            available_cmds = [cmd for cmd in cmd_list if cmd in self.commands]
+            if available_cmds:
+                print_formatted_text(f"    {category}: {len(available_cmds)} commands")
+        print()
+        
+        # Health Check Summary
+        print_formatted_text(PromptHTML("<ansiyellow><b>🏥 Health Check Summary:</b></ansiyellow>"))
+        
+        health_score = 0
+        total_checks = 5
+        
+        # Check 1: At least one API key is set
+        has_api_key = any(os.getenv(key) for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"])
+        if has_api_key:
+            health_score += 1
+            print_formatted_text(PromptHTML("  <ansigreen>✓ LLM API key configured</ansigreen>"))
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ No LLM API key found</ansired>"))
+        
+        # Check 2: SECRET_KEY is set
+        if os.getenv("SECRET_KEY"):
+            health_score += 1
+            print_formatted_text(PromptHTML("  <ansigreen>✓ Security key configured</ansigreen>"))
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ SECRET_KEY not set (security risk)</ansired>"))
+        
+        # Check 3: Config file exists
+        if config_file.exists():
+            health_score += 1
+            print_formatted_text(PromptHTML("  <ansigreen>✓ Configuration file present</ansigreen>"))
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ No configuration file</ansired>"))
+        
+        # Check 4: Agent is loaded
+        if self.current_agent:
+            health_score += 1
+            print_formatted_text(PromptHTML("  <ansigreen>✓ Agent is loaded and ready</ansigreen>"))
+        else:
+            print_formatted_text(PromptHTML("  <ansired>✗ No agent loaded</ansired>"))
+        
+        # Check 5: Dependencies check (basic)
+        try:
+            import spoon_ai
+            health_score += 1
+            print_formatted_text(PromptHTML("  <ansigreen>✓ Core dependencies available</ansigreen>"))
+        except ImportError:
+            print_formatted_text(PromptHTML("  <ansired>✗ Core dependencies missing</ansired>"))
+        
+        # Overall health score
+        health_percentage = (health_score / total_checks) * 100
+        if health_percentage >= 80:
+            health_color = "ansigreen"
+            health_status = "Excellent"
+        elif health_percentage >= 60:
+            health_color = "ansiyellow"
+            health_status = "Good"
+        else:
+            health_color = "ansired"
+            health_status = "Poor"
+            
+        print()
+        print_formatted_text(PromptHTML(f"  <{health_color}><b>Overall Health: {health_status} ({health_score}/{total_checks} checks passed)</b></{health_color}>"))
+        
+        if health_score < total_checks:
+            print()
+            print_formatted_text(PromptHTML("<ansiyellow><b>💡 Recommendations:</b></ansiyellow>"))
+            if not has_api_key:
+                print_formatted_text("  • Set up at least one LLM API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, or DEEPSEEK_API_KEY)")
+            if not os.getenv("SECRET_KEY"):
+                print_formatted_text("  • Set SECRET_KEY for security: python -c \"import secrets; print(secrets.token_urlsafe(32))\"")
+            if not config_file.exists():
+                print_formatted_text("  • Run 'config' command to set up initial configuration")
+            if not self.current_agent:
+                print_formatted_text("  • Load an agent with 'load-agent <name>' to start using SpoonAI")
+        
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
