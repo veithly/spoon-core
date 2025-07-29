@@ -21,6 +21,15 @@ from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
 from spoon_ai.utils.config_manager import ConfigManager
 from spoon_ai.tools.crypto_tools import get_crypto_tools, add_crypto_tools_to_manager, CryptoToolsConfig
+from spoon_ai.tools.toolkit_integration import (
+    get_all_toolkit_tools, 
+    add_all_toolkit_tools_to_manager, 
+    ToolkitConfig,
+    get_crypto_tools as get_toolkit_crypto_tools,
+    get_data_platform_tools,
+    get_storage_tools,
+    get_social_media_tools
+)
 
 # Create a log filter to filter out log messages containing specific keywords
 class KeywordFilter(logging.Filter):
@@ -227,6 +236,28 @@ class SpoonAICLI:
             aliases=["tg"]
         ))
 
+        # Toolkit Commands
+        self.add_command(SpoonCommand(
+            name="list-toolkit-categories",
+            description="List all available toolkit categories",
+            handler=self._handle_list_toolkit_categories,
+            aliases=["toolkit-categories", "categories"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="list-toolkit-tools",
+            description="List tools in a specific category",
+            handler=self._handle_list_toolkit_tools,
+            aliases=["toolkit-tools"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="load-toolkit-tools",
+            description="Load toolkit tools from specified categories",
+            handler=self._handle_load_toolkit_tools,
+            aliases=["load-tools"]
+        ))
+
     def add_command(self, command: SpoonCommand):
         self.commands[command.name] = command
 
@@ -250,16 +281,16 @@ class SpoonAICLI:
         return f"Spoon AI {agent_part} > "
 
     def _handle_load_agent(self, input_list: List[str]):
-    if not input_list:
-        logger.error("Missing agent name. Usage: load-agent <agent_name>")
-        return
+        if not input_list:
+            logger.error("Missing agent name. Usage: load-agent <agent_name>")
+            return
 
-    name = input_list[0]
-    if name not in ["react", "spoon_react_mcp"]:
-        logger.error(f"Invalid agent name: '{name}'. Use 'list-agents' to see available agents.")
-        return
+        name = input_list[0]
+        if name not in ["react", "spoon_react_mcp"]:
+            logger.error(f"Invalid agent name: '{name}'. Use 'list-agents' to see available agents.")
+            return
 
-    self._load_agent(name)
+        self._load_agent(name)
 
     def _get_available_agents(self) -> Dict[str, Dict[str, Any]]:
         """Get available agents from configuration and built-in definitions"""
@@ -348,8 +379,8 @@ class SpoonAICLI:
             # Configure tools for the agent
             self._configure_agent_tools(self.current_agent, agent_config)
 
-            # Add crypto tools to the agent (default behavior)
-            self._add_crypto_tools_to_agent(self.current_agent)
+            # Load toolkit tools based on configuration
+            self._load_toolkit_tools_for_agent(self.current_agent, agent_config)
 
             logger.info(f"Loaded agent: {self.current_agent.name}")
 
@@ -616,6 +647,7 @@ class SpoonAICLI:
                               "get_token_price", "get_24h_stats", "get_kline_data",
                               "price_threshold_alert", "lp_range_check", "monitor_sudden_price_increase",
                               "lending_rate_monitor", "crypto_market_monitor", "predict_price", "token_holders",
+                              "trading_history", "uniswap_liquidity", "wallet_analysis",
                               "crypto_powerdata_cex", "crypto_powerdata_dex",
                               "crypto_powerdata_indicators", "crypto_powerdata_price"
                           ])]
@@ -632,6 +664,95 @@ class SpoonAICLI:
         except Exception as e:
             logger.error(f"Failed to add crypto tools to agent: {e}")
             logger.debug(f"Crypto tools integration error details: {e}", exc_info=True)
+
+    def _add_toolkit_tools_to_agent(self, agent, categories: List[str] = None):
+        """Add toolkit tools from specified categories to the agent's tool manager."""
+        try:
+            if categories is None:
+                categories = ["crypto", "data_platforms"]  # Default categories
+            
+            tools_added = 0
+            
+            for category in categories:
+                if category == "crypto":
+                    crypto_tools = get_toolkit_crypto_tools()
+                    agent.avaliable_tools.add_tools(*crypto_tools)
+                    tools_added += len(crypto_tools)
+                    logger.info(f"Added {len(crypto_tools)} crypto tools")
+                    
+                elif category == "data_platforms":
+                    data_tools = get_data_platform_tools()
+                    agent.avaliable_tools.add_tools(*data_tools)
+                    tools_added += len(data_tools)
+                    logger.info(f"Added {len(data_tools)} data platform tools")
+                    
+                elif category == "storage":
+                    storage_tools = get_storage_tools()
+                    agent.avaliable_tools.add_tools(*storage_tools)
+                    tools_added += len(storage_tools)
+                    logger.info(f"Added {len(storage_tools)} storage tools")
+                    
+                elif category == "social_media":
+                    social_tools = get_social_media_tools()
+                    agent.avaliable_tools.add_tools(*social_tools)
+                    tools_added += len(social_tools)
+                    logger.info(f"Added {len(social_tools)} social media tools")
+                    
+                else:
+                    logger.warning(f"Unknown tool category: {category}")
+
+            logger.info(f"Successfully added {tools_added} toolkit tools to agent")
+            
+            # Log available tool categories
+            available_categories = ToolkitConfig.get_all_categories()
+            logger.info(f"Available tool categories: {', '.join(available_categories)}")
+
+        except Exception as e:
+            logger.error(f"Failed to add toolkit tools to agent: {e}")
+            logger.debug(f"Toolkit tools integration error details: {e}", exc_info=True)
+
+    def _load_toolkit_tools_for_agent(self, agent, agent_config: Dict[str, Any]):
+        """Load toolkit tools for an agent based on configuration"""
+        try:
+            # Get toolkit configuration
+            toolkit_config = self.config_manager.get("toolkit", {})
+            auto_load = toolkit_config.get("auto_load", True)
+            
+            if not auto_load:
+                logger.info("Toolkit auto-load is disabled")
+                return
+            
+            # Determine which categories to load
+            categories_to_load = []
+            
+            # Check agent-specific toolkit categories first
+            agent_categories = agent_config.get("toolkit_categories")
+            if agent_categories:
+                categories_to_load = agent_categories
+                logger.info(f"Using agent-specific toolkit categories: {categories_to_load}")
+            else:
+                # Use default categories from toolkit config
+                default_categories = toolkit_config.get("default_categories", ["crypto"])
+                enabled_categories = []
+                
+                # Check which categories are enabled
+                category_configs = toolkit_config.get("categories", {})
+                for category in default_categories:
+                    if category_configs.get(category, {}).get("enabled", True):
+                        enabled_categories.append(category)
+                
+                categories_to_load = enabled_categories
+                logger.info(f"Using default toolkit categories: {categories_to_load}")
+            
+            # Load the tools
+            if categories_to_load:
+                self._add_toolkit_tools_to_agent(agent, categories_to_load)
+            else:
+                logger.info("No toolkit categories enabled")
+                
+        except Exception as e:
+            logger.error(f"Failed to load toolkit tools for agent: {e}")
+            logger.debug(f"Toolkit tools loading error details: {e}", exc_info=True)
 
     def _handle_list_agents(self, input_list: List[str]):
         """List all available agents from configuration and built-in definitions"""
@@ -1167,21 +1288,21 @@ class SpoonAICLI:
         self._should_exit = True
 
     def _handle_new_chat(self, input_list: List[str]):
-    if not self.current_agent:
-        logger.error("No agent loaded")
-        return
+        if not self.current_agent:
+            logger.error("No agent loaded")
+            return
 
-    # Reset chat history with metadata
-    self.current_agent.chat_history = {
-        'metadata': {
-            'agent_name': self.current_agent.name,
-            'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        },
-        'messages': []
-    }
+        # Reset chat history with metadata
+        self.current_agent.chat_history = {
+            'metadata': {
+                'agent_name': self.current_agent.name,
+                'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            },
+            'messages': []
+        }
 
-    logger.info(f"Started new chat with {self.current_agent.name} (chat history cleared)")
+        logger.info(f"Started new chat with {self.current_agent.name} (chat history cleared)")
 
     def _handle_list_chats(self, input_list: List[str]):
         chat_logs_dir = Path('chat_logs')
@@ -1572,3 +1693,77 @@ class SpoonAICLI:
         telegram = TelegramClient(self.agents["react"])
         asyncio.create_task(telegram.run())
         print_formatted_text(PromptHTML("<green>Telegram client started</green>"))
+
+    def _handle_list_toolkit_categories(self, input_list: List[str]):
+        """List all available toolkit categories"""
+        try:
+            categories = ToolkitConfig.get_all_categories()
+            logger.info("Available toolkit categories:")
+            for category in categories:
+                tools = ToolkitConfig.get_tools_by_category(category)
+                logger.info(f"  {category}: {len(tools)} tools")
+                
+            logger.info("\nUse 'list-toolkit-tools <category>' to see tools in a specific category")
+            logger.info("Use 'load-toolkit-tools <category1> <category2> ...' to load tools from categories")
+            
+        except Exception as e:
+            logger.error(f"Failed to list toolkit categories: {e}")
+
+    def _handle_list_toolkit_tools(self, input_list: List[str]):
+        """List tools in a specific category"""
+        try:
+            if len(input_list) < 2:
+                logger.error("Usage: list-toolkit-tools <category>")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            category = input_list[1]
+            tools = ToolkitConfig.get_tools_by_category(category)
+            
+            if not tools:
+                logger.error(f"Unknown category: {category}")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            logger.info(f"Tools in '{category}' category:")
+            for tool in tools:
+                logger.info(f"  - {tool}")
+                
+            # Show which tools require configuration
+            config_tools = ToolkitConfig.get_tools_requiring_config()
+            category_config_tools = [tool for tool in tools if tool in config_tools]
+            if category_config_tools:
+                logger.info(f"\nTools requiring configuration: {', '.join(category_config_tools)}")
+                
+        except Exception as e:
+            logger.error(f"Failed to list toolkit tools: {e}")
+
+    def _handle_load_toolkit_tools(self, input_list: List[str]):
+        """Load toolkit tools from specified categories"""
+        try:
+            if len(input_list) < 2:
+                logger.error("Usage: load-toolkit-tools <category1> [category2] ...")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            if not self.current_agent:
+                logger.error("No agent loaded. Use 'load-agent <name>' first.")
+                return
+                
+            categories = input_list[1:]
+            available_categories = ToolkitConfig.get_all_categories()
+            
+            # Validate categories
+            invalid_categories = [cat for cat in categories if cat not in available_categories]
+            if invalid_categories:
+                logger.error(f"Invalid categories: {', '.join(invalid_categories)}")
+                logger.info("Available categories: " + ", ".join(available_categories))
+                return
+                
+            # Load tools from specified categories
+            self._add_toolkit_tools_to_agent(self.current_agent, categories)
+            logger.info(f"Successfully loaded tools from categories: {', '.join(categories)}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load toolkit tools: {e}")
+            logger.debug(f"Load toolkit tools error details: {e}", exc_info=True)
