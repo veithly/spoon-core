@@ -63,10 +63,10 @@ class OpenAIProvider(LLMProviderInterface):
             raise ProviderError("openai", f"Failed to initialize: {str(e)}", original_error=e)
     
     def _convert_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
-        """Convert Message objects to OpenAI format."""
+        """Convert Message objects to OpenAI format with validation."""
         openai_messages = []
         
-        for message in messages:
+        for i, message in enumerate(messages):
             msg_dict = {"role": message.role}
             
             if message.content:
@@ -91,9 +91,84 @@ class OpenAIProvider(LLMProviderInterface):
             if message.tool_call_id:
                 msg_dict["tool_call_id"] = message.tool_call_id
             
+            # Validate tool message placement
+            if message.role == "tool":
+                # Check if previous message is assistant with tool_calls
+                if i == 0 or openai_messages[-1]["role"] != "assistant" or "tool_calls" not in openai_messages[-1]:
+                    logger.warning(f"Tool message at index {i} is not preceded by assistant message with tool_calls. Skipping.")
+                    continue
+            
             openai_messages.append(msg_dict)
         
-        return openai_messages
+        return self._validate_and_fix_message_sequence(openai_messages)
+    
+    def _validate_and_fix_message_sequence(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Validate and fix message sequence to comply with OpenAI API requirements."""
+        if not messages:
+            return messages
+        
+        fixed_messages = []
+        i = 0
+        
+        while i < len(messages):
+            current_msg = messages[i]
+            
+            # Handle tool messages
+            if current_msg["role"] == "tool":
+                # Find the preceding assistant message with tool_calls
+                assistant_msg_idx = -1
+                for j in range(len(fixed_messages) - 1, -1, -1):
+                    if fixed_messages[j]["role"] == "assistant" and "tool_calls" in fixed_messages[j]:
+                        assistant_msg_idx = j
+                        break
+                
+                if assistant_msg_idx == -1:
+                    # No preceding assistant message with tool_calls found, skip this tool message
+                    logger.warning(f"Skipping tool message without preceding assistant tool_calls: {current_msg}")
+                    i += 1
+                    continue
+                
+                # Check if this tool message corresponds to any tool_call in the assistant message
+                assistant_msg = fixed_messages[assistant_msg_idx]
+                tool_call_ids = [tc["id"] for tc in assistant_msg.get("tool_calls", [])]
+                
+                if current_msg.get("tool_call_id") not in tool_call_ids:
+                    logger.warning(f"Tool message tool_call_id {current_msg.get('tool_call_id')} not found in assistant tool_calls. Skipping.")
+                    i += 1
+                    continue
+            
+            # Handle system messages - they should be at the beginning
+            elif current_msg["role"] == "system":
+                # If we already have messages and this is not the first, move it to the beginning
+                if fixed_messages and fixed_messages[0]["role"] != "system":
+                    # Insert at the beginning, but after any existing system messages
+                    insert_idx = 0
+                    while insert_idx < len(fixed_messages) and fixed_messages[insert_idx]["role"] == "system":
+                        insert_idx += 1
+                    fixed_messages.insert(insert_idx, current_msg)
+                    i += 1
+                    continue
+            
+            # Handle consecutive messages with the same role (except tool messages)
+            elif (fixed_messages and 
+                  fixed_messages[-1]["role"] == current_msg["role"] and 
+                  current_msg["role"] != "tool"):
+                
+                # Merge content if both have content
+                if (fixed_messages[-1].get("content") and current_msg.get("content")):
+                    fixed_messages[-1]["content"] += "\n" + current_msg["content"]
+                    i += 1
+                    continue
+                # If current message has content but previous doesn't, replace
+                elif current_msg.get("content") and not fixed_messages[-1].get("content"):
+                    fixed_messages[-1] = current_msg
+                    i += 1
+                    continue
+            
+            fixed_messages.append(current_msg)
+            i += 1
+        
+        return fixed_messages
     
     def _convert_response(self, response: ChatCompletion, duration: float) -> LLMResponse:
         """Convert OpenAI response to standardized LLMResponse."""
