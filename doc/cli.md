@@ -52,7 +52,8 @@ The CLI includes these built-in agents:
 | ------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `help`              | `h`, `?`          | Display help information                                                                                                  |
 | `exit`              | `quit`, `q`       | Exit the CLI                                                                                                              |
-| `load-agent <name>` | `load`            | Load an agent with the specified name                                                                                     |
+| `system-info`       | `sysinfo`, `status`, `info` | Display comprehensive system information, environment status, and health checks                                    |
+| `load-agent <n>` | `load`            | Load an agent with the specified name                                                                                     |
 | `list-agents`       | `agents`          | List all available agents                                                                                                 |
 | `config`            | `cfg`, `settings` | Configure settings (such as API keys)                                                                                     |
 | `reload-config`     | `reload`          | Reload the current agent's configuration                                                                                  |
@@ -143,6 +144,51 @@ For MCP-enabled agents, additional configuration is needed (see examples below).
 
 # Update specific settings
 > config API_KEY your-new-key
+```
+
+### System Diagnostics
+
+The `system-info` command provides comprehensive system diagnostics and health checks:
+
+```bash
+# Display full system information
+> system-info
+
+# Using aliases
+> sysinfo
+> status
+> info
+```
+
+This command shows:
+- **System Details**: Platform, Python version, architecture, timestamp
+- **Environment Variables**: Status of all API keys and configuration (with security masking)
+- **Configuration Status**: Validates config.json and detects placeholder values
+- **Agent Status**: Current agent information, tools, and LLM provider
+- **Health Checks**: Automated scoring with recommendations for improvements
+
+**Example Output:**
+```
+🔍 SpoonAI System Information
+═══════════════════════════════════════
+
+📊 System Details:
+  Platform: macOS 13.0
+  Python Version: 3.11.0
+  Architecture: arm64
+
+🔑 Environment Variables:
+  OpenAI API           ✓ Set - ********... (length: 64)
+  Anthropic API        ✗ Not set
+  Secret Key           ✓ Set - ********... (length: 32)
+
+🏥 Health Check Summary:
+  ✓ LLM API key configured
+  ✓ Security key configured
+  ✓ Configuration file present
+  ✓ Agent is loaded and ready
+  
+  Overall Health: Excellent (4/4 checks passed)
 ```
 
 ## CLI Usage Examples
