@@ -81,6 +81,17 @@ The CLI includes these built-in agents:
 | ---------------------------- | ------- | ---------------------------------------------------------------- |
 | `load-docs <directory_path>` | `docs`  | Load documents from the specified directory to the current agent |
 
+### LLM Provider Management Commands
+
+| Command                           | Aliases    | Description                                    |
+| --------------------------------- | ---------- | ---------------------------------------------- |
+| `list-providers`                  | `providers`| List all available LLM providers              |
+| `set-provider <provider>`         | `provider` | Set the default LLM provider                  |
+| `test-provider <provider>`        | `test`     | Test connectivity to a specific provider      |
+| `provider-status`                 | `status`   | Show health status of all providers           |
+| `provider-stats <provider>`       | `stats`    | Show performance statistics for a provider    |
+| `config provider <name> <key> <value>` | -    | Configure provider-specific settings          |
+
 ## ⚙️ Configuration Management
 
 ### Environment Variables
@@ -143,6 +154,13 @@ For MCP-enabled agents, additional configuration is needed (see examples below).
 
 # Update specific settings
 > config API_KEY your-new-key
+
+# LLM Provider Management
+> list-providers                    # List available LLM providers
+> set-provider openai              # Set default LLM provider
+> test-provider anthropic          # Test provider connectivity
+> provider-status                  # Show provider health status
+> config provider openai model gpt-4.1-turbo  # Configure provider settings
 ```
 
 ## CLI Usage Examples
@@ -155,7 +173,7 @@ For MCP-enabled agents, additional configuration is needed (see examples below).
 > config
 Current configuration:
 API_KEY: sk-***********
-MODEL: gpt-4
+MODEL: gpt-4.1
 ...
 ```
 
@@ -164,6 +182,61 @@ MODEL: gpt-4
 ```
 > config API_KEY sk-your-new-api-key
 API_KEY updated
+```
+
+#### LLM Provider Management
+
+1. List available providers:
+
+```
+> list-providers
+Available LLM providers:
+✅ openai (gpt-4.1) - Healthy
+✅ anthropic (claude-sonnet-4-20250514) - Healthy  
+❌ gemini (gemini-2.5-pro) - Unhealthy
+Default provider: openai
+```
+
+2. Switch default provider:
+
+```
+> set-provider anthropic
+Default LLM provider set to: anthropic
+```
+
+3. Test provider connectivity:
+
+```
+> test-provider openai
+Testing OpenAI provider...
+✅ Connection successful
+Model: gpt-4.1
+Response time: 1.2s
+```
+
+4. View provider statistics:
+
+```
+> provider-stats openai
+OpenAI Provider Statistics:
+Total requests: 1,247
+Successful requests: 1,198 (96.1%)
+Average response time: 2.3s
+Rate limit hits: 12
+Last error: 2 hours ago
+```
+
+5. Configure provider settings:
+
+```
+> config provider openai model gpt-4.1-turbo
+OpenAI model updated to: gpt-4.1-turbo
+
+> config provider anthropic temperature 0.7
+Anthropic temperature updated to: 0.7
+
+> config provider openai max_tokens 8192
+OpenAI max_tokens updated to: 8192
 ```
 
 #### Basic Interaction
@@ -232,6 +305,36 @@ python main.py
 2. **Verify required fields**: Ensure all required parameters are present
 3. **Test MCP servers**: Verify external services are accessible
 4. **Check environment variables**: Confirm all API keys are set
+
+### LLM Provider Troubleshooting
+
+| Issue | Command | Solution |
+|-------|---------|----------|
+| Provider not responding | `test-provider <name>` | Check API key and connectivity |
+| High error rate | `provider-stats <name>` | Review error patterns and adjust config |
+| Slow responses | `provider-stats <name>` | Check response times and consider alternatives |
+| Authentication failed | `config provider <name> api_key <key>` | Update API key |
+| Model not available | `list-providers` | Check available models and update config |
+
+### Common CLI Troubleshooting Commands
+
+```bash
+# Diagnose provider issues
+> provider-status                   # Overall health check
+> test-provider openai             # Test specific provider
+> provider-stats openai            # Detailed statistics
+> show-logs llm                    # View LLM-related logs
+
+# Configuration debugging
+> config validate                  # Validate configuration
+> config reset                     # Reset to defaults
+> reload-config                    # Reload configuration
+
+# Agent troubleshooting
+> list-agents                      # Check available agents
+> agent-status                     # Current agent status
+> clear-cache                      # Clear agent cache
+```
 
 ### Example: Custom Search Agent Configuration
 

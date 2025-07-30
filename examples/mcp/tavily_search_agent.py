@@ -148,14 +148,31 @@ async def main():
         print("export TAVILY_API_KEY=your_actual_api_key")
         print("\nContinuing with demo (may fail without valid API key)...")
 
-    # Create the Tavily Search Agent
-    search_agent = TavilySearchAgent(
-        llm=ChatBot(
-            llm_provider="openai",
-            model_name="anthropic/claude-sonnet-4",
-            base_url="https://openrouter.ai/api/v1"
+    # Create the Tavily Search Agent with new LLM architecture
+    print("🔧 Setting up LLM architecture...")
+    
+    try:
+        # Option 1: Use new LLM manager architecture (recommended)
+        search_agent = TavilySearchAgent(
+            llm=ChatBot(
+                use_llm_manager=True,
+                llm_provider="openai",
+                model_name="anthropic/claude-sonnet-4"
+            )
         )
-    )
+        print("✓ Using new LLM manager architecture")
+    except Exception as e:
+        print(f"⚠ Falling back to legacy mode: {e}")
+        # Option 2: Fallback to legacy mode for compatibility
+        search_agent = TavilySearchAgent(
+            llm=ChatBot(
+                llm_provider="openai",
+                model_name="anthropic/claude-sonnet-4",
+                base_url="https://openrouter.ai/api/v1",
+                use_llm_manager=False
+            )
+        )
+        print("✓ Using legacy ChatBot architecture")
 
     print("=== Tavily Search Agent Demo ===")
     print("Initializing agent...")

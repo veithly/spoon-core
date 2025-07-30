@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class GeminiConfig(LLMConfig):
     """Gemini Configuration"""
     
-    model: str = "gemini-pro"
+    model: str = "gemini-2.5-pro"
     api_key: str = ""
 
 

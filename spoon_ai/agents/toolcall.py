@@ -221,12 +221,13 @@ class ToolCallAgent(ReActAgent):
         for tool_call in self.tool_calls:
             result = await self.execute_tool(tool_call)
             logger.info(f"Tool {tool_call.function.name} executed with result: {result}")
-            self.add_message("tool", result, tool_call_id=tool_call.id)
+            self.add_message("tool", result, tool_call_id=tool_call.id, tool_name=tool_call.function.name)
             results.append(result)
         return "\n\n".join(results)
 
     async def execute_tool(self, tool_call: ToolCall) -> str:
         def parse_tool_arguments(arguments):
+            """Parse tool arguments using improved logic."""
             if isinstance(arguments, str):
                 arguments = arguments.strip()
                 if not arguments:
