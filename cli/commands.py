@@ -7,7 +7,7 @@ import shlex
 import sys
 import traceback
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Any
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.completion import WordCompleter
@@ -21,6 +21,15 @@ from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
 from spoon_ai.utils.config_manager import ConfigManager
 from spoon_ai.tools.crypto_tools import get_crypto_tools, add_crypto_tools_to_manager, CryptoToolsConfig
+from spoon_ai.tools.toolkit_integration import (
+    get_all_toolkit_tools, 
+    add_all_toolkit_tools_to_manager, 
+    ToolkitConfig,
+    get_crypto_tools as get_toolkit_crypto_tools,
+    get_data_platform_tools,
+    get_storage_tools,
+    get_social_media_tools
+)
 
 # Create a log filter to filter out log messages containing specific keywords
 class KeywordFilter(logging.Filter):
@@ -189,6 +198,14 @@ class SpoonAICLI:
             aliases=["send"]
         ))
 
+        # LLM Status Command
+        self.add_command(SpoonCommand(
+            name="llm-status",
+            description="Show LLM provider status and configuration",
+            handler=self._handle_llm_status,
+            aliases=["llm", "providers"]
+        ))
+
         # Swap Command
         self.add_command(SpoonCommand(
             name="swap",
@@ -227,6 +244,28 @@ class SpoonAICLI:
             aliases=["tg"]
         ))
 
+        # Toolkit Commands
+        self.add_command(SpoonCommand(
+            name="list-toolkit-categories",
+            description="List all available toolkit categories",
+            handler=self._handle_list_toolkit_categories,
+            aliases=["toolkit-categories", "categories"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="list-toolkit-tools",
+            description="List tools in a specific category",
+            handler=self._handle_list_toolkit_tools,
+            aliases=["toolkit-tools"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="load-toolkit-tools",
+            description="Load toolkit tools from specified categories",
+            handler=self._handle_load_toolkit_tools,
+            aliases=["load-tools"]
+        ))
+
     def add_command(self, command: SpoonCommand):
         # Store primary command
         self.commands[command.name] = command
@@ -254,27 +293,359 @@ class SpoonAICLI:
         return f"Spoon AI {agent_part} > "
 
     def _handle_load_agent(self, input_list: List[str]):
-        if len(input_list) != 1:
-            logger.error("Usage: load-agent <agent_name>")
+        if not input_list:
+            logger.error("Missing agent name. Usage: load-agent <agent_name>")
             return
+
         name = input_list[0]
+        if name not in ["react", "spoon_react_mcp"]:
+            logger.error(f"Invalid agent name: '{name}'. Use 'list-agents' to see available agents.")
+            return
+
         self._load_agent(name)
 
-    def  _load_agent(self, name: str):
-        if name == "react":
-            self.agents[name] = SpoonReactAI()
-            self.current_agent = self.agents[name]
-            # Add crypto tools to the agent
-            self._add_crypto_tools_to_agent(self.current_agent)
-            logger.info(f"Loaded agent: {self.current_agent.name}")
-        elif name == "spoon_react_mcp":
-            self.agents[name] = SpoonReactMCP()
-            self.current_agent = self.agents[name]
-            # Add crypto tools to the agent
-            self._add_crypto_tools_to_agent(self.current_agent)
-            logger.info(f"Loaded agent: {self.current_agent.name}")
+    def _get_available_agents(self) -> Dict[str, Dict[str, Any]]:
+        """Get available agents from configuration and built-in definitions"""
+        # Built-in agent definitions
+        builtin_agents = {
+            "react": {
+                "class": "SpoonReactAI",
+                "aliases": ["spoon_react"],
+                "description": "A smart AI agent for blockchain operations"
+            },
+            "spoon_react_mcp": {
+                "class": "SpoonReactMCP",
+                "aliases": [],
+                "description": "SpoonReact agent with MCP protocol support"
+            }
+        }
+
+        # Get agents from configuration file
+        config_agents = self.config_manager.get("agents", {})
+
+        # Merge built-in and config agents (config takes precedence)
+        available_agents = {**builtin_agents, **config_agents}
+
+        return available_agents
+
+    def _load_agent(self, name: str):
+        """Load agent by name using configuration-driven approach"""
+        available_agents = self._get_available_agents()
+
+        # Find agent by name or alias
+        agent_config = None
+        agent_key = None
+
+        # Direct name match
+        if name in available_agents:
+            agent_config = available_agents[name]
+            agent_key = name
         else:
+            # Search by alias
+            for key, config in available_agents.items():
+                if name in config.get("aliases", []):
+                    agent_config = config
+                    agent_key = key
+                    break
+
+        if not agent_config:
             logger.error(f"Agent {name} not found")
+            logger.info("Available agents:")
+            for key, config in available_agents.items():
+                aliases = config.get("aliases", [])
+                alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+                logger.info(f"  {key}{alias_str}: {config.get('description', 'No description')}")
+            return
+
+        # Load agent based on class name
+        agent_class = agent_config.get("class")
+        try:
+            # Create agent instance with configuration
+            agent_instance_config = agent_config.get("config", {})
+
+            if agent_class == "SpoonReactAI":
+                self.agents[name] = SpoonReactAI(**agent_instance_config)
+            elif agent_class == "SpoonReactMCP":
+                # For MCP agents, configure MCP servers and transports
+                mcp_config = self._prepare_mcp_config(agent_config)
+                logger.info(f"Creating MCP agent with config: {mcp_config}")
+
+                # Create MCP agent with proper transport configuration
+                if mcp_config.get("mcp_servers"):
+                    # Create primary transport for the first enabled MCP server
+                    mcp_transport = self._create_mcp_transport(mcp_config)
+                    self.agents[name] = SpoonReactMCP(mcp_transport=mcp_transport, **agent_instance_config)
+
+                    # Store MCP configuration for later use by the agent
+                    self.agents[name]._mcp_config = mcp_config
+                else:
+                    # No MCP servers configured, use default
+                    logger.warning(f"No MCP servers configured for agent {name}, using default transport")
+                    self.agents[name] = SpoonReactMCP(**agent_instance_config)
+            else:
+                logger.error(f"Unknown agent class: {agent_class}")
+                return
+
+            self.current_agent = self.agents[name]
+
+            # Configure tools for the agent
+            self._configure_agent_tools(self.current_agent, agent_config)
+
+            # Load toolkit tools based on configuration
+            self._load_toolkit_tools_for_agent(self.current_agent, agent_config)
+
+            logger.info(f"Loaded agent: {self.current_agent.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to load agent {name}: {e}")
+            logger.debug(f"Agent loading error details: {e}", exc_info=True)
+
+    def _prepare_mcp_config(self, agent_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare MCP configuration for MCP-enabled agents"""
+        mcp_config = {}
+
+        # Get MCP servers configuration
+        mcp_servers = agent_config.get("mcp_servers", [])
+        if mcp_servers:
+            servers_config = self.config_manager.get("mcp_servers", {})
+            mcp_config["mcp_servers"] = {}
+
+            for server_name in mcp_servers:
+                if server_name in servers_config:
+                    server_config = servers_config[server_name]
+                    if not server_config.get("disabled", False):
+                        mcp_config["mcp_servers"][server_name] = server_config
+                        logger.info(f"Configured MCP server: {server_name}")
+                    else:
+                        logger.warning(f"MCP server {server_name} is disabled")
+                else:
+                    logger.warning(f"MCP server {server_name} not found in configuration")
+
+        return mcp_config
+
+    def _create_mcp_transport(self, mcp_config: Dict[str, Any]):
+        """Create MCP transport based on server configuration with universal support"""
+        from fastmcp.client.transports import (
+            NpxStdioTransport, PythonStdioTransport, SSETransport,
+            WSTransport, FastMCPStdioTransport, UvxStdioTransport
+        )
+
+        mcp_servers = mcp_config.get("mcp_servers", {})
+
+        # Support multiple MCP servers - use the first configured one for now
+        # In the future, we can support multiple simultaneous connections
+        for server_name, server_config in mcp_servers.items():
+            if server_config.get("disabled", False):
+                logger.info(f"Skipping disabled MCP server: {server_name}")
+                continue
+
+            transport_type = server_config.get("transport", "auto")
+            logger.info(f"Creating MCP transport for {server_name} (type: {transport_type})")
+
+            try:
+                transport = self._create_transport_by_type(server_name, server_config, transport_type)
+                if transport:
+                    logger.info(f"Successfully created {transport_type} transport for {server_name}")
+                    return transport
+            except Exception as e:
+                logger.error(f"Failed to create transport for {server_name}: {e}")
+                continue
+
+        # Fallback to default transport
+        logger.info("Using fallback SSE transport")
+        return SSETransport("http://127.0.0.1:8765/sse")
+
+    def _create_transport_by_type(self, server_name: str, server_config: Dict[str, Any], transport_type: str):
+        """Create specific transport type based on configuration"""
+        from fastmcp.client.transports import (
+            NpxStdioTransport, PythonStdioTransport, SSETransport,
+            WSTransport, FastMCPStdioTransport, UvxStdioTransport
+        )
+
+        # Auto-detect transport type if not specified
+        if transport_type == "auto":
+            transport_type = self._detect_transport_type(server_config)
+
+        env_vars = server_config.get("env", {})
+
+        if transport_type == "npx" or (transport_type == "stdio" and server_config.get("command") == "npx"):
+            return self._create_npx_transport(server_config, env_vars)
+
+        elif transport_type == "python" or (transport_type == "stdio" and server_config.get("command") == "python"):
+            return self._create_python_transport(server_config, env_vars)
+
+        elif transport_type == "uvx" or (transport_type == "stdio" and server_config.get("command") == "uvx"):
+            return self._create_uvx_transport(server_config, env_vars)
+
+        elif transport_type == "sse":
+            return self._create_sse_transport(server_config)
+
+        elif transport_type == "websocket" or transport_type == "ws":
+            return self._create_websocket_transport(server_config)
+
+        elif transport_type == "fastmcp":
+            return self._create_fastmcp_transport(server_config, env_vars)
+
+        else:
+            logger.warning(f"Unsupported transport type: {transport_type}")
+            return None
+
+    def _detect_transport_type(self, server_config: Dict[str, Any]) -> str:
+        """Auto-detect transport type based on server configuration"""
+        command = server_config.get("command", "")
+        url = server_config.get("url", "")
+
+        if command == "npx":
+            return "npx"
+        elif command == "python":
+            return "python"
+        elif command == "uvx":
+            return "uvx"
+        elif url.startswith("http") and "/sse" in url:
+            return "sse"
+        elif url.startswith("ws"):
+            return "websocket"
+        elif command:
+            return "stdio"  # Generic stdio for other commands
+        else:
+            return "sse"  # Default fallback
+
+    def _create_npx_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
+        """Create NPX stdio transport"""
+        from fastmcp.client.transports import NpxStdioTransport
+
+        args = server_config.get("args", [])
+        if not args:
+            raise ValueError("NPX transport requires args with package name")
+
+        # Extract package name (usually the last argument)
+        package_name = args[-1]
+        package_args = args[:-1] if len(args) > 1 else []
+
+        logger.info(f"Creating NPX transport: package={package_name}, args={package_args}")
+
+        return NpxStdioTransport(
+            package=package_name,
+            args=package_args,
+            env_vars=env_vars,
+            project_directory=server_config.get("cwd"),
+            use_package_lock=server_config.get("use_package_lock", True)
+        )
+
+    def _create_python_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
+        """Create Python stdio transport"""
+        from fastmcp.client.transports import PythonStdioTransport
+
+        script_path = server_config.get("script_path") or server_config.get("args", [None])[0]
+        if not script_path:
+            raise ValueError("Python transport requires script_path or first arg as script path")
+
+        args = server_config.get("args", [])[1:] if len(server_config.get("args", [])) > 1 else []
+
+        logger.info(f"Creating Python transport: script={script_path}, args={args}")
+
+        return PythonStdioTransport(
+            script_path=script_path,
+            args=args,
+            env=env_vars,
+            cwd=server_config.get("cwd"),
+            python_cmd=server_config.get("python_cmd", "python")
+        )
+
+    def _create_uvx_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
+        """Create UVX stdio transport"""
+        from fastmcp.client.transports import UvxStdioTransport
+
+        args = server_config.get("args", [])
+        if not args:
+            raise ValueError("UVX transport requires args with package name")
+
+        package_name = args[-1]
+        package_args = args[:-1] if len(args) > 1 else []
+
+        logger.info(f"Creating UVX transport: package={package_name}, args={package_args}")
+
+        return UvxStdioTransport(
+            package=package_name,
+            args=package_args,
+            env_vars=env_vars
+        )
+
+    def _create_sse_transport(self, server_config: Dict[str, Any]):
+        """Create SSE transport"""
+        from fastmcp.client.transports import SSETransport
+
+        url = server_config.get("url")
+        if not url:
+            host = server_config.get("host", "127.0.0.1")
+            port = server_config.get("port", 8765)
+            path = server_config.get("path", "/sse")
+            url = f"http://{host}:{port}{path}"
+
+        logger.info(f"Creating SSE transport: {url}")
+
+        return SSETransport(url)
+
+    def _create_websocket_transport(self, server_config: Dict[str, Any]):
+        """Create WebSocket transport"""
+        from fastmcp.client.transports import WSTransport
+
+        url = server_config.get("url")
+        if not url:
+            host = server_config.get("host", "127.0.0.1")
+            port = server_config.get("port", 8765)
+            path = server_config.get("path", "/ws")
+            url = f"ws://{host}:{port}{path}"
+
+        logger.info(f"Creating WebSocket transport: {url}")
+
+        return WSTransport(url)
+
+    def _create_fastmcp_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
+        """Create FastMCP stdio transport"""
+        from fastmcp.client.transports import FastMCPStdioTransport
+
+        command = server_config.get("command")
+        args = server_config.get("args", [])
+
+        if not command:
+            raise ValueError("FastMCP transport requires command")
+
+        logger.info(f"Creating FastMCP transport: {command} {' '.join(args)}")
+
+        return FastMCPStdioTransport(
+            command=command,
+            args=args,
+            env=env_vars,
+            cwd=server_config.get("cwd")
+        )
+
+    def _configure_agent_tools(self, agent, agent_config: Dict[str, Any]):
+        """Configure tools for the agent based on configuration"""
+        tools = agent_config.get("tools", [])
+        if not tools:
+            return
+
+        tool_sets_config = self.config_manager.get("tool_sets", {})
+
+        for tool_name in tools:
+            if tool_name in tool_sets_config:
+                tool_config = tool_sets_config[tool_name]
+                tool_type = tool_config.get("type")
+
+                if tool_type == "builtin":
+                    if tool_config.get("enabled", True):
+                        logger.info(f"Enabled built-in tool set: {tool_name}")
+                        # Built-in tools like crypto_tools are handled separately
+                elif tool_type == "mcp_server":
+                    server_name = tool_config.get("server")
+                    if server_name:
+                        logger.info(f"Configured MCP tool set: {tool_name} from server: {server_name}")
+                        # MCP tools will be loaded when the MCP server connects
+                else:
+                    logger.warning(f"Unknown tool type: {tool_type} for tool: {tool_name}")
+            else:
+                logger.warning(f"Tool set {tool_name} not found in configuration")
 
     def _add_crypto_tools_to_agent(self, agent):
         """Add crypto tools to the agent's tool manager."""
@@ -288,6 +659,7 @@ class SpoonAICLI:
                               "get_token_price", "get_24h_stats", "get_kline_data",
                               "price_threshold_alert", "lp_range_check", "monitor_sudden_price_increase",
                               "lending_rate_monitor", "crypto_market_monitor", "predict_price", "token_holders",
+                              "trading_history", "uniswap_liquidity", "wallet_analysis",
                               "crypto_powerdata_cex", "crypto_powerdata_dex",
                               "crypto_powerdata_indicators", "crypto_powerdata_price"
                           ])]
@@ -305,14 +677,123 @@ class SpoonAICLI:
             logger.error(f"Failed to add crypto tools to agent: {e}")
             logger.debug(f"Crypto tools integration error details: {e}", exc_info=True)
 
+    def _add_toolkit_tools_to_agent(self, agent, categories: List[str] = None):
+        """Add toolkit tools from specified categories to the agent's tool manager."""
+        try:
+            if categories is None:
+                categories = ["crypto", "data_platforms"]  # Default categories
+            
+            tools_added = 0
+            
+            for category in categories:
+                if category == "crypto":
+                    crypto_tools = get_toolkit_crypto_tools()
+                    agent.avaliable_tools.add_tools(*crypto_tools)
+                    tools_added += len(crypto_tools)
+                    logger.info(f"Added {len(crypto_tools)} crypto tools")
+                    
+                elif category == "data_platforms":
+                    data_tools = get_data_platform_tools()
+                    agent.avaliable_tools.add_tools(*data_tools)
+                    tools_added += len(data_tools)
+                    logger.info(f"Added {len(data_tools)} data platform tools")
+                    
+                elif category == "storage":
+                    storage_tools = get_storage_tools()
+                    agent.avaliable_tools.add_tools(*storage_tools)
+                    tools_added += len(storage_tools)
+                    logger.info(f"Added {len(storage_tools)} storage tools")
+                    
+                elif category == "social_media":
+                    social_tools = get_social_media_tools()
+                    agent.avaliable_tools.add_tools(*social_tools)
+                    tools_added += len(social_tools)
+                    logger.info(f"Added {len(social_tools)} social media tools")
+                    
+                else:
+                    logger.warning(f"Unknown tool category: {category}")
+
+            logger.info(f"Successfully added {tools_added} toolkit tools to agent")
+            
+            # Log available tool categories
+            available_categories = ToolkitConfig.get_all_categories()
+            logger.info(f"Available tool categories: {', '.join(available_categories)}")
+
+        except Exception as e:
+            logger.error(f"Failed to add toolkit tools to agent: {e}")
+            logger.debug(f"Toolkit tools integration error details: {e}", exc_info=True)
+
+    def _load_toolkit_tools_for_agent(self, agent, agent_config: Dict[str, Any]):
+        """Load toolkit tools for an agent based on configuration"""
+        try:
+            # Get toolkit configuration
+            toolkit_config = self.config_manager.get("toolkit", {})
+            auto_load = toolkit_config.get("auto_load", True)
+            
+            if not auto_load:
+                logger.info("Toolkit auto-load is disabled")
+                return
+            
+            # Determine which categories to load
+            categories_to_load = []
+            
+            # Check agent-specific toolkit categories first
+            agent_categories = agent_config.get("toolkit_categories")
+            if agent_categories:
+                categories_to_load = agent_categories
+                logger.info(f"Using agent-specific toolkit categories: {categories_to_load}")
+            else:
+                # Use default categories from toolkit config
+                default_categories = toolkit_config.get("default_categories", ["crypto"])
+                enabled_categories = []
+                
+                # Check which categories are enabled
+                category_configs = toolkit_config.get("categories", {})
+                for category in default_categories:
+                    if category_configs.get(category, {}).get("enabled", True):
+                        enabled_categories.append(category)
+                
+                categories_to_load = enabled_categories
+                logger.info(f"Using default toolkit categories: {categories_to_load}")
+            
+            # Load the tools
+            if categories_to_load:
+                self._add_toolkit_tools_to_agent(agent, categories_to_load)
+            else:
+                logger.info("No toolkit categories enabled")
+                
+        except Exception as e:
+            logger.error(f"Failed to load toolkit tools for agent: {e}")
+            logger.debug(f"Toolkit tools loading error details: {e}", exc_info=True)
+
     def _handle_list_agents(self, input_list: List[str]):
+        """List all available agents from configuration and built-in definitions"""
+        available_agents = self._get_available_agents()
+
         logger.info("Available agents:")
-        for agent in self.agents.values():
-            logger.info(f"  {agent.name}: {agent.description}")
+        for name, config in available_agents.items():
+            aliases = config.get("aliases", [])
+            alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+            description = config.get("description", "No description")
+            logger.info(f"  {name}{alias_str}: {description}")
+
+        # Also show currently loaded agents (avoid duplicates)
+        if self.agents:
+            logger.info("\nCurrently loaded agents:")
+            loaded_agents = {}
+            for agent_key, agent in self.agents.items():
+                # Use agent name as key to avoid duplicates
+                if agent.name not in loaded_agents:
+                    loaded_agents[agent.name] = agent
+
+            for agent in loaded_agents.values():
+                logger.info(f"  {agent.name}: {agent.description}")
 
     def _load_default_agent(self):
-        # self._load_agent("spoon_react_mcp")
-        self._load_agent("react")
+        """Load the default agent from configuration"""
+        default_agent = self.config_manager.get("default_agent", "react")
+        logger.info(f"Loading default agent: {default_agent}")
+        self._load_agent(default_agent)
 
     def _set_prompt_toolkit(self):
         self.style = Style.from_dict({
@@ -829,7 +1310,17 @@ class SpoonAICLI:
             logger.error("No agent loaded")
             return
 
-        logger.info(f"Started new chat with {self.current_agent.name}")
+        # Reset chat history with metadata
+        self.current_agent.chat_history = {
+            'metadata': {
+                'agent_name': self.current_agent.name,
+                'created_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            },
+            'messages': []
+        }
+
+        logger.info(f"Started new chat with {self.current_agent.name} (chat history cleared)")
 
     def _handle_list_chats(self, input_list: List[str]):
         chat_logs_dir = Path('chat_logs')
@@ -961,10 +1452,71 @@ class SpoonAICLI:
         logger.info("  config api_key anthropic sk-ant-xxxx")
         logger.info("  config default_agent my_agent")
 
-    def _handle_list_agents(self, input_list: List[str]):
-        logger.info("Available agents:")
-        for agent in self.agents.values():
-            logger.info(f"  {agent.name}: {agent.description}")
+
+    def _handle_llm_status(self, input_list: List[str]):
+        """Handle LLM status command to show provider configuration and availability"""
+        try:
+            from spoon_ai.llm.config import ConfigurationManager
+            
+            config_manager = ConfigurationManager()
+            
+            logger.info("=" * 60)
+            logger.info("LLM PROVIDER STATUS")
+            logger.info("=" * 60)
+            
+            # Show current default provider
+            default_provider = config_manager.get_default_provider()
+            logger.info(f"Current Default Provider: {default_provider}")
+            
+            # Show available providers by priority
+            available_providers = config_manager.get_available_providers_by_priority()
+            if available_providers:
+                logger.info(f"Available Providers (by priority): {', '.join(available_providers)}")
+            else:
+                logger.warning("No providers with valid API keys found!")
+            
+            # Show detailed provider information
+            logger.info("\nProvider Details:")
+            provider_info = config_manager.get_provider_info()
+            
+            for provider, info in provider_info.items():
+                status_icon = "Available" if info['available'] else "Not Available"
+                logger.info(f"  {provider.upper()}: {status_icon}")
+                
+                if info['available']:
+                    logger.info(f"    Model: {info['model']}")
+                    if info.get('base_url'):
+                        logger.info(f"    Base URL: {info['base_url']}")
+                    logger.info(f"    Configured via: {info['configured_via']}")
+                else:
+                    if 'error' in info:
+                        logger.info(f"    Error: {info['error']}")
+            
+            # Show current agent's LLM configuration
+            if self.current_agent and hasattr(self.current_agent, 'llm'):
+                logger.info(f"\nCurrent Agent LLM:")
+                llm = self.current_agent.llm
+                if hasattr(llm, 'use_llm_manager'):
+                    architecture = "New LLM Manager" if llm.use_llm_manager else "Legacy"
+                    logger.info(f"    Architecture: {architecture}")
+                if hasattr(llm, 'llm_provider'):
+                    logger.info(f"    Provider: {llm.llm_provider}")
+                if hasattr(llm, 'model_name'):
+                    logger.info(f"    Model: {llm.model_name}")
+            
+            # Show configuration tips
+            logger.info("\nConfiguration Tips:")
+            logger.info("  • Set DEFAULT_LLM_PROVIDER environment variable to override default selection")
+            logger.info("  • Configure API keys in .env file or environment variables")
+            logger.info("  • Provider priority: anthropic > openai > gemini")
+            logger.info("  • Use 'config' command to manage other settings")
+            
+            logger.info("=" * 60)
+            
+        except Exception as e:
+            logger.error(f"Error getting LLM status: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
     def _handle_reload_config(self, input_list: List[str]):
         """Reload configuration"""
@@ -1224,3 +1776,77 @@ class SpoonAICLI:
         telegram = TelegramClient(self.agents["react"])
         asyncio.create_task(telegram.run())
         print_formatted_text(PromptHTML("<green>Telegram client started</green>"))
+
+    def _handle_list_toolkit_categories(self, input_list: List[str]):
+        """List all available toolkit categories"""
+        try:
+            categories = ToolkitConfig.get_all_categories()
+            logger.info("Available toolkit categories:")
+            for category in categories:
+                tools = ToolkitConfig.get_tools_by_category(category)
+                logger.info(f"  {category}: {len(tools)} tools")
+                
+            logger.info("\nUse 'list-toolkit-tools <category>' to see tools in a specific category")
+            logger.info("Use 'load-toolkit-tools <category1> <category2> ...' to load tools from categories")
+            
+        except Exception as e:
+            logger.error(f"Failed to list toolkit categories: {e}")
+
+    def _handle_list_toolkit_tools(self, input_list: List[str]):
+        """List tools in a specific category"""
+        try:
+            if len(input_list) < 2:
+                logger.error("Usage: list-toolkit-tools <category>")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            category = input_list[1]
+            tools = ToolkitConfig.get_tools_by_category(category)
+            
+            if not tools:
+                logger.error(f"Unknown category: {category}")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            logger.info(f"Tools in '{category}' category:")
+            for tool in tools:
+                logger.info(f"  - {tool}")
+                
+            # Show which tools require configuration
+            config_tools = ToolkitConfig.get_tools_requiring_config()
+            category_config_tools = [tool for tool in tools if tool in config_tools]
+            if category_config_tools:
+                logger.info(f"\nTools requiring configuration: {', '.join(category_config_tools)}")
+                
+        except Exception as e:
+            logger.error(f"Failed to list toolkit tools: {e}")
+
+    def _handle_load_toolkit_tools(self, input_list: List[str]):
+        """Load toolkit tools from specified categories"""
+        try:
+            if len(input_list) < 2:
+                logger.error("Usage: load-toolkit-tools <category1> [category2] ...")
+                logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
+                return
+                
+            if not self.current_agent:
+                logger.error("No agent loaded. Use 'load-agent <name>' first.")
+                return
+                
+            categories = input_list[1:]
+            available_categories = ToolkitConfig.get_all_categories()
+            
+            # Validate categories
+            invalid_categories = [cat for cat in categories if cat not in available_categories]
+            if invalid_categories:
+                logger.error(f"Invalid categories: {', '.join(invalid_categories)}")
+                logger.info("Available categories: " + ", ".join(available_categories))
+                return
+                
+            # Load tools from specified categories
+            self._add_toolkit_tools_to_agent(self.current_agent, categories)
+            logger.info(f"Successfully loaded tools from categories: {', '.join(categories)}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load toolkit tools: {e}")
+            logger.debug(f"Load toolkit tools error details: {e}", exc_info=True)

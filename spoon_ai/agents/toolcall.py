@@ -98,17 +98,18 @@ class ToolCallAgent(ReActAgent):
             output_queue=self.output_queue,
         )
 
-        # Check for finish_reason termination before processing tools
-        if self._should_terminate_on_finish_reason(response):
-            logger.info(f"🏁 {self.name} terminating due to finish_reason signals")
+        self.tool_calls = response.tool_calls
+
+        # Only terminate on finish_reason if there are NO tool calls
+        # If there are tool calls, we should execute them regardless of finish_reason
+        if not self.tool_calls and self._should_terminate_on_finish_reason(response):
+            logger.info(f"🏁 {self.name} terminating due to finish_reason signals (no tool calls)")
             self.state = AgentState.FINISHED
             self.add_message("assistant", response.content or "Task completed")
             # Set a flag to indicate finish_reason termination and store the content
             self._finish_reason_terminated = True
             self._final_response_content = response.content or "Task completed"
             return False
-
-        self.tool_calls = response.tool_calls
 
         logger.info(colored(f"🤔 {self.name}'s thoughts: {response.content}", "cyan"))
         tool_count = len(self.tool_calls) if self.tool_calls else 0
@@ -220,12 +221,13 @@ class ToolCallAgent(ReActAgent):
         for tool_call in self.tool_calls:
             result = await self.execute_tool(tool_call)
             logger.info(f"Tool {tool_call.function.name} executed with result: {result}")
-            self.add_message("tool", result, tool_call_id=tool_call.id)
+            self.add_message("tool", result, tool_call_id=tool_call.id, tool_name=tool_call.function.name)
             results.append(result)
         return "\n\n".join(results)
 
     async def execute_tool(self, tool_call: ToolCall) -> str:
         def parse_tool_arguments(arguments):
+            """Parse tool arguments using improved logic."""
             if isinstance(arguments, str):
                 arguments = arguments.strip()
                 if not arguments:

@@ -20,12 +20,19 @@ class ConfigManager:
             if self.config_file.exists():
                 with open(self.config_file, 'r') as f:
                     return json.load(f)
+            else:
+                # Return default configuration if file doesn't exist
+                return {
+                    "api_keys": {},
+                    "base_url": "",
+                    "default_agent": "react"
+                }
         except Exception as e:
             print(f"Error loading config: {e}")
             return {
                 "api_keys": {},
                 "base_url": "",
-                "default_agent": "default"
+                "default_agent": "react"
             }
 
     def _is_placeholder_value(self, value: str) -> bool:
@@ -201,7 +208,7 @@ class ConfigManager:
         api_keys = self.get("api_keys", {})
 
         # Check for valid (non-placeholder) API keys in priority order
-        for provider in ["anthropic", "openai", "deepseek"]:
+        for provider in ["anthropic", "openai", "gemini", "deepseek"]:
             if provider in api_keys:
                 key_value = api_keys[provider]
                 if key_value and not self._is_placeholder_value(key_value):
