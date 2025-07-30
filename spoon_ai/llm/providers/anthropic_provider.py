@@ -76,7 +76,9 @@ class AnthropicProvider(LLMProviderInterface):
         for message in messages:
             if message.role == "system":
                 # Handle system messages separately
-                if self.enable_prompt_cache and len(message.content) >= 4000:
+                # Only apply cache_control to system message if it's large enough
+                if (self.enable_prompt_cache and 
+                    len(message.content) >= 4000):
                     system_content = [
                         {
                             "type": "text",
@@ -86,6 +88,7 @@ class AnthropicProvider(LLMProviderInterface):
                     ]
                     logger.info(f"Applied cache_control to system message ({len(message.content)} chars)")
                 else:
+                    # Use string format for simple system messages
                     system_content = message.content
             elif message.role == "tool":
                 # Convert tool messages to user messages with tool_result
@@ -137,18 +140,35 @@ class AnthropicProvider(LLMProviderInterface):
     def _convert_tools(self, tools: List[Dict]) -> List[Dict]:
         """Convert tools to Anthropic format."""
         anthropic_tools = []
-        for tool in tools:
+        cache_control_count = 0
+        max_cache_control_blocks = 3  # Leave room for system message cache_control
+        
+        for i, tool in enumerate(tools):
             anthropic_tool = {
                 "name": tool["function"]["name"],
                 "description": tool["function"]["description"],
                 "input_schema": tool["function"]["parameters"]
             }
             
-            # Add cache control for tools if enabled and there are multiple tools
-            if self.enable_prompt_cache and len(tools) > 1:
+            # Only add cache control to the first few tools to stay within Anthropic's limit
+            # Prioritize tools with larger schemas or descriptions
+            tool_size = len(str(tool["function"]["parameters"])) + len(tool["function"]["description"])
+            should_cache = (
+                self.enable_prompt_cache and 
+                cache_control_count < max_cache_control_blocks and
+                len(tools) > 4 and  # Only use cache_control when there are many tools
+                (tool_size > 500 or i < 2)  # Cache large tools or first 2 tools
+            )
+            
+            if should_cache:
                 anthropic_tool["cache_control"] = {"type": "ephemeral"}
+                cache_control_count += 1
+                logger.debug(f"Applied cache_control to tool: {tool['function']['name']} (size: {tool_size})")
             
             anthropic_tools.append(anthropic_tool)
+        
+        if cache_control_count > 0:
+            logger.info(f"Applied cache_control to {cache_control_count}/{len(tools)} tools")
         
         return anthropic_tools
     
@@ -183,14 +203,20 @@ class AnthropicProvider(LLMProviderInterface):
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
             
-            response = await self.client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_content,
-                messages=anthropic_messages,
+            # Prepare request parameters
+            request_params = {
+                'model': model,
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+                'messages': anthropic_messages,
                 **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
-            )
+            }
+            
+            # Only add system parameter if we have system content
+            if system_content is not None:
+                request_params['system'] = system_content
+            
+            response = await self.client.messages.create(**request_params)
             
             duration = asyncio.get_event_loop().time() - start_time
             
@@ -216,14 +242,20 @@ class AnthropicProvider(LLMProviderInterface):
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
             
-            async with self.client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_content,
-                messages=anthropic_messages,
+            # Prepare request parameters
+            request_params = {
+                'model': model,
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+                'messages': anthropic_messages,
                 **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
-            ) as stream:
+            }
+            
+            # Only add system parameter if we have system content
+            if system_content is not None:
+                request_params['system'] = system_content
+            
+            async with self.client.messages.stream(**request_params) as stream:
                 async for chunk in stream:
                     if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
                         yield chunk.delta.text
@@ -266,15 +298,21 @@ class AnthropicProvider(LLMProviderInterface):
             finish_reason = None
             native_finish_reason = None
             
-            async with self.client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_content,
-                messages=anthropic_messages,
-                tools=anthropic_tools,
+            # Prepare request parameters
+            request_params = {
+                'model': model,
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+                'messages': anthropic_messages,
+                'tools': anthropic_tools,
                 **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
-            ) as stream:
+            }
+            
+            # Only add system parameter if we have system content
+            if system_content is not None:
+                request_params['system'] = system_content
+            
+            async with self.client.messages.stream(**request_params) as stream:
                 async for chunk in stream:
                     if chunk.type == "message_start":
                         # Log cache metrics from streaming message_start event

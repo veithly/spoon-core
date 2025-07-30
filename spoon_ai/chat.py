@@ -14,6 +14,15 @@ from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 import asyncio
 
+# Try to import Gemini client
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+    logger.warning("Google Gemini client not available. Install with: pip install google-genai")
+
 logger = getLogger(__name__)
 
 class Memory(BaseModel):
@@ -88,6 +97,8 @@ class ChatBot:
                 configured_providers.append("anthropic")
             if "openai" in api_keys and not config_manager._is_placeholder_value(api_keys["openai"]):
                 configured_providers.append("openai")
+            if "gemini" in api_keys and not config_manager._is_placeholder_value(api_keys["gemini"]):
+                configured_providers.append("gemini")
             if "deepseek" in api_keys and not config_manager._is_placeholder_value(api_keys["deepseek"]):
                 configured_providers.append("deepseek")
 
@@ -101,6 +112,10 @@ class ChatBot:
                     logger.info("Using OpenAI API from config")
                     self.model_name = self.model_name or "gpt-4.1"
                     self.llm_provider = "openai"
+                elif "gemini" in configured_providers:
+                    logger.info("Using Gemini API from config")
+                    self.model_name = self.model_name or "gemini-2.5-pro"
+                    self.llm_provider = "gemini"
                 elif "deepseek" in configured_providers:
                     logger.info("Using DeepSeek API from config")
                     self.model_name = self.model_name or "deepseek-chat"
@@ -115,8 +130,12 @@ class ChatBot:
                     logger.info("Using OpenAI API from environment")
                     self.model_name = self.model_name or "gpt-4.1"
                     self.llm_provider = "openai"
+                elif os.getenv("GEMINI_API_KEY"):
+                    logger.info("Using Gemini API from environment")
+                    self.model_name = self.model_name or "gemini-2.5-pro"
+                    self.llm_provider = "gemini"
                 else:
-                    raise ValueError("No API key found in config or environment. Please configure API keys in config.json or set OPENAI_API_KEY/ANTHROPIC_API_KEY environment variables")
+                    raise ValueError("No API key found in config or environment. Please configure API keys in config.json or set OPENAI_API_KEY/ANTHROPIC_API_KEY/GEMINI_API_KEY environment variables")
 
         # Get API key from config if not provided
         # When using a custom base_url (like OpenRouter), use the openai API key
@@ -135,6 +154,8 @@ class ChatBot:
                 self.model_name = "gpt-4.1"
             elif self.llm_provider == "anthropic":
                 self.model_name = "claude-sonnet-4-20250514"
+            elif self.llm_provider == "gemini":
+                self.model_name = "gemini-2.5-pro"
 
         logger.info(f"Initializing ChatBot with provider: {self.llm_provider}, model: {self.model_name}, base_url: {self.base_url}")
 
@@ -156,8 +177,18 @@ class ChatBot:
                 api_key=self.api_key or os.getenv("ANTHROPIC_API_KEY"),
                 http_client=http_client
             )
+        elif self.llm_provider == "gemini" and not self.base_url:
+            # Use native Gemini API only when no custom base_url is specified
+            if not HAS_GEMINI:
+                raise ValueError("Gemini provider selected but google-genai package not installed. Install with: pip install google-genai")
+            self.api_logic = "gemini"
+            # Initialize Gemini client
+            try:
+                self.llm = genai.Client(api_key=self.api_key or os.getenv("GEMINI_API_KEY"))
+            except Exception as e:
+                raise ValueError(f"Failed to initialize Gemini client: {str(e)}")
         else:
-            raise ValueError(f"Invalid LLM provider: {llm_provider}")
+            raise ValueError(f"Invalid LLM provider: {self.llm_provider}")
 
     def _log_cache_metrics(self, usage_data) -> None:
         """Log cache metrics from Anthropic API response usage data"""
@@ -242,6 +273,55 @@ class ChatBot:
             if hasattr(response, 'usage'):
                 self._log_cache_metrics(response.usage)
             return response.content[0].text
+        elif self.api_logic == "gemini":
+            # Convert messages to Gemini format
+            system_content = system_msg or ""
+            user_message = ""
+            
+            # Get the last user message
+            for message in reversed(formatted_messages):
+                if message.get("role") == "user":
+                    user_message = message.get("content", "")
+                    break
+            
+            # If no user message found, use a default
+            if not user_message:
+                user_message = "Hello"
+            
+            # Build request content
+            contents = [types.Part.from_text(text=user_message)]
+            
+            # Generate configuration
+            generate_config = types.GenerateContentConfig(
+                max_output_tokens=4096,
+                temperature=0.3
+            )
+            
+            # Add system instruction if available
+            if system_content:
+                generate_config.system_instruction = system_content
+            
+            # Send request
+            response = self.llm.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=generate_config
+            )
+            
+            # Extract content from response
+            content = ""
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            content += part.text
+            
+            # Fallback to text attribute if available
+            if not content and hasattr(response, "text"):
+                content = response.text
+            
+            return content or ""
 
     # @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=60))
     async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
@@ -500,6 +580,29 @@ class ChatBot:
                     tool_calls=tool_calls,
                     finish_reason=finish_reason,
                     native_finish_reason=native_finish_reason
+                )
+            elif self.api_logic == "gemini":
+                # Gemini doesn't support native tool calls, add tool descriptions to system message
+                logger.warning("Gemini doesn't support native tool calls, adding tool descriptions to system message")
+                
+                # Add tool descriptions to system content
+                enhanced_system_msg = system_msg or ""
+                if tools:
+                    tools_desc = "\nAvailable tools:\n"
+                    for tool in tools:
+                        if 'function' in tool:
+                            func = tool['function']
+                            tools_desc += f"- {func.get('name', 'unknown')}: {func.get('description', 'No description')}\n"
+                    enhanced_system_msg += tools_desc
+                
+                # Use regular chat with enhanced system message
+                response_content = await self._ask_legacy(formatted_messages, enhanced_system_msg)
+                
+                return LLMResponse(
+                    content=response_content,
+                    tool_calls=[],  # Gemini doesn't support native tool calls
+                    finish_reason="stop",
+                    native_finish_reason="stop"
                 )
         except Exception as e:
             logger.error(f"Error during tool call: {e}")

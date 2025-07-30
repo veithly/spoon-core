@@ -1,3 +1,4 @@
+import json
 from enum import Enum
 from typing import Any, List, Literal, Optional, Union
 
@@ -7,6 +8,43 @@ from pydantic import BaseModel, Field
 class Function(BaseModel):
     name: str
     arguments: str
+    
+    def get_arguments_dict(self) -> dict:
+        """Parse arguments string to dictionary.
+        
+        Returns:
+            dict: Parsed arguments as dictionary
+        """
+        if isinstance(self.arguments, str):
+            arguments = self.arguments.strip()
+            if not arguments:
+                return {}
+            try:
+                return json.loads(arguments)
+            except json.JSONDecodeError:
+                return {}
+        elif isinstance(self.arguments, dict):
+            return self.arguments
+        else:
+            return {}
+    
+    @classmethod
+    def create(cls, name: str, arguments: Union[str, dict]) -> "Function":
+        """Create Function with arguments as string or dict.
+        
+        Args:
+            name: Function name
+            arguments: Function arguments as string or dict
+            
+        Returns:
+            Function: Function instance with arguments as JSON string
+        """
+        if isinstance(arguments, dict):
+            arguments_str = json.dumps(arguments)
+        else:
+            arguments_str = str(arguments)
+        
+        return cls(name=name, arguments=arguments_str)
 
 class ToolCall(BaseModel):
     id: str
@@ -55,6 +93,6 @@ TOOL_CHOICE_TYPE = Literal[TOOL_CHOICE_VALUES] # type: ignore
 
 class LLMResponse(BaseModel):
     content: str
-    tool_calls: List[Any] = Field(default_factory=list)
+    tool_calls: List[ToolCall] = Field(default_factory=list)
     finish_reason: Optional[str] = Field(default=None)
     native_finish_reason: Optional[str] = Field(default=None)

@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from logging import getLogger
 
@@ -24,6 +25,7 @@ logger = getLogger(__name__)
     ProviderCapability.CHAT,
     ProviderCapability.COMPLETION,
     ProviderCapability.STREAMING,
+    ProviderCapability.TOOLS,
     ProviderCapability.IMAGE_GENERATION,
     ProviderCapability.VISION
 ])
@@ -59,7 +61,7 @@ class GeminiProvider(LLMProviderInterface):
             raise ProviderError("gemini", f"Failed to initialize: {str(e)}", original_error=e)
     
     def _convert_messages(self, messages: List[Message]) -> tuple[Optional[str], str]:
-        """Convert Message objects to Gemini format."""
+        """Convert Message objects to Gemini format for simple chat."""
         system_content = ""
         user_message = ""
         
@@ -82,6 +84,96 @@ class GeminiProvider(LLMProviderInterface):
             user_message = "Hello"
         
         return system_content, user_message
+    
+    def _convert_messages_for_tools(self, messages: List[Message]) -> tuple[Optional[str], List]:
+        """Convert Message objects to Gemini format for tool calling."""
+        system_content = ""
+        gemini_messages = []
+        
+        for message in messages:
+            if message.role == "system":
+                if system_content:
+                    system_content += " " + message.content
+                else:
+                    system_content = message.content
+            elif message.role == "user":
+                gemini_messages.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=message.content)]
+                ))
+            elif message.role == "assistant":
+                if message.tool_calls:
+                    # Convert tool calls to Gemini format
+                    parts = []
+                    if message.content:
+                        parts.append(types.Part.from_text(text=message.content))
+                    
+                    for tool_call in message.tool_calls:
+                        args = tool_call.function.get_arguments_dict()
+                        parts.append(types.Part.from_function_call(
+                            name=tool_call.function.name,
+                            args=args
+                        ))
+                    
+                    gemini_messages.append(types.Content(
+                        role="model",
+                        parts=parts
+                    ))
+                else:
+                    gemini_messages.append(types.Content(
+                        role="model",
+                        parts=[types.Part.from_text(text=message.content)]
+                    ))
+            elif message.role == "tool":
+                # Convert tool response to Gemini format
+                # Gemini requires a non-empty name for function_response
+                tool_name = message.name
+                if not tool_name:
+                    # Fallback: try to extract tool name from tool_call_id or use a default
+                    if message.tool_call_id:
+                        # Try to find the corresponding tool call in previous messages
+                        for prev_msg in reversed(messages):
+                            if prev_msg.role == "assistant" and prev_msg.tool_calls:
+                                for tool_call in prev_msg.tool_calls:
+                                    if tool_call.id == message.tool_call_id:
+                                        tool_name = tool_call.function.name
+                                        break
+                                if tool_name:
+                                    break
+                    
+                    # If still no name found, use a default
+                    if not tool_name:
+                        tool_name = "unknown_function"
+                
+                gemini_messages.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_function_response(
+                        name=tool_name,
+                        response={"result": message.content}
+                    )]
+                ))
+        
+        return system_content, gemini_messages
+    
+    def _convert_tools_to_gemini(self, tools: List[Dict]) -> List:
+        """Convert OpenAI/Anthropic tool format to Gemini format."""
+        gemini_tools = []
+        
+        if tools:
+            function_declarations = []
+            for tool in tools:
+                if 'function' in tool:
+                    func = tool['function']
+                    function_declarations.append(types.FunctionDeclaration(
+                        name=func.get('name'),
+                        description=func.get('description'),
+                        parameters=func.get('parameters', {})
+                    ))
+            
+            if function_declarations:
+                gemini_tools.append(types.Tool(function_declarations=function_declarations))
+        
+        return gemini_tools
     
     async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
         """Send chat request to Gemini."""
@@ -203,37 +295,47 @@ class GeminiProvider(LLMProviderInterface):
         return await self.chat(messages, **kwargs)
     
     async def chat_with_tools(self, messages: List[Message], tools: List[Dict], **kwargs) -> LLMResponse:
-        """Send chat request with tools to Gemini."""
-        # Gemini doesn't support tool calls in the same way as OpenAI/Anthropic
-        # We'll add tool descriptions to the system message and use regular chat
-        logger.warning("Gemini doesn't support native tool calls, adding tool descriptions to system message")
+        """Send chat request with tools to Gemini using native function calling."""
+        if not self.client:
+            raise ProviderError("gemini", "Provider not initialized")
         
-        system_content, user_message = self._convert_messages(messages)
-        
-        # Add tool descriptions to system content
-        if tools:
-            tools_desc = "Available tools:\n"
-            for tool in tools:
-                if 'function' in tool:
-                    func = tool['function']
-                    tools_desc += f"- {func.get('name', 'unknown')}: {func.get('description', 'No description')}\n"
+        try:
+            start_time = asyncio.get_event_loop().time()
             
+            # Convert messages to Gemini format
+            system_content, gemini_messages = self._convert_messages_for_tools(messages)
+            
+            # Convert tools to Gemini format
+            gemini_tools = self._convert_tools_to_gemini(tools)
+            
+            # Extract parameters
+            model = kwargs.get('model', self.model)
+            max_tokens = kwargs.get('max_tokens', self.max_tokens)
+            temperature = kwargs.get('temperature', self.temperature)
+            
+            # Generate configuration
+            generate_config = types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                tools=gemini_tools
+            )
+            
+            # Add system instruction if available
             if system_content:
-                system_content += "\n\n" + tools_desc
-            else:
-                system_content = tools_desc
-        
-        # Create modified messages with enhanced system content
-        modified_messages = []
-        if system_content:
-            modified_messages.append(Message(role="system", content=system_content))
-        
-        # Add non-system messages
-        for message in messages:
-            if message.role != "system":
-                modified_messages.append(message)
-        
-        return await self.chat(modified_messages, **kwargs)
+                generate_config.system_instruction = system_content
+            
+            # Send request
+            response = self.client.models.generate_content(
+                model=model,
+                contents=gemini_messages,
+                config=generate_config
+            )
+            
+            duration = asyncio.get_event_loop().time() - start_time
+            return self._convert_tool_response(response, duration)
+            
+        except Exception as e:
+            await self._handle_error(e)
     
     def _convert_response(self, response, duration: float) -> LLMResponse:
         """Convert Gemini response to standardized LLMResponse."""
@@ -315,12 +417,69 @@ class GeminiProvider(LLMProviderInterface):
             model=self.model,
             finish_reason="stop",  # Gemini doesn't provide detailed finish reasons
             native_finish_reason="stop",
-            tool_calls=[],  # Gemini doesn't support native tool calls
+            tool_calls=[],  # Will be populated by _convert_tool_response for tool calls
             duration=duration,
             metadata={
                 "image_paths": image_paths,
                 "has_images": len(image_paths) > 0
             }
+        )
+    
+    def _convert_tool_response(self, response, duration: float) -> LLMResponse:
+        """Convert Gemini tool response to standardized LLMResponse."""
+        content = ""
+        tool_calls = []
+        finish_reason = "stop"
+        
+        # Check if there are candidate results
+        if hasattr(response, "candidates") and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, "content") and candidate.content:
+                # Iterate through all parts
+                for part in candidate.content.parts:
+                    # Check if there is text content
+                    if hasattr(part, "text") and part.text:
+                        if content:
+                            content += "\n" + part.text
+                        else:
+                            content = part.text
+                    # Check if there is a function call
+                    elif hasattr(part, "function_call") and part.function_call:
+                        # Convert Gemini function call to our ToolCall format
+                        function_call = part.function_call
+                        
+                        # Generate a unique ID for the tool call
+                        import uuid
+                        tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
+                        
+                        # Convert arguments to JSON string
+                        import json
+                        arguments_json = json.dumps(function_call.args) if function_call.args else "{}"
+                        
+                        tool_call = ToolCall(
+                            id=tool_call_id,
+                            type="function",
+                            function=Function(
+                                name=function_call.name,
+                                arguments=arguments_json
+                            )
+                        )
+                        tool_calls.append(tool_call)
+                        finish_reason = "tool_calls"
+        
+        # If no content was obtained from candidates, try using the text attribute
+        if not content and hasattr(response, "text"):
+            content = response.text
+        
+        return LLMResponse(
+            content=content or "",
+            provider="gemini",
+            model=self.model,
+            finish_reason=finish_reason,
+            native_finish_reason=finish_reason,
+            tool_calls=tool_calls,
+            duration=duration,
+            metadata={}
         )
     
     def get_metadata(self) -> ProviderMetadata:
@@ -332,6 +491,7 @@ class GeminiProvider(LLMProviderInterface):
                 ProviderCapability.CHAT,
                 ProviderCapability.COMPLETION,
                 ProviderCapability.STREAMING,
+                ProviderCapability.TOOLS,
                 ProviderCapability.IMAGE_GENERATION,
                 ProviderCapability.VISION
             ],

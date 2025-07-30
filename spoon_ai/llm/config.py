@@ -320,32 +320,46 @@ class ConfigurationManager:
             raise ConfigurationError(f"Configuration validation failed: {str(e)}")
     
     def get_default_provider(self) -> str:
-        """Get default provider from configuration.
+        """Get default provider from configuration with intelligent selection.
         
         Returns:
             str: Default provider name
         """
+        # 1. Check explicit configuration file setting
         if self._config_cache and 'llm' in self._config_cache:
             provider = self._config_cache['llm'].get('provider')
             if provider:
+                logger.info(f"Using provider from config file: {provider}")
                 return provider
         
-        # Check environment variable
+        # 2. Check environment variable for explicit preference
         env_provider = os.getenv('DEFAULT_LLM_PROVIDER')
         if env_provider:
+            logger.info(f"Using provider from DEFAULT_LLM_PROVIDER: {env_provider}")
             return env_provider
         
-        # Fallback to first available provider with API key
-        for provider in ['openai', 'anthropic', 'gemini']:
+        # 3. Intelligent selection based on available API keys and quality
+        # Priority order: anthropic (best quality) -> openai -> gemini
+        provider_priority = ['anthropic', 'openai', 'gemini']
+        available_providers = []
+        
+        for provider in provider_priority:
             try:
                 config = self._get_provider_config_dict(provider)
                 if config.get('api_key'):
-                    logger.info(f"Using {provider} as default provider")
-                    return provider
-            except Exception:
+                    available_providers.append(provider)
+                    logger.debug(f"Found API key for {provider}")
+            except Exception as e:
+                logger.debug(f"No valid config for {provider}: {e}")
                 continue
         
-        # Ultimate fallback
+        if available_providers:
+            selected = available_providers[0]  # First in priority order
+            logger.info(f"Intelligently selected {selected} as default provider (available: {available_providers})")
+            return selected
+        
+        # 4. Ultimate fallback
+        logger.warning("No API keys found for any provider, falling back to openai")
         return 'openai'
     
     def list_configured_providers(self) -> List[str]:
@@ -369,6 +383,53 @@ class ConfigurationManager:
                 providers.add(provider)
         
         return list(providers)
+    
+    def get_available_providers_by_priority(self) -> List[str]:
+        """Get available providers ordered by priority and quality.
+        
+        Returns:
+            List[str]: List of available provider names in priority order
+        """
+        # Define priority order based on quality and capabilities
+        priority_order = ['anthropic', 'openai', 'gemini']
+        available_providers = []
+        
+        for provider in priority_order:
+            try:
+                config = self._get_provider_config_dict(provider)
+                if config.get('api_key'):
+                    available_providers.append(provider)
+            except Exception:
+                continue
+        
+        return available_providers
+    
+    def get_provider_info(self) -> Dict[str, Dict[str, Any]]:
+        """Get information about all providers and their availability.
+        
+        Returns:
+            Dict[str, Dict[str, Any]]: Provider information including availability
+        """
+        provider_info = {}
+        
+        for provider in ['anthropic', 'openai', 'gemini']:
+            try:
+                config = self._get_provider_config_dict(provider)
+                has_api_key = bool(config.get('api_key'))
+                
+                provider_info[provider] = {
+                    'available': has_api_key,
+                    'model': config.get('model', 'Unknown'),
+                    'base_url': config.get('base_url'),
+                    'configured_via': 'environment' if os.getenv(f'{provider.upper()}_API_KEY') else 'config_file'
+                }
+            except Exception as e:
+                provider_info[provider] = {
+                    'available': False,
+                    'error': str(e)
+                }
+        
+        return provider_info
     
     def reload_config(self) -> None:
         """Reload configuration from file."""
