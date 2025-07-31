@@ -84,6 +84,7 @@ Fill in your keys:
 OPENAI_API_KEY=sk-your-openai-key
 ANTHROPIC_API_KEY=sk-your-claude-key
 DEEPSEEK_API_KEY=your-deepseek-key
+GEMINI_API_KEY=your-gemini-api-key
 PRIVATE_KEY=your-wallet-private-key
 RPC_URL=https://mainnet.rpc
 CHAIN_ID=12345
