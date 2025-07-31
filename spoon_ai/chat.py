@@ -5,6 +5,7 @@ import json
 
 from spoon_ai.schema import Message, LLMResponse, ToolCall
 from spoon_ai.utils.config_manager import ConfigManager
+from spoon_ai.llm.manager import LLMManager, get_llm_manager
 
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -12,6 +13,15 @@ from httpx import AsyncClient
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 import asyncio
+
+# Try to import Gemini client
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+    logger.warning("Google Gemini client not available. Install with: pip install google-genai")
 
 logger = getLogger(__name__)
 
@@ -43,8 +53,19 @@ def to_dict(message: Message) -> dict:
     return messages
 
 class ChatBot:
-    def __init__(self, model_name: str = None, llm_config: dict = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_prompt_cache: bool = True):
-        # Initialize configuration manager
+    def __init__(self, model_name: str = None, llm_config: dict = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_prompt_cache: bool = True, use_llm_manager: bool = False):
+        # Check if we should use the new LLM manager architecture
+        self.use_llm_manager = use_llm_manager
+        
+        if self.use_llm_manager:
+            # Use new LLM manager architecture
+            self.llm_manager = get_llm_manager()
+            self.model_name = model_name
+            self.llm_provider = llm_provider
+            logger.info("ChatBot initialized with LLM Manager architecture")
+            return
+        
+        # Initialize configuration manager (legacy path)
         config_manager = ConfigManager()
         
         # Configure prompt caching
@@ -76,6 +97,8 @@ class ChatBot:
                 configured_providers.append("anthropic")
             if "openai" in api_keys and not config_manager._is_placeholder_value(api_keys["openai"]):
                 configured_providers.append("openai")
+            if "gemini" in api_keys and not config_manager._is_placeholder_value(api_keys["gemini"]):
+                configured_providers.append("gemini")
             if "deepseek" in api_keys and not config_manager._is_placeholder_value(api_keys["deepseek"]):
                 configured_providers.append("deepseek")
 
@@ -89,6 +112,10 @@ class ChatBot:
                     logger.info("Using OpenAI API from config")
                     self.model_name = self.model_name or "gpt-4.1"
                     self.llm_provider = "openai"
+                elif "gemini" in configured_providers:
+                    logger.info("Using Gemini API from config")
+                    self.model_name = self.model_name or "gemini-2.5-pro"
+                    self.llm_provider = "gemini"
                 elif "deepseek" in configured_providers:
                     logger.info("Using DeepSeek API from config")
                     self.model_name = self.model_name or "deepseek-chat"
@@ -103,8 +130,12 @@ class ChatBot:
                     logger.info("Using OpenAI API from environment")
                     self.model_name = self.model_name or "gpt-4.1"
                     self.llm_provider = "openai"
+                elif os.getenv("GEMINI_API_KEY"):
+                    logger.info("Using Gemini API from environment")
+                    self.model_name = self.model_name or "gemini-2.5-pro"
+                    self.llm_provider = "gemini"
                 else:
-                    raise ValueError("No API key found in config or environment. Please configure API keys in config.json or set OPENAI_API_KEY/ANTHROPIC_API_KEY environment variables")
+                    raise ValueError("No API key found in config or environment. Please configure API keys in config.json or set OPENAI_API_KEY/ANTHROPIC_API_KEY/GEMINI_API_KEY environment variables")
 
         # Get API key from config if not provided
         # When using a custom base_url (like OpenRouter), use the openai API key
@@ -123,6 +154,8 @@ class ChatBot:
                 self.model_name = "gpt-4.1"
             elif self.llm_provider == "anthropic":
                 self.model_name = "claude-sonnet-4-20250514"
+            elif self.llm_provider == "gemini":
+                self.model_name = "gemini-2.5-pro"
 
         logger.info(f"Initializing ChatBot with provider: {self.llm_provider}, model: {self.model_name}, base_url: {self.base_url}")
 
@@ -144,8 +177,18 @@ class ChatBot:
                 api_key=self.api_key or os.getenv("ANTHROPIC_API_KEY"),
                 http_client=http_client
             )
+        elif self.llm_provider == "gemini" and not self.base_url:
+            # Use native Gemini API only when no custom base_url is specified
+            if not HAS_GEMINI:
+                raise ValueError("Gemini provider selected but google-genai package not installed. Install with: pip install google-genai")
+            self.api_logic = "gemini"
+            # Initialize Gemini client
+            try:
+                self.llm = genai.Client(api_key=self.api_key or os.getenv("GEMINI_API_KEY"))
+            except Exception as e:
+                raise ValueError(f"Failed to initialize Gemini client: {str(e)}")
         else:
-            raise ValueError(f"Invalid LLM provider: {llm_provider}")
+            raise ValueError(f"Invalid LLM provider: {self.llm_provider}")
 
     def _log_cache_metrics(self, usage_data) -> None:
         """Log cache metrics from Anthropic API response usage data"""
@@ -164,6 +207,35 @@ class ChatBot:
         return self.cache_metrics.copy()
 
     async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        if self.use_llm_manager:
+            return await self._ask_with_manager(messages, system_msg, output_queue)
+        return await self._ask_legacy(messages, system_msg, output_queue)
+    
+    async def _ask_with_manager(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        """Ask method using the new LLM manager architecture."""
+        # Convert messages to the expected format
+        formatted_messages = []
+        if system_msg:
+            formatted_messages.append(Message(role="system", content=system_msg))
+        
+        for message in messages:
+            if isinstance(message, dict):
+                formatted_messages.append(Message(**message))
+            elif isinstance(message, Message):
+                formatted_messages.append(message)
+            else:
+                raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Use LLM manager for the request
+        response = await self.llm_manager.chat(
+            messages=formatted_messages,
+            provider=self.llm_provider
+        )
+        
+        return response.content
+    
+    async def _ask_legacy(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
+        """Legacy ask method using the original ChatBot logic."""
         formatted_messages = [] if system_msg is None else [{"role": "system", "content": system_msg}]
         for message in messages:
             if isinstance(message, dict):
@@ -201,9 +273,88 @@ class ChatBot:
             if hasattr(response, 'usage'):
                 self._log_cache_metrics(response.usage)
             return response.content[0].text
+        elif self.api_logic == "gemini":
+            # Convert messages to Gemini format
+            system_content = system_msg or ""
+            user_message = ""
+            
+            # Get the last user message
+            for message in reversed(formatted_messages):
+                if message.get("role") == "user":
+                    user_message = message.get("content", "")
+                    break
+            
+            # If no user message found, use a default
+            if not user_message:
+                user_message = "Hello"
+            
+            # Build request content
+            contents = [types.Part.from_text(text=user_message)]
+            
+            # Generate configuration
+            generate_config = types.GenerateContentConfig(
+                max_output_tokens=4096,
+                temperature=0.3
+            )
+            
+            # Add system instruction if available
+            if system_content:
+                generate_config.system_instruction = system_content
+            
+            # Send request
+            response = self.llm.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=generate_config
+            )
+            
+            # Extract content from response
+            content = ""
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            content += part.text
+            
+            # Fallback to text attribute if available
+            if not content and hasattr(response, "text"):
+                content = response.text
+            
+            return content or ""
 
     # @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=60))
     async def ask_tool(self,messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
+        if self.use_llm_manager:
+            return await self._ask_tool_with_manager(messages, system_msg, tools, tool_choice, output_queue, **kwargs)
+        return await self._ask_tool_legacy(messages, system_msg, tools, tool_choice, output_queue, **kwargs)
+    
+    async def _ask_tool_with_manager(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
+        """Ask tool method using the new LLM manager architecture."""
+        # Convert messages to the expected format
+        formatted_messages = []
+        if system_msg:
+            formatted_messages.append(Message(role="system", content=system_msg))
+        
+        for message in messages:
+            if isinstance(message, dict):
+                formatted_messages.append(Message(**message))
+            elif isinstance(message, Message):
+                formatted_messages.append(message)
+            else:
+                raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Use LLM manager for the tool request
+        response = await self.llm_manager.chat_with_tools(
+            messages=formatted_messages,
+            tools=tools or [],
+            provider=self.llm_provider,
+            **kwargs
+        )
+        
+        return response
+    
+    async def _ask_tool_legacy(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs):
         if tool_choice not in ["auto", "none", "required"]:
             tool_choice = "auto"
 
@@ -429,6 +580,29 @@ class ChatBot:
                     tool_calls=tool_calls,
                     finish_reason=finish_reason,
                     native_finish_reason=native_finish_reason
+                )
+            elif self.api_logic == "gemini":
+                # Gemini doesn't support native tool calls, add tool descriptions to system message
+                logger.warning("Gemini doesn't support native tool calls, adding tool descriptions to system message")
+                
+                # Add tool descriptions to system content
+                enhanced_system_msg = system_msg or ""
+                if tools:
+                    tools_desc = "\nAvailable tools:\n"
+                    for tool in tools:
+                        if 'function' in tool:
+                            func = tool['function']
+                            tools_desc += f"- {func.get('name', 'unknown')}: {func.get('description', 'No description')}\n"
+                    enhanced_system_msg += tools_desc
+                
+                # Use regular chat with enhanced system message
+                response_content = await self._ask_legacy(formatted_messages, enhanced_system_msg)
+                
+                return LLMResponse(
+                    content=response_content,
+                    tool_calls=[],  # Gemini doesn't support native tool calls
+                    finish_reason="stop",
+                    native_finish_reason="stop"
                 )
         except Exception as e:
             logger.error(f"Error during tool call: {e}")

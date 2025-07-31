@@ -38,6 +38,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🧠 ReAct Intelligent Agent** - Advanced agent architecture combining reasoning and action
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
 - **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
+- **🏗️ Unified LLM Architecture** - Extensible provider system with automatic fallback, load balancing, and comprehensive monitoring
 - **⚡ Prompt Caching** - Intelligent caching for Anthropic models to reduce token costs and improve response times
 - **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
 - **🔌 MCP (Model Context Protocol)** – Dynamic, protocol-driven tool invocation system. Agents can discover and execute tools at runtime over `stdio`, `http`, or `websocket` transports — without hardcoding or restarts.
@@ -134,8 +135,140 @@ Here is an example `config.json` where a user wants to use OpenAI. You only need
   "base_url": "https://api.openai.com/v1",
   "default_agent": "default",
   "llm_provider": "openai",
-  "model_name": "gpt-4"
+  "model_name": "gpt-4.1"
 }
+```
+
+## 🏗️ Unified LLM Architecture
+
+SpoonOS features a unified LLM infrastructure that provides seamless integration with multiple providers, automatic fallback mechanisms, and comprehensive monitoring.
+
+### Key Benefits
+
+- **Provider Agnostic**: Switch between OpenAI, Anthropic, Gemini, and custom providers without code changes
+- **Automatic Fallback**: Built-in fallback chains ensure high availability
+- **Load Balancing**: Distribute requests across multiple provider instances
+- **Comprehensive Monitoring**: Request logging, performance metrics, and error tracking
+- **Easy Extension**: Add new providers with minimal code
+
+### Basic Usage
+
+```python
+from spoon_ai.llm import LLMManager, ConfigurationManager
+
+# Initialize the LLM manager
+config_manager = ConfigurationManager()
+llm_manager = LLMManager(config_manager)
+
+# Simple chat request (uses default provider)
+response = await llm_manager.chat([
+    {"role": "user", "content": "Hello, world!"}
+])
+print(response.content)
+
+# Use specific provider
+response = await llm_manager.chat(
+    messages=[{"role": "user", "content": "Hello!"}],
+    provider="anthropic"
+)
+
+# Chat with tools
+tools = [{"name": "get_weather", "description": "Get weather info"}]
+response = await llm_manager.chat_with_tools(
+    messages=[{"role": "user", "content": "What's the weather?"}],
+    tools=tools,
+    provider="openai"
+)
+```
+
+### Provider Configuration
+
+Configure providers in your `config.json`:
+
+```json
+{
+  "llm_providers": {
+    "openai": {
+      "api_key": "sk-your-openai-key",
+      "model": "gpt-4.1",
+      "max_tokens": 4096,
+      "temperature": 0.3
+    },
+    "anthropic": {
+      "api_key": "sk-ant-your-key",
+      "model": "claude-sonnet-4-20250514",
+      "max_tokens": 4096,
+      "temperature": 0.3
+    },
+    "gemini": {
+      "api_key": "your-gemini-key",
+      "model": "gemini-2.5-pro",
+      "max_tokens": 4096
+    }
+  },
+  "llm_settings": {
+    "default_provider": "openai",
+    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "enable_monitoring": true,
+    "enable_caching": true
+  }
+}
+```
+
+### Fallback and Load Balancing
+
+```python
+# Set up fallback chain
+llm_manager.set_fallback_chain(["openai", "anthropic", "gemini"])
+
+# The manager will automatically try providers in order if one fails
+response = await llm_manager.chat([
+    {"role": "user", "content": "Hello!"}
+])
+# If OpenAI fails, it will try Anthropic, then Gemini
+```
+
+### Custom Provider Integration
+
+```python
+from spoon_ai.llm import LLMProviderInterface, register_provider
+
+@register_provider("custom", capabilities=["chat", "completion"])
+class CustomProvider(LLMProviderInterface):
+    async def initialize(self, config):
+        self.api_key = config["api_key"]
+        # Initialize your provider
+    
+    async def chat(self, messages, **kwargs):
+        # Implement chat functionality
+        return LLMResponse(
+            content="Custom response",
+            provider="custom",
+            model="custom-model",
+            finish_reason="stop"
+        )
+    
+    # Implement other required methods...
+```
+
+### Monitoring and Debugging
+
+```python
+from spoon_ai.llm import get_debug_logger, get_metrics_collector
+
+# Get monitoring instances
+debug_logger = get_debug_logger()
+metrics = get_metrics_collector()
+
+# View provider statistics
+stats = metrics.get_provider_stats("openai")
+print(f"Success rate: {stats['success_rate']:.1f}%")
+print(f"Average response time: {stats['avg_response_time']:.2f}s")
+
+# Get recent logs
+logs = debug_logger.get_recent_logs(limit=10)
+for log in logs:
+    print(f"{log.timestamp}: {log.provider} - {log.method}")
 ```
 
 ## Using OpenRouter (Multi-LLM Gateway)
@@ -146,14 +279,13 @@ from spoon_ai.agents import SpoonReactAI
 
 # Using OpenAI's GPT-4
 openai_agent = SpoonReactAI(
-    llm=ChatBot(model_name="gpt-4", llm_provider="openai")
+    llm=ChatBot(model_name="gpt-4.1", llm_provider="openai")
 )
 
 # Using Anthropic's Claude
 claude_agent = SpoonReactAI(
     llm=ChatBot(model_name="claude-sonnet-4-20250514", llm_provider="anthropic")
 )
-
 
 # Using OpenRouter (OpenAI-compatible API)
 # Uses OPENAI_API_KEY environment variable with your OpenRouter API key

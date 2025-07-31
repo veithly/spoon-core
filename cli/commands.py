@@ -198,6 +198,14 @@ class SpoonAICLI:
             aliases=["send"]
         ))
 
+        # LLM Status Command
+        self.add_command(SpoonCommand(
+            name="llm-status",
+            description="Show LLM provider status and configuration",
+            handler=self._handle_llm_status,
+            aliases=["llm", "providers"]
+        ))
+
         # Swap Command
         self.add_command(SpoonCommand(
             name="swap",
@@ -259,7 +267,11 @@ class SpoonAICLI:
         ))
 
     def add_command(self, command: SpoonCommand):
+        # Store primary command
         self.commands[command.name] = command
+        # Store all aliases pointing to the same command
+        for alias in command.aliases:
+            self.commands[alias] = command
 
     def _help(self, input_list: List[str]):
         if len(input_list) <= 1:
@@ -792,8 +804,14 @@ class SpoonAICLI:
             'warning': 'ansiyellow',
         })
 
+        # Collect all command names and aliases
+        all_names = set()
+        for cmd in self.commands.values():
+            all_names.add(cmd.name)
+            all_names.update(cmd.aliases)
+
         self.completer = WordCompleter(
-            list(self.commands.keys()),
+            list(all_names),
             ignore_case=True,
         )
         history_file = self.config_dir / "history.txt"
@@ -1434,6 +1452,71 @@ class SpoonAICLI:
         logger.info("  config api_key anthropic sk-ant-xxxx")
         logger.info("  config default_agent my_agent")
 
+
+    def _handle_llm_status(self, input_list: List[str]):
+        """Handle LLM status command to show provider configuration and availability"""
+        try:
+            from spoon_ai.llm.config import ConfigurationManager
+            
+            config_manager = ConfigurationManager()
+            
+            logger.info("=" * 60)
+            logger.info("LLM PROVIDER STATUS")
+            logger.info("=" * 60)
+            
+            # Show current default provider
+            default_provider = config_manager.get_default_provider()
+            logger.info(f"Current Default Provider: {default_provider}")
+            
+            # Show available providers by priority
+            available_providers = config_manager.get_available_providers_by_priority()
+            if available_providers:
+                logger.info(f"Available Providers (by priority): {', '.join(available_providers)}")
+            else:
+                logger.warning("No providers with valid API keys found!")
+            
+            # Show detailed provider information
+            logger.info("\nProvider Details:")
+            provider_info = config_manager.get_provider_info()
+            
+            for provider, info in provider_info.items():
+                status_icon = "Available" if info['available'] else "Not Available"
+                logger.info(f"  {provider.upper()}: {status_icon}")
+                
+                if info['available']:
+                    logger.info(f"    Model: {info['model']}")
+                    if info.get('base_url'):
+                        logger.info(f"    Base URL: {info['base_url']}")
+                    logger.info(f"    Configured via: {info['configured_via']}")
+                else:
+                    if 'error' in info:
+                        logger.info(f"    Error: {info['error']}")
+            
+            # Show current agent's LLM configuration
+            if self.current_agent and hasattr(self.current_agent, 'llm'):
+                logger.info(f"\nCurrent Agent LLM:")
+                llm = self.current_agent.llm
+                if hasattr(llm, 'use_llm_manager'):
+                    architecture = "New LLM Manager" if llm.use_llm_manager else "Legacy"
+                    logger.info(f"    Architecture: {architecture}")
+                if hasattr(llm, 'llm_provider'):
+                    logger.info(f"    Provider: {llm.llm_provider}")
+                if hasattr(llm, 'model_name'):
+                    logger.info(f"    Model: {llm.model_name}")
+            
+            # Show configuration tips
+            logger.info("\nConfiguration Tips:")
+            logger.info("  • Set DEFAULT_LLM_PROVIDER environment variable to override default selection")
+            logger.info("  • Configure API keys in .env file or environment variables")
+            logger.info("  • Provider priority: anthropic > openai > gemini")
+            logger.info("  • Use 'config' command to manage other settings")
+            
+            logger.info("=" * 60)
+            
+        except Exception as e:
+            logger.error(f"Error getting LLM status: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
     def _handle_reload_config(self, input_list: List[str]):
         """Reload configuration"""

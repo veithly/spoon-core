@@ -70,7 +70,15 @@ def setup_data():
 @pytest.fixture
 async def agent():
     """Fixture to create an agent and ensure it resets state after each test."""
-    a = DataAnalystAgent(llm=ChatBot())
+    # Try to use new LLM manager architecture first, fallback to legacy if needed
+    try:
+        a = DataAnalystAgent(llm=ChatBot(use_llm_manager=True))
+        print("✓ Using new LLM manager architecture for tests")
+    except Exception as e:
+        print(f"⚠ Falling back to legacy mode for tests: {e}")
+        a = DataAnalystAgent(llm=ChatBot(use_llm_manager=False))
+        print("✓ Using legacy ChatBot architecture for tests")
+    
     yield a  # Pass `agent` to the test function
     a.clear()  # Clear state after test
     a.state = AgentState.IDLE  # Reset agent state

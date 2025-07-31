@@ -59,7 +59,7 @@ class BaseAgent(BaseModel, ABC):
             else:
                 self.memory.add_message(Message(role=Role.ASSISTANT, content=content))
         elif role == "tool":
-            self.memory.add_message(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id))
+            self.memory.add_message(Message(role=Role.TOOL, content=content, tool_call_id=tool_call_id, name=tool_name))
     
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):

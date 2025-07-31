@@ -3,35 +3,20 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union
 
-import toml
 from pydantic import BaseModel, Field
 
 from logging import getLogger
+from spoon_ai.schema import Message, LLMConfig, LLMResponse
 
-from spoon_ai.schema import Message
+# Try to import toml, but make it optional
+try:
+    import toml
+    HAS_TOML = True
+except ImportError:
+    HAS_TOML = False
+
 logger = getLogger(__name__)
 
-
-
-class LLMConfig(BaseModel):
-    """Base class for LLM configuration"""
-    
-    model: str = ""
-    api_key: str = ""
-    base_url: Optional[str] = None
-    api_type: Optional[str] = None
-    api_version: Optional[str] = None
-    max_tokens: int = 4096
-    temperature: float = 0.3
-
-
-class LLMResponse(BaseModel):
-    """Base class for LLM response"""
-    
-    content: str
-    text: str = ""  # Original text response
-    tool_calls: List[Any] = Field(default_factory=list)
-    image_paths: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class LLMBase(ABC):
@@ -64,7 +49,17 @@ class LLMBase(ABC):
             return LLMConfig()
             
         try:
-            config_data = toml.load(config_path)
+            if config_path.endswith('.toml'):
+                if not HAS_TOML:
+                    logger.warning("TOML configuration file found but 'toml' package not installed")
+                    return LLMConfig()
+                config_data = toml.load(config_path)
+            else:
+                # Assume JSON format
+                import json
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+            
             llm_config = config_data.get(config_name, {})
             return LLMConfig(**llm_config)
         except Exception as e:

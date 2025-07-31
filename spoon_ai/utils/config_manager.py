@@ -208,7 +208,7 @@ class ConfigManager:
         api_keys = self.get("api_keys", {})
 
         # Check for valid (non-placeholder) API keys in priority order
-        for provider in ["anthropic", "openai", "deepseek"]:
+        for provider in ["anthropic", "openai", "gemini", "deepseek"]:
             if provider in api_keys:
                 key_value = api_keys[provider]
                 if key_value and not self._is_placeholder_value(key_value):

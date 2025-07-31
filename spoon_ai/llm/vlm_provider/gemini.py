@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GeminiConfig(LLMConfig):
     """Gemini Configuration"""
     
-    model: str = "gemini-pro"
+    model: str = "gemini-2.5-pro"
     api_key: str = Field(default_factory=lambda: os.getenv('GEMINI_API_KEY', ''))
     
     @model_validator(mode='after')
