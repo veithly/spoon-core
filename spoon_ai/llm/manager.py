@@ -521,7 +521,6 @@ class LLMManager:
                         await provider_instance.initialize(config.model_dump())
                         logger.info(f"Initialized provider {provider_name} for health check")
                     except Exception as init_error:
-                        # 处理初始化失败
                         logger.warning(f"Failed to initialize provider {provider_name} for health check: {init_error}")
                         health_status[provider_name] = False
                         self.load_balancer.update_provider_health(provider_name, False)
