@@ -200,9 +200,9 @@ class LLMManager:
             # Set default provider
             self.default_provider = self.config_manager.get_default_provider()
             
-            # Set default fallback chain
+            # Set fallback chain from configuration
             if not self.fallback_chain:
-                self.fallback_chain = configured_providers
+                self.fallback_chain = self.config_manager.get_fallback_chain()
             
             logger.info(f"LLM Manager initialized with providers: {configured_providers}")
             logger.info(f"Default provider: {self.default_provider}")
@@ -513,6 +513,20 @@ class LLMManager:
         for provider_name in self.registry.list_providers():
             try:
                 provider_instance = self.registry.get_provider(provider_name)
+                
+                # Try to initialize provider if not already initialized
+                if hasattr(provider_instance, 'client') and provider_instance.client is None:
+                    try:
+                        config = self.config_manager.load_provider_config(provider_name)
+                        await provider_instance.initialize(config.model_dump())
+                        logger.info(f"Initialized provider {provider_name} for health check")
+                    except Exception as init_error:
+                        logger.warning(f"Failed to initialize provider {provider_name} for health check: {init_error}")
+                        health_status[provider_name] = False
+                        self.load_balancer.update_provider_health(provider_name, False)
+                        continue
+                
+                # Perform health check
                 is_healthy = await provider_instance.health_check()
                 health_status[provider_name] = is_healthy
                 

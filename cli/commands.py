@@ -105,7 +105,27 @@ class SpoonAICLI:
         self.config_dir = Path(__file__).resolve().parents[1]
         self.commands: Dict[str, SpoonCommand] = {}
         self.config_manager = ConfigManager()
-        self.aggregator = Aggregator(rpc_url=os.getenv("RPC_URL"), chain_id=int(os.getenv("CHAIN_ID", 1)), scan_url=os.getenv("SCAN_URL", "https://etherscan.io"))
+        
+        # Get blockchain configuration from config.json first, then fallback to environment variables
+        config_data = self.config_manager._load_config()
+        
+        # Get RPC_URL from config.json or environment
+        rpc_url = config_data.get("RPC_URL") or os.getenv("RPC_URL")
+        
+        # Get CHAIN_ID from config.json or environment
+        chain_id_str = config_data.get("CHAIN_ID") or os.getenv("CHAIN_ID", "1")
+        chain_id = int(chain_id_str) if chain_id_str and str(chain_id_str).strip() else 1
+        
+        # Get SCAN_URL from config.json or environment
+        scan_url = config_data.get("SCAN_URL") or os.getenv("SCAN_URL", "https://etherscan.io")
+        
+
+        
+        self.aggregator = Aggregator(
+            rpc_url=rpc_url, 
+            chain_id=chain_id, 
+            scan_url=scan_url
+        )
         self._should_exit = False
         self._init_commands()
         self._set_prompt_toolkit()

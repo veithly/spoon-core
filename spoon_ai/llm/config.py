@@ -362,6 +362,29 @@ class ConfigurationManager:
         logger.warning("No API keys found for any provider, falling back to openai")
         return 'openai'
     
+    def get_fallback_chain(self) -> List[str]:
+        """Get fallback chain from configuration.
+        
+        Returns:
+            List[str]: List of provider names in fallback order
+        """
+        # Check llm_settings.fallback_chain in config file
+        if self._config_cache and 'llm_settings' in self._config_cache:
+            fallback_chain = self._config_cache['llm_settings'].get('fallback_chain')
+            if fallback_chain:
+                logger.info(f"Using fallback chain from config file: {fallback_chain}")
+                return fallback_chain
+        
+        # Fallback to intelligent selection based on available providers
+        available_providers = self.get_available_providers_by_priority()
+        if available_providers:
+            logger.info(f"Using intelligent fallback chain: {available_providers}")
+            return available_providers
+        
+        # Ultimate fallback
+        logger.warning("No fallback chain configured, using default")
+        return ['openai']
+    
     def list_configured_providers(self) -> List[str]:
         """List all configured providers.
         
