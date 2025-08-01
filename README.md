@@ -23,6 +23,8 @@ Here's how to navigate it:
 
 - [🧩 Agent Framework](#agent-framework): Learn how to create your own agents, register custom tools, and extend SpoonOS with minimal setup.
 
+- [📊 Enhanced Graph System](#enhanced-graph-system): Discover the powerful graph-based workflow orchestration system for complex AI agent workflows.
+
 - [🔌 API Integration](#api-integration): Plug in external APIs to enhance your agent workflows.
 
 - [🤝 Contributing](#contributing): Want to get involved? Check here for contribution guidelines.
@@ -39,6 +41,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
 - **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
 - **🏗️ Unified LLM Architecture** - Extensible provider system with automatic fallback, load balancing, and comprehensive monitoring
+- **📊 Enhanced Graph System** - LangGraph-inspired workflow orchestration with state management, multi-agent coordination, and human-in-the-loop patterns
 - **⚡ Prompt Caching** - Intelligent caching for Anthropic models to reduce token costs and improve response times
 - **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
 - **🔌 MCP (Model Context Protocol)** – Dynamic, protocol-driven tool invocation system. Agents can discover and execute tools at runtime over `stdio`, `http`, or `websocket` transports — without hardcoding or restarts.
@@ -117,13 +120,13 @@ This model ensures that sensitive keys and environment-specific settings are kep
 
 The `config.json` file manages agent and API settings. Below are the supported parameters:
 
-| Parameter       | Type     | Description                                                                                               | Default                               |
-|-----------------|----------|-----------------------------------------------------------------------------------------------------------|---------------------------------------|
-| `api_keys`      | `object` | A dictionary containing API keys for different LLM providers (e.g., `openai`, `anthropic`, `deepseek`).      | `{}`                                  |
-| `base_url`      | `string` | The base URL for the API endpoint, particularly useful for custom or proxy servers like OpenRouter.           | `""`                                  |
-| `default_agent` | `string` | The default agent to use for tasks.                                                                       | `"default"`                           |
-| `llm_provider`  | `string` | The name of the LLM provider to use (e.g., `openai`, `anthropic`). Overrides provider detection from model name. | `"openai"`                            |
-| `model_name`    | `string` | The specific model to use for the selected provider (e.g., `gpt-4.1`, `claude-sonnet-4-20250514`).           | `null`                                |
+| Parameter       | Type     | Description                                                                                                      | Default     |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ----------- |
+| `api_keys`      | `object` | A dictionary containing API keys for different LLM providers (e.g., `openai`, `anthropic`, `deepseek`).          | `{}`        |
+| `base_url`      | `string` | The base URL for the API endpoint, particularly useful for custom or proxy servers like OpenRouter.              | `""`        |
+| `default_agent` | `string` | The default agent to use for tasks.                                                                              | `"default"` |
+| `llm_provider`  | `string` | The name of the LLM provider to use (e.g., `openai`, `anthropic`). Overrides provider detection from model name. | `"openai"`  |
+| `model_name`    | `string` | The specific model to use for the selected provider (e.g., `gpt-4.1`, `claude-sonnet-4-20250514`).               | `null`      |
 
 Here is an example `config.json` where a user wants to use OpenAI. You only need to provide the key for the service you intend to use.
 
@@ -298,7 +301,54 @@ openrouter_agent = SpoonReactAI(
 )
 ```
 
-## 🚀 Run the CLI
+
+## 📊 Enhanced Graph System
+
+SpoonOS includes a powerful graph-based workflow orchestration system inspired by LangGraph, designed for building complex AI agent workflows with state management, multi-agent coordination, and human-in-the-loop patterns.
+
+### Key Features
+
+- **StateGraph Architecture** - Build workflows using nodes, edges, and conditional routing
+- **Multi-Agent Coordination** - Supervisor patterns and agent routing capabilities  
+- **Human-in-the-Loop** - Interrupt/resume mechanisms for human approval workflows
+- **Streaming Execution** - Real-time monitoring with values, updates, and debug modes
+- **LLM Integration** - Seamless integration with SpoonOS LLM Manager
+- **State Persistence** - Checkpointing and workflow resumption capabilities
+
+### Quick Example
+
+```python
+from spoon_ai.graph import StateGraph
+from typing import TypedDict
+
+class WorkflowState(TypedDict):
+    counter: int
+    completed: bool
+
+def increment(state: WorkflowState):
+    return {"counter": state["counter"] + 1}
+
+def complete(state: WorkflowState):
+    return {"completed": True}
+
+# Build and execute workflow
+graph = StateGraph(WorkflowState)
+graph.add_node("increment", increment)
+graph.add_node("complete", complete)
+graph.add_edge("increment", "complete")
+graph.set_entry_point("increment")
+
+compiled = graph.compile()
+result = await compiled.invoke({"counter": 0, "completed": False})
+# Result: {"counter": 1, "completed": True}
+```
+
+📖 **[Complete Graph System Guide](doc/graph_agent.md)**
+
+🎯 **[Comprehensive Demo](examples/llm_integrated_graph_demo.py)**
+
+
+## 🚀 Quick Start
 
 ### Start the MCP Server
 
@@ -420,13 +470,21 @@ chatbot = ChatBot(
 - [requirements.txt](./requirements.txt)
 - [main.py](./main.py)
 - [examples/](./examples)
-  - [agent/](./examples/agent/) – 🧠 Agent demos ( Weather)
+  - [agent/](./examples/agent/) – 🧠 Agent demos (Weather)
   - [mcp/](./examples/mcp/) – 🔌 Tool server examples
+  - [llm_integrated_graph_demo.py](./examples/llm_integrated_graph_demo.py) – 📊 Complete graph system demo
 - [spoon_ai/](./spoon_ai) – 🍴 Core agent framework
+  - [graph.py](./spoon_ai/graph.py) – 📊 Enhanced graph system implementation
+  - [llm/](./spoon_ai/llm/) – 🏗️ Unified LLM architecture
+- [tests/](./tests)
+  - [test_graph.py](./tests/test_graph.py) – 📊 Graph system test suite
+- [docs/](./docs)
+  - [GRAPH_SYSTEM_COMPLETE_GUIDE.md](./docs/GRAPH_SYSTEM_COMPLETE_GUIDE.md) – 📊 Complete graph system guide
 - [doc/](./doc)
   - [installation.md](./doc/installation.md)
   - [configuration.md](./doc/configuration.md)
   - [openrouter.md](./doc/openrouter.md)
-  - [cli.md](./do/cli.md)
+  - [cli.md](./doc/cli.md)
   - [agent.md](./doc/agent.md)
+  - [graph_agent.md](./doc/graph_agent.md) – 📊 Enhanced graph system guide
   - [mcp_mode_usage.md](./doc/mcp_mode_usage.md)
