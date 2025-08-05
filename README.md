@@ -148,8 +148,8 @@ Create or edit `config.json` directly for advanced configurations:
           "type": "mcp",
           "enabled": true,
           "mcp_server": {
-            "command": "npm",
-            "args": ["exec", "--yes", "--", "tavily-mcp"],
+            "command": "npx",
+            "args": ["--yes", "tavily-mcp"],
             "env": {"TAVILY_API_KEY": "your-tavily-key"}
           }
         },
@@ -159,7 +159,9 @@ Create or edit `config.json` directly for advanced configurations:
           "enabled": true,
           "env": {
             "OKX_API_KEY": "your-okx-key",
-            "OKX_SECRET_KEY": "your-okx-secret"
+            "OKX_SECRET_KEY": "your-okx-secret",
+            "OKX_API_PASSPHRASE": "your-okx-passphrase",
+            "OKX_PROJECT_ID": "your-okx-project-id"
           }
         }
       ]
@@ -196,16 +198,21 @@ Example agent with both tool types:
           "name": "tavily-search",
           "type": "mcp",
           "mcp_server": {
-            "command": "npm",
-            "args": ["exec", "--yes", "--", "tavily-mcp"],
+            "command": "npx",
+            "args": ["--yes", "tavily-mcp"],
             "env": {"TAVILY_API_KEY": "your-key"}
           }
         },
         {
-          "name": "crypto_data",
+          "name": "crypto_powerdata_cex",
           "type": "builtin",
-          "env": {"OKX_API_KEY": "your-key"}
-        }
+          "enabled": true,
+          "env": {
+            "OKX_API_KEY": "your_okx_api_key",
+            "OKX_SECRET_KEY": "your_okx_secret_key",
+            "OKX_API_PASSPHRASE": "your_okx_api_passphrase",
+            "OKX_PROJECT_ID": "your_okx_project_id"
+          }
       ]
     }
   }
