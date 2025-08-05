@@ -1,10 +1,24 @@
 # 🔐 Configuration Guide for SpoonOS
 
-This guide covers how to configure SpoonOS with API keys, private keys, RPC endpoints, and other environment variables.
+This guide covers how to configure SpoonOS with the unified tool configuration system, including API keys, MCP tools, built-in tools, and environment variables.
 
 ---
 
-## 1.🧾 Method: .env File (Recommended)
+## Overview
+
+SpoonOS uses a **unified tool configuration system** that consolidates all tool settings directly within agent configurations. This approach provides:
+
+### Key Benefits
+- **Single Configuration Point**: All tool settings in one place per agent
+- **Embedded MCP Servers**: MCP server configuration included directly in tool definitions
+- **Automatic Lifecycle Management**: MCP servers start/stop automatically based on tool usage
+- **Type Safety**: Strong validation for all configuration options
+- **Environment Variable Integration**: Tool-specific environment variables can be configured directly in tool definitions
+- **Priority-based Configuration**: Tool-level env vars override system env vars for flexible configuration management
+
+---
+
+## 1. 🧾 Method: .env File (Recommended)
 
 Create a `.env` file in the project root:
 
@@ -24,6 +38,21 @@ DEEPSEEK_API_KEY=your-deepseek-key
 PRIVATE_KEY=your-wallet-private-key
 RPC_URL=https://mainnet.rpc
 CHAIN_ID=12345
+
+# Tool-specific environment variables
+TAVILY_API_KEY=your-tavily-api-key
+BRAVE_API_KEY=your-brave-search-key
+GITHUB_TOKEN=your-github-token
+
+# Built-in tool environment variables
+OKX_API_KEY=your_okx_api_key
+OKX_SECRET_KEY=your_okx_secret_key
+OKX_API_PASSPHRASE=your_okx_api_passphrase
+OKX_PROJECT_ID=your_okx_project_id
+CHAINBASE_API_KEY=your_chainbase_api_key
+THIRDWEB_CLIENT_ID=your_thirdweb_client_id
+BITQUERY_API_KEY=your_bitquery_api_key
+RPC_URL=https://eth.llamarpc.com
 ```
 
 Then load it at the top of your Python entry file (e.g. main.py):
@@ -33,7 +62,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 ```
 
-## 2.💻 Method: Shell Environment Variables
+## 2. 💻 Method: Shell Environment Variables
 
 **Linux/macOS:**
 
@@ -64,14 +93,11 @@ $env:PRIVATE_KEY="your-wallet-private-key-here"
 [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-your-anthropic-api-key-here", "User")
 ```
 
-## 3.🧪 Method: CLI Configuration Commands
+## 3. 🧪 Method: CLI Configuration Commands
 
 After starting the CLI, use the `config` command:
 
 ```bash
-# Start the MCP server with all available tools
-python -m spoon_ai.tools.mcp_tools_collection
-
 # Start the CLI
 python main.py
 
@@ -99,9 +125,11 @@ API Keys:
 PRIVATE_KEY: 0x12...ab34
 ```
 
-## 4 📁 Method: Configuration File
+## 4. 📁 Method: Unified Configuration File
 
-The CLI creates a configuration file at `config.json` in the project root directory:
+The unified configuration format consolidates all settings in `config.json`:
+
+### Complete Configuration Example
 
 ```json
 {
@@ -110,9 +138,8 @@ The CLI creates a configuration file at `config.json` in the project root direct
     "anthropic": "sk-ant-your-anthropic-api-key-here",
     "deepseek": "your-deepseek-api-key-here"
   },
-  "base_url": "your_base_url_here",
-  "default_agent": "default",
-  "llm_providers": {
+  "default_agent": "web_researcher",
+  "providers": {
     "openai": {
       "api_key": "sk-your-openai-key",
       "model": "gpt-4.1",
@@ -123,31 +150,289 @@ The CLI creates a configuration file at `config.json` in the project root direct
     },
     "anthropic": {
       "api_key": "sk-ant-your-key",
-      "model": "claude-sonnet-4-20250514",
+      "model": "claude-3-5-sonnet-20241022",
       "max_tokens": 4096,
       "temperature": 0.3,
       "timeout": 30,
       "retry_attempts": 3
-    },
-    "gemini": {
-      "api_key": "your-gemini-key",
-      "model": "gemini-2.5-pro",
-      "max_tokens": 4096,
-      "temperature": 0.3
     }
   },
   "llm_settings": {
     "default_provider": "openai",
-    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "fallback_chain": ["openai", "anthropic"],
     "enable_monitoring": true,
     "enable_caching": true,
     "enable_debug_logging": false,
     "max_concurrent_requests": 10
+  },
+  "agents": {
+    "web_researcher": {
+      "class": "SpoonReactMCP",
+      "description": "Agent with web search and analysis capabilities",
+      "aliases": ["researcher", "web"],
+      "config": {
+        "max_steps": 10,
+        "tool_choice": "auto"
+      },
+      "tools": [
+        {
+          "name": "web_search",
+          "type": "mcp",
+          "description": "Web search capabilities via Tavily API",
+          "enabled": true,
+          "mcp_server": {
+            "command": "npx",
+            "args": ["-y", "@tavily/mcp-server"],
+            "env": {
+              "TAVILY_API_KEY": "your-tavily-api-key-here"
+            },
+            "disabled": false,
+            "autoApprove": ["search", "get_content"],
+            "timeout": 30,
+            "retry_attempts": 3
+          },
+          "config": {
+            "max_results": 10,
+            "include_raw_content": true
+          }
+        },
+        {
+          "name": "crypto_powerdata_cex",
+          "type": "builtin",
+          "description": "Crypto PowerData CEX market data tool",
+          "enabled": true,
+          "env": {
+            "OKX_API_KEY": "your_okx_api_key",
+            "OKX_SECRET_KEY": "your_okx_secret_key",
+            "OKX_API_PASSPHRASE": "your_okx_api_passphrase",
+            "OKX_PROJECT_ID": "your_okx_project_id"
+          },
+          "config": {
+            "timeout": 30,
+            "max_retries": 3
+          }
+        }
+      ]
+    },
+    "trading_bot": {
+      "class": "SpoonReactAI",
+      "description": "Automated trading and DeFi operations",
+      "aliases": ["trader", "bot"],
+      "config": {
+        "max_steps": 15,
+        "tool_choice": "auto"
+      },
+      "tools": [
+        {
+          "name": "github_tools",
+          "type": "mcp",
+          "description": "GitHub repository analysis and management",
+          "enabled": true,
+          "mcp_server": {
+            "command": "uvx",
+            "args": ["github-mcp-server"],
+            "env": {
+              "GITHUB_TOKEN": "your-github-token-here"
+            },
+            "autoApprove": ["list_repos", "get_file"]
+          }
+        },
+        {
+          "name": "get_token_price",
+          "type": "builtin",
+          "description": "Get current token prices",
+          "enabled": true,
+          "env": {
+            "RPC_URL": "https://eth.llamarpc.com",
+            "BITQUERY_API_KEY": "your_bitquery_api_key"
+          },
+          "config": {
+            "timeout": 30,
+            "max_retries": 3
+          }
+        }
+      ]
+    }
   }
 }
 ```
 
-## 5. 🔍 Verification & Testing
+### Environment Variables Configuration Example
+
+Here's a complete example showing how to use environment variables in tool configurations:
+
+```json
+{
+  "api_keys": {
+    "OPENAI_API_KEY": "sk-your-openai-key",
+    "ANTHROPIC_API_KEY": "sk-your-anthropic-key"
+  },
+  "default_agent": "trading_agent",
+  "agents": {
+    "trading_agent": {
+      "class": "SpoonReactAI",
+      "description": "Trading agent with environment variable configuration",
+      "tools": [
+        {
+          "name": "crypto_powerdata_cex",
+          "type": "builtin",
+          "description": "Crypto PowerData CEX with environment variables",
+          "enabled": true,
+          "env": {
+            "POWERDATA_API_KEY": "your-powerdata-api-key-here",
+            "POWERDATA_BASE_URL": "https://api.cryptopowerdata.com",
+            "DEBUG_MODE": "false"
+          },
+          "config": {
+            "max_retries": 3,
+            "rate_limit": 100
+          }
+        },
+        {
+          "name": "tavily_search",
+          "type": "mcp",
+          "description": "Tavily with dual environment variables",
+          "enabled": true,
+          "env": {
+            "SEARCH_TIMEOUT": "60",
+            "DEBUG_SEARCH": "true"
+          },
+          "mcp_server": {
+            "command": "npx",
+            "args": ["-y", "@tavily/mcp-server"],
+            "env": {
+              "TAVILY_API_KEY": "your-tavily-api-key-here",
+              "NODE_ENV": "production"
+            },
+            "autoApprove": ["search", "get_content"]
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**Key Features:**
+- **Tool-level environment variables**: Set at the tool level (`env` field)
+- **Server-level environment variables**: Set in MCP server configuration
+- **Environment isolation**: Each tool has its own environment scope
+- **Override capability**: Tool-level env vars override server-level ones
+
+## 5. 🔧 Tool Configuration Details
+
+### MCP Tools Configuration
+
+MCP (Model Context Protocol) tools require an embedded server configuration. Here's a basic example:
+
+#### Environment Variables for MCP Tools
+
+MCP tools support environment variables at two levels:
+
+1. **Tool-level environment variables** (`env` at tool level): Applied to the entire tool context
+2. **Server-level environment variables** (`env` in `mcp_server`): Applied specifically to the MCP server process
+
+Tool-level environment variables are merged with server-level ones, with tool-level taking precedence.
+
+#### Web Search Tool (Tavily)
+```json
+{
+  "name": "tavily-search",
+  "type": "mcp",
+  "description": "Web search and content retrieval via Tavily",
+  "enabled": true,
+  "mcp_server": {
+    "command": "npx",
+    "args": ["--yes", "tavily-mcp"],
+    "env": {
+      "TAVILY_API_KEY": "your-tavily-api-key-here"
+    },
+    "autoApprove": ["tavily-search"],
+    "timeout": 30,
+    "retry_attempts": 3
+  },
+  "config": {
+    "max_results": 10,
+    "include_raw_content": true
+  }
+}
+```
+
+### Built-in Tools Configuration
+
+Built-in tools are part of the SpoonOS toolkit and don't require external servers. For a complete list of all available built-in tools, see the [Built-in Tools Reference](./builtin_tools.md).
+
+#### Environment Variables for Tools
+
+You can configure environment variables directly in tool configurations instead of relying only on system environment variables:
+
+```json
+{
+  "name": "crypto_powerdata_cex",
+  "type": "builtin",
+  "description": "Crypto PowerData CEX market data",
+  "enabled": true,
+  "env": {
+    "OKX_API_KEY": "your_okx_api_key",
+    "OKX_SECRET_KEY": "your_okx_secret_key",
+    "OKX_API_PASSPHRASE": "your_okx_api_passphrase",
+    "OKX_PROJECT_ID": "your_okx_project_id"
+  },
+  "config": {
+    "timeout": 30,
+    "max_retries": 3
+  }
+}
+```
+
+**Key Benefits:**
+- **Tool-specific Environment**: Each tool can have its own environment variables
+- **Configuration Isolation**: Environment variables are scoped to individual tools
+- **Override System Variables**: Tool-level env vars take precedence over system environment
+- **Dynamic Configuration**: No need to restart the application to change environment variables
+
+### Mixed Configuration Example
+
+A simple agent with both MCP and builtin tools:
+
+```json
+{
+  "research_agent": {
+    "class": "SpoonReactMCP",
+    "description": "Research agent with web search and crypto data",
+    "aliases": ["researcher"],
+    "config": {
+      "max_steps": 10,
+      "tool_choice": "auto"
+    },
+    "tools": [
+      {
+        "name": "tavily-search",
+        "type": "mcp",
+        "description": "Web search via Tavily",
+        "enabled": true,
+        "mcp_server": {
+          "command": "npx",
+          "args": ["--yes", "tavily-mcp"],
+          "env": {"TAVILY_API_KEY": "your-tavily-key"}
+        }
+      },
+      {
+        "name": "crypto_powerdata_cex",
+        "type": "builtin",
+        "description": "Cryptocurrency market data",
+        "enabled": true,
+        "env": {
+          "OKX_API_KEY": "your_okx_api_key",
+          "OKX_SECRET_KEY": "your_okx_secret_key"
+        }
+      }
+    ]
+  }
+}
+```
+
+## 6. 🔍 Verification & Testing
 
 ### Check Environment Variables
 
@@ -164,18 +449,45 @@ python -c "import os; print('OpenAI:', 'SET' if os.getenv('OPENAI_API_KEY') else
 ### Test API Connectivity
 
 ```bash
-# Start the MCP server with all available tools
-python -m spoon_ai.tools.mcp_tools_collection
-
 # Start CLI and test
 python main.py
 
-# start chat and test
+# Test agent loading
+> load-agent web_researcher
+✅ Loaded agent: web_researcher
+
+# Test chat functionality
 > action chat
 > Hello, can you respond to test the API connection?
 ```
 
-## 6 🔒 Security Best Practices
+### Test Tool Configuration
+
+```bash
+# Test configuration validation
+python -c "
+from spoon_ai.config.manager import ConfigManager
+manager = ConfigManager()
+config = manager.load_config()
+issues = manager.validate_configuration()
+print('✅ Valid configuration' if not issues else f'❌ Issues: {issues}')
+"
+
+# Test tool loading
+python -c "
+from spoon_ai.config.manager import ConfigManager
+import asyncio
+
+async def test_tools():
+    manager = ConfigManager()
+    tools = await manager.load_agent_tools('web_researcher')
+    print(f'✅ Loaded {len(tools)} tools successfully')
+
+asyncio.run(test_tools())
+"
+```
+
+## 7. 🔒 Security Best Practices
 
 ### 🚨 Critical Security Guidelines
 
@@ -215,7 +527,7 @@ chmod 600 .env
 # Set up billing alerts on API provider dashboards
 ```
 
-## 🏗️ LLM Provider Configuration
+## 8. 🏗️ LLM Provider Configuration
 
 SpoonOS supports multiple LLM providers through a unified configuration system. You can configure providers individually and set up fallback chains for high availability.
 
@@ -239,7 +551,7 @@ Each provider supports the following configuration options:
 #### OpenAI Configuration
 ```json
 {
-  "llm_providers": {
+  "providers": {
     "openai": {
       "api_key": "sk-your-openai-key",
       "model": "gpt-4.1",
@@ -256,10 +568,10 @@ Each provider supports the following configuration options:
 #### Anthropic Configuration
 ```json
 {
-  "llm_providers": {
+  "providers": {
     "anthropic": {
       "api_key": "sk-ant-your-key",
-      "model": "claude-sonnet-4-20250514",
+      "model": "claude-3-5-sonnet-20241022",
       "max_tokens": 4096,
       "temperature": 0.3,
       "timeout": 30,
@@ -272,10 +584,10 @@ Each provider supports the following configuration options:
 #### Gemini Configuration
 ```json
 {
-  "llm_providers": {
+  "providers": {
     "gemini": {
       "api_key": "your-gemini-key",
-      "model": "gemini-2.5-pro",
+      "model": "gemini-2.0-flash-exp",
       "max_tokens": 4096,
       "temperature": 0.3,
       "timeout": 30
@@ -303,20 +615,6 @@ Configure global LLM behavior:
 }
 ```
 
-### Fallback Configuration
-
-Set up automatic fallback between providers:
-
-```json
-{
-  "llm_settings": {
-    "fallback_chain": ["openai", "anthropic", "gemini"],
-    "fallback_on_errors": ["rate_limit", "timeout", "authentication"],
-    "fallback_delay": 1.0
-  }
-}
-```
-
 ### Environment Variable Mapping
 
 You can also configure providers using environment variables:
@@ -330,166 +628,155 @@ OPENAI_TEMPERATURE=0.3
 
 # Anthropic
 ANTHROPIC_API_KEY=sk-ant-your-key
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 ANTHROPIC_MAX_TOKENS=4096
 
 # Gemini
 GEMINI_API_KEY=your-key
-GEMINI_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-2.0-flash-exp
 ```
 
-### CLI Provider Commands
+## 9. 🔧 Troubleshooting Configuration Issues
 
-Manage providers through the CLI:
+### Common Configuration Problems
 
-```bash
-# List available providers
-> config providers
+#### 1. Missing Environment Variables
 
-# Configure a provider
-> config provider openai api_key sk-your-new-key
-> config provider openai model gpt-4.1-turbo
+**Error:** `Tool 'web_search' missing environment variable TAVILY_API_KEY`
 
-# Set default provider
-> config llm_settings default_provider anthropic
-
-# Configure fallback chain
-> config llm_settings fallback_chain openai,anthropic,gemini
-
-# Test provider connectivity
-> test-provider openai
-> test-provider all
-```
-
-### Provider Switching
-
-Switch providers dynamically:
-
-```python
-from spoon_ai.llm import LLMManager
-
-llm_manager = LLMManager()
-
-# Use specific provider
-response = await llm_manager.chat(
-    messages=[{"role": "user", "content": "Hello"}],
-    provider="anthropic"
-)
-
-# Use default provider (with fallback)
-response = await llm_manager.chat(
-    messages=[{"role": "user", "content": "Hello"}]
-)
-```
-
-## 🔧 Troubleshooting LLM Provider Issues
-
-### Common Provider Configuration Issues
-
-#### 1. Provider Not Found
-**Error:** `Provider 'openai' not found`
-
-**Solutions:**
-- Check provider name spelling in configuration
-- Ensure provider is properly configured in `llm_providers` section
-- Verify provider module is imported
-
-```bash
-# Check available providers
-> list-providers
-
-# Test provider configuration
-> test-provider openai
-```
-
-#### 2. API Key Authentication Errors
-**Error:** `AuthenticationError: Invalid API key`
-
-**Solutions:**
-- Verify API key is correct and active
-- Check API key format (OpenAI: `sk-...`, Anthropic: `sk-ant-...`)
-- Ensure API key has sufficient permissions
-
-```bash
-# Update API key
-> config provider openai api_key sk-your-new-key
-
-# Test authentication
-> test-provider openai
-```
-
-#### 3. Rate Limit Errors
-**Error:** `RateLimitError: Rate limit exceeded`
-
-**Solutions:**
-- Configure retry attempts and delays
-- Set up fallback providers
-- Reduce concurrent requests
+**Solution:**
+- Add the required environment variable to your `.env` file
+- Or set it in the tool's MCP server configuration
+- Check that the variable name matches exactly
 
 ```json
 {
-  "llm_providers": {
-    "openai": {
-      "retry_attempts": 5,
-      "retry_delay": 2.0
-    }
-  },
-  "llm_settings": {
-    "fallback_chain": ["openai", "anthropic"],
-    "max_concurrent_requests": 5
-  }
-}
-```
-
-#### 4. Model Not Available
-**Error:** `ModelNotFoundError: Model 'gpt-5' not available`
-
-**Solutions:**
-- Check available models for provider
-- Use correct model names
-- Update to supported model versions
-
-```bash
-# Check provider capabilities
-> provider-status openai
-
-# Update model
-> config provider openai model gpt-4.1-turbo
-```
-
-#### 5. Network Connectivity Issues
-**Error:** `NetworkError: Connection timeout`
-
-**Solutions:**
-- Check internet connectivity
-- Verify firewall settings
-- Increase timeout values
-
-```json
-{
-  "llm_providers": {
-    "openai": {
-      "timeout": 60,
-      "retry_attempts": 3
+  "mcp_server": {
+    "env": {
+      "TAVILY_API_KEY": "your-actual-api-key-here"
     }
   }
 }
 ```
 
-#### 6. Configuration Validation Errors
-**Error:** `ConfigurationError: Invalid configuration format`
+#### 2. MCP Server Startup Failures
+
+**Error:** `MCP Server failed to start: Command not found`
 
 **Solutions:**
-- Validate JSON syntax
-- Check required fields are present
-- Verify data types match expected format
+- Ensure the command is installed and available in PATH
+- For `npx` commands: `npm install -g npm`
+- For `uvx` commands: Install uv package manager
+- Check the command and arguments are correct
 
 ```bash
-# Validate configuration
-python -c "import json; json.load(open('config.json'))"
+# Test MCP server manually
+npx -y @tavily/mcp-server
 
-# Reset to default configuration
-> config reset
+# Or for uvx
+uvx github-mcp-server
+```
+
+#### 3. Tool Configuration Validation Errors
+
+**Error:** `MCP tools must have mcp_server configuration`
+
+**Solution:**
+- Ensure MCP tools have the `mcp_server` section
+- Check that the tool type is set to "mcp"
+- Verify all required fields are present
+
+```json
+{
+  "name": "my_tool",
+  "type": "mcp",  // Must be "mcp" for MCP tools
+  "enabled": true,
+  "mcp_server": {  // Required for MCP tools
+    "command": "npx",
+    "args": ["-y", "my-mcp-server"]
+  }
+}
+```
+
+#### 4. Duplicate Tool Names
+
+**Error:** `Duplicate tool names found: ['web_search']`
+
+**Solution:**
+- Ensure tool names are unique within each agent
+- Use descriptive, unique names for tools
+- Consider prefixing tools with their purpose
+
+```json
+{
+  "tools": [
+    {"name": "tavily_web_search", "type": "mcp"},
+    {"name": "brave_web_search", "type": "mcp"}
+  ]
+}
+```
+
+#### 5. Agent Class Not Found
+
+**Error:** `Agent class 'MyCustomAgent' not found`
+
+**Solution:**
+- Verify the agent class name is correct
+- Use supported agent classes: `SpoonReactAI`, `SpoonReactMCP`
+- Check for typos in the class name
+
+```json
+{
+  "agents": {
+    "my_agent": {
+      "class": "SpoonReactMCP"  // Use exact class name
+    }
+  }
+}
+```
+
+### Environment Variable Requirements
+
+Different tools require specific environment variables:
+
+#### Web Search Tools
+```bash
+# Tavily
+TAVILY_API_KEY=your-tavily-api-key
+
+# Brave Search
+BRAVE_API_KEY=your-brave-search-key
+
+# SerpAPI
+SERPAPI_API_KEY=your-serpapi-key
+```
+
+#### Development Tools
+```bash
+# GitHub
+GITHUB_TOKEN=your-github-personal-access-token
+
+# GitLab
+GITLAB_TOKEN=your-gitlab-access-token
+```
+
+#### Database Tools
+```bash
+# PostgreSQL
+DATABASE_URL=postgresql://user:password@localhost:5432/database
+
+# MongoDB
+MONGODB_URI=mongodb://localhost:27017/database
+```
+
+#### Blockchain Tools
+```bash
+# Ethereum
+ETHEREUM_RPC_URL=https://mainnet.infura.io/v3/your-project-id
+PRIVATE_KEY=your-wallet-private-key
+
+# Solana
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 ```
 
 ### Debug Mode
@@ -504,34 +791,93 @@ Enable debug logging for detailed troubleshooting:
 }
 ```
 
+Or via environment variable:
 ```bash
-# Enable debug mode via CLI
-> config llm_settings enable_debug_logging true
-
-# View debug logs
-> show-logs llm
+export SPOON_DEBUG=true
+python main.py
 ```
 
-### Health Monitoring
+## 10. 📋 Configuration Schema Reference
 
-Monitor provider health:
+### Agent Configuration Schema
 
-```bash
-# Check all providers
-> provider-status
+```json
+{
+  "agent_name": {
+    "class": "SpoonReactAI | SpoonReactMCP",
+    "description": "string (optional)",
+    "aliases": ["array", "of", "strings"] (optional),
+    "config": {
+      "max_steps": "integer (default: 10)",
+      "tool_choice": "string (default: 'auto')"
+    },
+    "tools": [
+      // Array of tool configurations (see below)
+    ]
+  }
+}
+```
 
-# Monitor specific provider
-> provider-stats openai
+### Tool Configuration Schema
 
-# Test connectivity
-> test-provider all
+#### Built-in Tool
+```json
+{
+  "name": "string (required, unique per agent)",
+  "type": "builtin",
+  "description": "string (optional)",
+  "enabled": "boolean (default: true)",
+  "env": {
+    "KEY": "value"
+  } (optional),
+  "config": {
+    // Tool-specific configuration options
+  }
+}
+```
+
+#### MCP Tool
+```json
+{
+  "name": "string (required, unique per agent)",
+  "type": "mcp",
+  "description": "string (optional)",
+  "enabled": "boolean (default: true)",
+  "env": {
+    "KEY": "value"
+  } (optional),
+  "mcp_server": {
+    "command": "string (required)",
+    "args": ["array", "of", "strings"] (optional),
+    "env": {
+      "KEY": "value"
+    } (optional),
+    "cwd": "string (optional)",
+    "disabled": "boolean (default: false)",
+    "autoApprove": ["array", "of", "tool", "names"] (optional),
+    "timeout": "integer (default: 30)",
+    "retry_attempts": "integer (default: 3)"
+  },
+  "config": {
+    // Tool-specific configuration options
+  } (optional)
+}
 ```
 
 ## ✅ Next Steps
 
 After configuration, continue to:
 
-- 🤖 [Set up OpenRouter LLM models](./openrouter.md)
-- 🧠 [Start the CLI or develop your custom agents](./cli.md)
-- 🧩 [Learn to build your own agent](./agent.md)
-- 🌐 [Integrate Web3 tools with MCP](./mcp_mode_usage.md)
+- 🤖 [Agent Configuration Guide](./agent_configuration.md)
+- 🧠 [Start the CLI](./cli.md)
+- 🔧 [Tool Development Guide](./tools.md)
+- 📊 [Monitoring and Debugging](./monitoring.md)
+
+---
+
+## 📚 Additional Resources
+
+- [Configuration Examples Repository](../examples/)
+- [Tool Configuration Templates](../examples/config/)
+- [MCP Server Documentation](https://modelcontextprotocol.io/)
+- [SpoonOS API Reference](./api.md)

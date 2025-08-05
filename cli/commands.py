@@ -19,17 +19,8 @@ from spoon_ai.agents import SpoonReactAI, SpoonReactMCP
 from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
-from spoon_ai.utils.config_manager import ConfigManager
-from spoon_ai.tools.crypto_tools import get_crypto_tools, add_crypto_tools_to_manager, CryptoToolsConfig
-from spoon_ai.tools.toolkit_integration import (
-    get_all_toolkit_tools, 
-    add_all_toolkit_tools_to_manager, 
-    ToolkitConfig,
-    get_crypto_tools as get_toolkit_crypto_tools,
-    get_data_platform_tools,
-    get_storage_tools,
-    get_social_media_tools
-)
+from spoon_ai.config.manager import ConfigManager
+
 
 # Create a log filter to filter out log messages containing specific keywords
 class KeywordFilter(logging.Filter):
@@ -49,14 +40,25 @@ class KeywordFilter(logging.Filter):
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("cli")
 
-# Add keyword filter
+# Add keyword filter for startup noise reduction
 keyword_filter = KeywordFilter([
     "telemetry",
     "anonymized",
     "n_results",
     "updating n_results",
     "number of requested results",
-    "elements in index"
+    "elements in index",
+    "loaded configuration from",
+    "found configuration file",
+    "using provider from config file",
+    "created provider instance",
+    "configured provider",
+    "llm manager initialized",
+    "default provider",
+    "fallback chain",
+    "loaded environment variables",
+    "using fallback chain from config file",
+    "chatbot initialized"
 ])
 logger.addFilter(keyword_filter)
 
@@ -75,6 +77,11 @@ logging.getLogger("langchain").setLevel(logging.ERROR)
 logging.getLogger("anthropic").setLevel(logging.ERROR)
 logging.getLogger("google").setLevel(logging.ERROR)
 logging.getLogger("fastmcp").setLevel(logging.ERROR)
+
+# Disable verbose logs from internal modules during startup
+logging.getLogger("spoon_ai.config").setLevel(logging.WARNING)
+logging.getLogger("spoon_ai.llm").setLevel(logging.WARNING)
+logging.getLogger("spoon_ai.utils.config_manager").setLevel(logging.WARNING)
 from spoon_ai.schema import AgentState
 from spoon_ai.social_media.telegram import TelegramClient
 
@@ -105,25 +112,25 @@ class SpoonAICLI:
         self.config_dir = Path(__file__).resolve().parents[1]
         self.commands: Dict[str, SpoonCommand] = {}
         self.config_manager = ConfigManager()
-        
-        # Get blockchain configuration from config.json first, then fallback to environment variables
-        config_data = self.config_manager._load_config()
-        
+
+        # Get blockchain configuration from environment variables
+        config_data = {}
+
         # Get RPC_URL from config.json or environment
         rpc_url = config_data.get("RPC_URL") or os.getenv("RPC_URL")
-        
+
         # Get CHAIN_ID from config.json or environment
         chain_id_str = config_data.get("CHAIN_ID") or os.getenv("CHAIN_ID", "1")
         chain_id = int(chain_id_str) if chain_id_str and str(chain_id_str).strip() else 1
-        
+
         # Get SCAN_URL from config.json or environment
         scan_url = config_data.get("SCAN_URL") or os.getenv("SCAN_URL", "https://etherscan.io")
-        
 
-        
+
+
         self.aggregator = Aggregator(
-            rpc_url=rpc_url, 
-            chain_id=chain_id, 
+            rpc_url=rpc_url,
+            chain_id=chain_id,
             scan_url=scan_url
         )
         self._should_exit = False
@@ -294,6 +301,28 @@ class SpoonAICLI:
             aliases=["sysinfo", "status", "info"]
         ))
 
+        # Configuration Migration Commands
+        self.add_command(SpoonCommand(
+            name="migrate-config",
+            description="Migrate legacy configuration to new unified format",
+            handler=self._handle_migrate_config,
+            aliases=["migrate"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="check-config",
+            description="Check if configuration needs migration",
+            handler=self._handle_check_config,
+            aliases=["check-migration"]
+        ))
+
+        self.add_command(SpoonCommand(
+            name="validate-config",
+            description="Validate current configuration and check for issues",
+            handler=self._handle_validate_config,
+            aliases=["validate"]
+        ))
+
     def add_command(self, command: SpoonCommand):
         # Store primary command
         self.commands[command.name] = command
@@ -320,20 +349,36 @@ class SpoonAICLI:
         agent_part = f"({self.current_agent.name})" if self.current_agent else "(no agent)"
         return f"Spoon AI {agent_part} > "
 
-    def _handle_load_agent(self, input_list: List[str]):
+    async def _handle_load_agent(self, input_list: List[str]):
         if not input_list:
             logger.error("Missing agent name. Usage: load-agent <agent_name>")
             return
 
         name = input_list[0]
-        if name not in ["react", "spoon_react_mcp"]:
-            logger.error(f"Invalid agent name: '{name}'. Use 'list-agents' to see available agents.")
+
+        # Get available agents to validate the name
+        available_agents = self._get_available_agents()
+
+        # Check if agent exists (by name or alias)
+        agent_found = False
+        if name in available_agents:
+            agent_found = True
+        else:
+            # Check aliases
+            for agent_name, config in available_agents.items():
+                if name in config.get("aliases", []):
+                    agent_found = True
+                    break
+
+        if not agent_found:
+            logger.error(f"Agent '{name}' not found. Use 'list-agents' to see available agents.")
             return
 
-        self._load_agent(name)
+        # Run the async load_agent method
+        await self._load_agent(name)
 
     def _get_available_agents(self) -> Dict[str, Dict[str, Any]]:
-        """Get available agents from configuration and built-in definitions"""
+        """Get available agents from unified configuration"""
         # Built-in agent definitions
         builtin_agents = {
             "react": {
@@ -348,451 +393,71 @@ class SpoonAICLI:
             }
         }
 
-        # Get agents from configuration file
-        config_agents = self.config_manager.get("agents", {})
+        # Get agents from unified configuration
+        try:
+            config = self.config_manager.load_config()
+            config_agents = {}
+            for name, agent_config in config.agents.items():
+                config_agents[name] = {
+                    "class": agent_config.class_name,
+                    "aliases": agent_config.aliases,
+                    "description": agent_config.description or f"Agent: {name}",
+                    "config": agent_config.config
+                }
+        except Exception as e:
+            logger.warning(f"Failed to load agent configuration: {e}")
+            config_agents = {}
 
         # Merge built-in and config agents (config takes precedence)
         available_agents = {**builtin_agents, **config_agents}
 
         return available_agents
 
-    def _load_agent(self, name: str):
-        """Load agent by name using configuration-driven approach"""
-        available_agents = self._get_available_agents()
-
-        # Find agent by name or alias
-        agent_config = None
-        agent_key = None
-
-        # Direct name match
-        if name in available_agents:
-            agent_config = available_agents[name]
-            agent_key = name
-        else:
-            # Search by alias
-            for key, config in available_agents.items():
-                if name in config.get("aliases", []):
-                    agent_config = config
-                    agent_key = key
-                    break
-
-        if not agent_config:
-            logger.error(f"Agent {name} not found")
-            logger.info("Available agents:")
-            for key, config in available_agents.items():
-                aliases = config.get("aliases", [])
-                alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
-                logger.info(f"  {key}{alias_str}: {config.get('description', 'No description')}")
-            return
-
-        # Load agent based on class name
-        agent_class = agent_config.get("class")
+    async def _load_agent(self, name: str):
+        """Load agent by name using unified tool configuration system"""
         try:
-            # Create agent instance with configuration
-            agent_instance_config = agent_config.get("config", {})
+            # Load configuration using unified system
+            config = self.config_manager.load_config()
+
+            # Get agent configuration
+            agent_config = self.config_manager.get_agent_config(name)
+
+            # Create agent instance based on class
+            agent_class = agent_config.class_name
+            agent_instance_config = agent_config.config
 
             if agent_class == "SpoonReactAI":
-                self.agents[name] = SpoonReactAI(**agent_instance_config)
+                agent_instance = SpoonReactAI(**agent_instance_config)
             elif agent_class == "SpoonReactMCP":
-                # For MCP agents, configure MCP servers and transports
-                mcp_config = self._prepare_mcp_config(agent_config)
-                logger.info(f"Creating MCP agent with config: {mcp_config}")
-
-                # Create MCP agent with proper transport configuration
-                if mcp_config.get("mcp_servers"):
-                    # Create primary transport for the first enabled MCP server
-                    mcp_transport = self._create_mcp_transport(mcp_config)
-                    self.agents[name] = SpoonReactMCP(mcp_transport=mcp_transport, **agent_instance_config)
-
-                    # Store MCP configuration for later use by the agent
-                    self.agents[name]._mcp_config = mcp_config
-                else:
-                    # No MCP servers configured, use default
-                    logger.warning(f"No MCP servers configured for agent {name}, using default transport")
-                    self.agents[name] = SpoonReactMCP(**agent_instance_config)
+                # For MCP agents, the unified system handles MCP server lifecycle
+                agent_instance = SpoonReactMCP(**agent_instance_config)
             else:
                 logger.error(f"Unknown agent class: {agent_class}")
                 return
 
-            self.current_agent = self.agents[name]
+            # Load tools using the unified system
+            tools = await self.config_manager.load_agent_tools(name)
 
-            # Configure tools for the agent
-            self._configure_agent_tools(self.current_agent, agent_config)
+            # Add tools to agent's tool manager
+            if hasattr(agent_instance, 'avaliable_tools') and tools:
+                agent_instance.avaliable_tools.add_tools(*tools)
+                logger.info(f"Added {len(tools)} tools to agent {name}")
 
-            # Load toolkit tools based on configuration
-            self._load_toolkit_tools_for_agent(self.current_agent, agent_config)
+            # Store agent and set as current
+            self.agents[name] = agent_instance
+            self.current_agent = agent_instance
 
-            logger.info(f"Loaded agent: {self.current_agent.name}")
+            logger.info(f"Successfully loaded agent: {name} with {len(tools)} tools")
 
         except Exception as e:
             logger.error(f"Failed to load agent {name}: {e}")
             logger.debug(f"Agent loading error details: {e}", exc_info=True)
 
-    def _prepare_mcp_config(self, agent_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare MCP configuration for MCP-enabled agents"""
-        mcp_config = {}
 
-        # Get MCP servers configuration
-        mcp_servers = agent_config.get("mcp_servers", [])
-        if mcp_servers:
-            servers_config = self.config_manager.get("mcp_servers", {})
-            mcp_config["mcp_servers"] = {}
 
-            for server_name in mcp_servers:
-                if server_name in servers_config:
-                    server_config = servers_config[server_name]
-                    if not server_config.get("disabled", False):
-                        mcp_config["mcp_servers"][server_name] = server_config
-                        logger.info(f"Configured MCP server: {server_name}")
-                    else:
-                        logger.warning(f"MCP server {server_name} is disabled")
-                else:
-                    logger.warning(f"MCP server {server_name} not found in configuration")
 
-        return mcp_config
 
-    def _create_mcp_transport(self, mcp_config: Dict[str, Any]):
-        """Create MCP transport based on server configuration with universal support"""
-        from fastmcp.client.transports import (
-            NpxStdioTransport, PythonStdioTransport, SSETransport,
-            WSTransport, FastMCPStdioTransport, UvxStdioTransport
-        )
 
-        mcp_servers = mcp_config.get("mcp_servers", {})
-
-        # Support multiple MCP servers - use the first configured one for now
-        # In the future, we can support multiple simultaneous connections
-        for server_name, server_config in mcp_servers.items():
-            if server_config.get("disabled", False):
-                logger.info(f"Skipping disabled MCP server: {server_name}")
-                continue
-
-            transport_type = server_config.get("transport", "auto")
-            logger.info(f"Creating MCP transport for {server_name} (type: {transport_type})")
-
-            try:
-                transport = self._create_transport_by_type(server_name, server_config, transport_type)
-                if transport:
-                    logger.info(f"Successfully created {transport_type} transport for {server_name}")
-                    return transport
-            except Exception as e:
-                logger.error(f"Failed to create transport for {server_name}: {e}")
-                continue
-
-        # Fallback to default transport
-        logger.info("Using fallback SSE transport")
-        return SSETransport("http://127.0.0.1:8765/sse")
-
-    def _create_transport_by_type(self, server_name: str, server_config: Dict[str, Any], transport_type: str):
-        """Create specific transport type based on configuration"""
-        from fastmcp.client.transports import (
-            NpxStdioTransport, PythonStdioTransport, SSETransport,
-            WSTransport, FastMCPStdioTransport, UvxStdioTransport
-        )
-
-        # Auto-detect transport type if not specified
-        if transport_type == "auto":
-            transport_type = self._detect_transport_type(server_config)
-
-        env_vars = server_config.get("env", {})
-
-        if transport_type == "npx" or (transport_type == "stdio" and server_config.get("command") == "npx"):
-            return self._create_npx_transport(server_config, env_vars)
-
-        elif transport_type == "python" or (transport_type == "stdio" and server_config.get("command") == "python"):
-            return self._create_python_transport(server_config, env_vars)
-
-        elif transport_type == "uvx" or (transport_type == "stdio" and server_config.get("command") == "uvx"):
-            return self._create_uvx_transport(server_config, env_vars)
-
-        elif transport_type == "sse":
-            return self._create_sse_transport(server_config)
-
-        elif transport_type == "websocket" or transport_type == "ws":
-            return self._create_websocket_transport(server_config)
-
-        elif transport_type == "fastmcp":
-            return self._create_fastmcp_transport(server_config, env_vars)
-
-        else:
-            logger.warning(f"Unsupported transport type: {transport_type}")
-            return None
-
-    def _detect_transport_type(self, server_config: Dict[str, Any]) -> str:
-        """Auto-detect transport type based on server configuration"""
-        command = server_config.get("command", "")
-        url = server_config.get("url", "")
-
-        if command == "npx":
-            return "npx"
-        elif command == "python":
-            return "python"
-        elif command == "uvx":
-            return "uvx"
-        elif url.startswith("http") and "/sse" in url:
-            return "sse"
-        elif url.startswith("ws"):
-            return "websocket"
-        elif command:
-            return "stdio"  # Generic stdio for other commands
-        else:
-            return "sse"  # Default fallback
-
-    def _create_npx_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
-        """Create NPX stdio transport"""
-        from fastmcp.client.transports import NpxStdioTransport
-
-        args = server_config.get("args", [])
-        if not args:
-            raise ValueError("NPX transport requires args with package name")
-
-        # Extract package name (usually the last argument)
-        package_name = args[-1]
-        package_args = args[:-1] if len(args) > 1 else []
-
-        logger.info(f"Creating NPX transport: package={package_name}, args={package_args}")
-
-        return NpxStdioTransport(
-            package=package_name,
-            args=package_args,
-            env_vars=env_vars,
-            project_directory=server_config.get("cwd"),
-            use_package_lock=server_config.get("use_package_lock", True)
-        )
-
-    def _create_python_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
-        """Create Python stdio transport"""
-        from fastmcp.client.transports import PythonStdioTransport
-
-        script_path = server_config.get("script_path") or server_config.get("args", [None])[0]
-        if not script_path:
-            raise ValueError("Python transport requires script_path or first arg as script path")
-
-        args = server_config.get("args", [])[1:] if len(server_config.get("args", [])) > 1 else []
-
-        logger.info(f"Creating Python transport: script={script_path}, args={args}")
-
-        return PythonStdioTransport(
-            script_path=script_path,
-            args=args,
-            env=env_vars,
-            cwd=server_config.get("cwd"),
-            python_cmd=server_config.get("python_cmd", "python")
-        )
-
-    def _create_uvx_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
-        """Create UVX stdio transport"""
-        from fastmcp.client.transports import UvxStdioTransport
-
-        args = server_config.get("args", [])
-        if not args:
-            raise ValueError("UVX transport requires args with package name")
-
-        package_name = args[-1]
-        package_args = args[:-1] if len(args) > 1 else []
-
-        logger.info(f"Creating UVX transport: package={package_name}, args={package_args}")
-
-        return UvxStdioTransport(
-            package=package_name,
-            args=package_args,
-            env_vars=env_vars
-        )
-
-    def _create_sse_transport(self, server_config: Dict[str, Any]):
-        """Create SSE transport"""
-        from fastmcp.client.transports import SSETransport
-
-        url = server_config.get("url")
-        if not url:
-            host = server_config.get("host", "127.0.0.1")
-            port = server_config.get("port", 8765)
-            path = server_config.get("path", "/sse")
-            url = f"http://{host}:{port}{path}"
-
-        logger.info(f"Creating SSE transport: {url}")
-
-        return SSETransport(url)
-
-    def _create_websocket_transport(self, server_config: Dict[str, Any]):
-        """Create WebSocket transport"""
-        from fastmcp.client.transports import WSTransport
-
-        url = server_config.get("url")
-        if not url:
-            host = server_config.get("host", "127.0.0.1")
-            port = server_config.get("port", 8765)
-            path = server_config.get("path", "/ws")
-            url = f"ws://{host}:{port}{path}"
-
-        logger.info(f"Creating WebSocket transport: {url}")
-
-        return WSTransport(url)
-
-    def _create_fastmcp_transport(self, server_config: Dict[str, Any], env_vars: Dict[str, str]):
-        """Create FastMCP stdio transport"""
-        from fastmcp.client.transports import FastMCPStdioTransport
-
-        command = server_config.get("command")
-        args = server_config.get("args", [])
-
-        if not command:
-            raise ValueError("FastMCP transport requires command")
-
-        logger.info(f"Creating FastMCP transport: {command} {' '.join(args)}")
-
-        return FastMCPStdioTransport(
-            command=command,
-            args=args,
-            env=env_vars,
-            cwd=server_config.get("cwd")
-        )
-
-    def _configure_agent_tools(self, agent, agent_config: Dict[str, Any]):
-        """Configure tools for the agent based on configuration"""
-        tools = agent_config.get("tools", [])
-        if not tools:
-            return
-
-        tool_sets_config = self.config_manager.get("tool_sets", {})
-
-        for tool_name in tools:
-            if tool_name in tool_sets_config:
-                tool_config = tool_sets_config[tool_name]
-                tool_type = tool_config.get("type")
-
-                if tool_type == "builtin":
-                    if tool_config.get("enabled", True):
-                        logger.info(f"Enabled built-in tool set: {tool_name}")
-                        # Built-in tools like crypto_tools are handled separately
-                elif tool_type == "mcp_server":
-                    server_name = tool_config.get("server")
-                    if server_name:
-                        logger.info(f"Configured MCP tool set: {tool_name} from server: {server_name}")
-                        # MCP tools will be loaded when the MCP server connects
-                else:
-                    logger.warning(f"Unknown tool type: {tool_type} for tool: {tool_name}")
-            else:
-                logger.warning(f"Tool set {tool_name} not found in configuration")
-
-    def _add_crypto_tools_to_agent(self, agent):
-        """Add crypto tools to the agent's tool manager."""
-        try:
-            # Add crypto tools to the agent's tool manager and get the tools for logging
-            updated_manager = add_crypto_tools_to_manager(agent.avaliable_tools)
-
-            # Get the crypto tools from the updated manager to avoid duplicate loading
-            crypto_tools = [tool for tool in updated_manager.tools if hasattr(tool, 'name') and
-                          any(tool.name == crypto_name for crypto_name in [
-                              "get_token_price", "get_24h_stats", "get_kline_data",
-                              "price_threshold_alert", "lp_range_check", "monitor_sudden_price_increase",
-                              "lending_rate_monitor", "crypto_market_monitor", "predict_price", "token_holders",
-                              "trading_history", "uniswap_liquidity", "wallet_analysis",
-                              "crypto_powerdata_cex", "crypto_powerdata_dex",
-                              "crypto_powerdata_indicators", "crypto_powerdata_price"
-                          ])]
-
-            if crypto_tools:
-                logger.info(f"Successfully added {len(crypto_tools)} crypto tools to agent")
-
-                # Log available crypto tools
-                tool_names = [tool.name for tool in crypto_tools]
-                logger.info(f"Available crypto tools: {', '.join(tool_names)}")
-            else:
-                logger.warning("No crypto tools were loaded")
-
-        except Exception as e:
-            logger.error(f"Failed to add crypto tools to agent: {e}")
-            logger.debug(f"Crypto tools integration error details: {e}", exc_info=True)
-
-    def _add_toolkit_tools_to_agent(self, agent, categories: List[str] = None):
-        """Add toolkit tools from specified categories to the agent's tool manager."""
-        try:
-            if categories is None:
-                categories = ["crypto", "data_platforms"]  # Default categories
-            
-            tools_added = 0
-            
-            for category in categories:
-                if category == "crypto":
-                    crypto_tools = get_toolkit_crypto_tools()
-                    agent.avaliable_tools.add_tools(*crypto_tools)
-                    tools_added += len(crypto_tools)
-                    logger.info(f"Added {len(crypto_tools)} crypto tools")
-                    
-                elif category == "data_platforms":
-                    data_tools = get_data_platform_tools()
-                    agent.avaliable_tools.add_tools(*data_tools)
-                    tools_added += len(data_tools)
-                    logger.info(f"Added {len(data_tools)} data platform tools")
-                    
-                elif category == "storage":
-                    storage_tools = get_storage_tools()
-                    agent.avaliable_tools.add_tools(*storage_tools)
-                    tools_added += len(storage_tools)
-                    logger.info(f"Added {len(storage_tools)} storage tools")
-                    
-                elif category == "social_media":
-                    social_tools = get_social_media_tools()
-                    agent.avaliable_tools.add_tools(*social_tools)
-                    tools_added += len(social_tools)
-                    logger.info(f"Added {len(social_tools)} social media tools")
-                    
-                else:
-                    logger.warning(f"Unknown tool category: {category}")
-
-            logger.info(f"Successfully added {tools_added} toolkit tools to agent")
-            
-            # Log available tool categories
-            available_categories = ToolkitConfig.get_all_categories()
-            logger.info(f"Available tool categories: {', '.join(available_categories)}")
-
-        except Exception as e:
-            logger.error(f"Failed to add toolkit tools to agent: {e}")
-            logger.debug(f"Toolkit tools integration error details: {e}", exc_info=True)
-
-    def _load_toolkit_tools_for_agent(self, agent, agent_config: Dict[str, Any]):
-        """Load toolkit tools for an agent based on configuration"""
-        try:
-            # Get toolkit configuration
-            toolkit_config = self.config_manager.get("toolkit", {})
-            auto_load = toolkit_config.get("auto_load", True)
-            
-            if not auto_load:
-                logger.info("Toolkit auto-load is disabled")
-                return
-            
-            # Determine which categories to load
-            categories_to_load = []
-            
-            # Check agent-specific toolkit categories first
-            agent_categories = agent_config.get("toolkit_categories")
-            if agent_categories:
-                categories_to_load = agent_categories
-                logger.info(f"Using agent-specific toolkit categories: {categories_to_load}")
-            else:
-                # Use default categories from toolkit config
-                default_categories = toolkit_config.get("default_categories", ["crypto"])
-                enabled_categories = []
-                
-                # Check which categories are enabled
-                category_configs = toolkit_config.get("categories", {})
-                for category in default_categories:
-                    if category_configs.get(category, {}).get("enabled", True):
-                        enabled_categories.append(category)
-                
-                categories_to_load = enabled_categories
-                logger.info(f"Using default toolkit categories: {categories_to_load}")
-            
-            # Load the tools
-            if categories_to_load:
-                self._add_toolkit_tools_to_agent(agent, categories_to_load)
-            else:
-                logger.info("No toolkit categories enabled")
-                
-        except Exception as e:
-            logger.error(f"Failed to load toolkit tools for agent: {e}")
-            logger.debug(f"Toolkit tools loading error details: {e}", exc_info=True)
 
     def _handle_list_agents(self, input_list: List[str]):
         """List all available agents from configuration and built-in definitions"""
@@ -817,11 +482,11 @@ class SpoonAICLI:
             for agent in loaded_agents.values():
                 logger.info(f"  {agent.name}: {agent.description}")
 
-    def _load_default_agent(self):
+    async def _load_default_agent(self):
         """Load the default agent from configuration"""
         default_agent = self.config_manager.get("default_agent", "react")
         logger.info(f"Loading default agent: {default_agent}")
-        self._load_agent(default_agent)
+        await self._load_agent(default_agent)
 
     def _set_prompt_toolkit(self):
         self.style = Style.from_dict({
@@ -1309,7 +974,7 @@ class SpoonAICLI:
             print("="*50 + "\n")
 
     async def run(self):
-        self._load_default_agent()
+        await self._load_default_agent()
         self._should_exit = False
 
         while not self._should_exit:
@@ -1326,6 +991,11 @@ class SpoonAICLI:
                 continue
             except EOFError:
                 self._should_exit = True
+                # Perform cleanup before exit
+                try:
+                    await self.config_manager.cleanup()
+                except Exception as e:
+                    logger.warning(f"Error during cleanup: {e}")
 
 
 
@@ -1485,32 +1155,32 @@ class SpoonAICLI:
         """Handle LLM status command to show provider configuration and availability"""
         try:
             from spoon_ai.llm.config import ConfigurationManager
-            
+
             config_manager = ConfigurationManager()
-            
+
             logger.info("=" * 60)
             logger.info("LLM PROVIDER STATUS")
             logger.info("=" * 60)
-            
+
             # Show current default provider
             default_provider = config_manager.get_default_provider()
             logger.info(f"Current Default Provider: {default_provider}")
-            
+
             # Show available providers by priority
             available_providers = config_manager.get_available_providers_by_priority()
             if available_providers:
                 logger.info(f"Available Providers (by priority): {', '.join(available_providers)}")
             else:
                 logger.warning("No providers with valid API keys found!")
-            
+
             # Show detailed provider information
             logger.info("\nProvider Details:")
             provider_info = config_manager.get_provider_info()
-            
+
             for provider, info in provider_info.items():
                 status_icon = "Available" if info['available'] else "Not Available"
                 logger.info(f"  {provider.upper()}: {status_icon}")
-                
+
                 if info['available']:
                     logger.info(f"    Model: {info['model']}")
                     if info.get('base_url'):
@@ -1519,7 +1189,7 @@ class SpoonAICLI:
                 else:
                     if 'error' in info:
                         logger.info(f"    Error: {info['error']}")
-            
+
             # Show current agent's LLM configuration
             if self.current_agent and hasattr(self.current_agent, 'llm'):
                 logger.info(f"\nCurrent Agent LLM:")
@@ -1531,16 +1201,16 @@ class SpoonAICLI:
                     logger.info(f"    Provider: {llm.llm_provider}")
                 if hasattr(llm, 'model_name'):
                     logger.info(f"    Model: {llm.model_name}")
-            
+
             # Show configuration tips
             logger.info("\nConfiguration Tips:")
             logger.info("  • Set DEFAULT_LLM_PROVIDER environment variable to override default selection")
             logger.info("  • Configure API keys in .env file or environment variables")
             logger.info("  • Provider priority: anthropic > openai > gemini")
             logger.info("  • Use 'config' command to manage other settings")
-            
+
             logger.info("=" * 60)
-            
+
         except Exception as e:
             logger.error(f"Error getting LLM status: {e}")
             import traceback
@@ -1552,8 +1222,24 @@ class SpoonAICLI:
             logger.info("No agent loaded, please load an agent first")
             return
 
-        self.current_agent.reload_config()
-        logger.info(f"Reloaded configuration for agent '{self.current_agent.name}'")
+        try:
+            # Clean up current configuration
+            asyncio.run(self.config_manager.cleanup())
+
+            # Reload configuration manager
+            self.config_manager = ConfigManager()
+
+            # Get current agent name
+            agent_name = self.current_agent.name
+
+            # Reload the agent with new configuration
+            asyncio.run(self._load_agent(agent_name))
+
+            logger.info(f"Reloaded configuration for agent: {agent_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to reload configuration: {e}")
+            logger.debug(f"Config reload error details: {e}", exc_info=True)
 
     def _handle_transfer(self, input_list: List[str]):
         """
@@ -1813,10 +1499,10 @@ class SpoonAICLI:
             for category in categories:
                 tools = ToolkitConfig.get_tools_by_category(category)
                 logger.info(f"  {category}: {len(tools)} tools")
-                
+
             logger.info("\nUse 'list-toolkit-tools <category>' to see tools in a specific category")
             logger.info("Use 'load-toolkit-tools <category1> <category2> ...' to load tools from categories")
-            
+
         except Exception as e:
             logger.error(f"Failed to list toolkit categories: {e}")
 
@@ -1827,25 +1513,25 @@ class SpoonAICLI:
                 logger.error("Usage: list-toolkit-tools <category>")
                 logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
                 return
-                
+
             category = input_list[1]
             tools = ToolkitConfig.get_tools_by_category(category)
-            
+
             if not tools:
                 logger.error(f"Unknown category: {category}")
                 logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
                 return
-                
+
             logger.info(f"Tools in '{category}' category:")
             for tool in tools:
                 logger.info(f"  - {tool}")
-                
+
             # Show which tools require configuration
             config_tools = ToolkitConfig.get_tools_requiring_config()
             category_config_tools = [tool for tool in tools if tool in config_tools]
             if category_config_tools:
                 logger.info(f"\nTools requiring configuration: {', '.join(category_config_tools)}")
-                
+
         except Exception as e:
             logger.error(f"Failed to list toolkit tools: {e}")
 
@@ -1856,27 +1542,27 @@ class SpoonAICLI:
                 logger.error("Usage: load-toolkit-tools <category1> [category2] ...")
                 logger.info("Available categories: " + ", ".join(ToolkitConfig.get_all_categories()))
                 return
-                
+
             if not self.current_agent:
                 logger.error("No agent loaded. Use 'load-agent <name>' first.")
                 return
-                
+
             categories = input_list[1:]
             available_categories = ToolkitConfig.get_all_categories()
-            
+
             # Validate categories
             invalid_categories = [cat for cat in categories if cat not in available_categories]
             if invalid_categories:
                 logger.error(f"Invalid categories: {', '.join(invalid_categories)}")
                 logger.info("Available categories: " + ", ".join(available_categories))
                 return
-                
+
             # Load toolkit tools
             tool_manager = get_all_toolkit_tools(categories=categories)
             add_all_toolkit_tools_to_manager(self.current_agent.avaliable_tools, categories=categories)
-            
+
             logger.info(f"✅ Successfully loaded {len(tool_manager.tools)} toolkit tools from categories: {', '.join(categories)}")
-            
+
         except Exception as e:
             logger.error(f"Error loading toolkit tools: {e}")
 
@@ -1885,10 +1571,10 @@ class SpoonAICLI:
         import platform
         import sys
         from datetime import datetime
-        
+
         print_formatted_text(PromptHTML("<ansiblue><b>🔍 SpoonAI System Information</b></ansiblue>"))
         print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
-        
+
         # System Information
         print_formatted_text(PromptHTML("<ansiyellow><b>📊 System Details:</b></ansiyellow>"))
         print_formatted_text(f"  Platform: {platform.system()} {platform.release()}")
@@ -1896,7 +1582,7 @@ class SpoonAICLI:
         print_formatted_text(f"  Architecture: {platform.machine()}")
         print_formatted_text(f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print()
-        
+
         # Environment Variables Status
         print_formatted_text(PromptHTML("<ansiyellow><b>🔑 Environment Variables:</b></ansiyellow>"))
         env_vars = [
@@ -1912,7 +1598,7 @@ class SpoonAICLI:
             ("DATABASE_URL", "Database"),
             ("REDIS_HOST", "Redis Host"),
         ]
-        
+
         for var_name, description in env_vars:
             value = os.getenv(var_name)
             if value:
@@ -1926,7 +1612,7 @@ class SpoonAICLI:
                 status = "<ansired>✗ Not set</ansired>"
             print_formatted_text(PromptHTML(f"  {description:20} {status}"))
         print()
-        
+
         # Configuration Status
         print_formatted_text(PromptHTML("<ansiyellow><b>⚙️  Configuration Status:</b></ansiyellow>"))
         config_file = Path("config.json")
@@ -1935,7 +1621,7 @@ class SpoonAICLI:
                 with open(config_file, 'r') as f:
                     config_data = json.load(f)
                 print_formatted_text(PromptHTML("  <ansigreen>✓ config.json found</ansigreen>"))
-                
+
                 # Check API keys in config
                 api_keys = config_data.get("api_keys", {})
                 if api_keys:
@@ -1947,13 +1633,13 @@ class SpoonAICLI:
                             print_formatted_text(PromptHTML(f"    <ansired>✗ {provider} (placeholder/empty)</ansired>"))
                 else:
                     print_formatted_text(PromptHTML("  <ansiyellow>! No API keys in config</ansiyellow>"))
-                    
+
             except Exception as e:
                 print_formatted_text(PromptHTML(f"  <ansired>✗ Error reading config.json: {e}</ansired>"))
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ config.json not found</ansired>"))
         print()
-        
+
         # Current Agent Status
         print_formatted_text(PromptHTML("<ansiyellow><b>🤖 Agent Status:</b></ansiyellow>"))
         if self.current_agent:
@@ -1970,12 +1656,12 @@ class SpoonAICLI:
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ No agent loaded</ansired>"))
         print()
-        
+
         # Available Commands
         print_formatted_text(PromptHTML("<ansiyellow><b>📝 CLI Commands:</b></ansiyellow>"))
         print_formatted_text(f"  Total commands: {len(self.commands)}")
         print_formatted_text("  Categories:")
-        
+
         # Group commands by category
         categories = {
             "Core": ["help", "exit", "system-info"],
@@ -1986,19 +1672,19 @@ class SpoonAICLI:
             "Tools": ["load-docs", "list-toolkit-categories", "list-toolkit-tools", "load-toolkit-tools"],
             "Social": ["telegram"],
         }
-        
+
         for category, cmd_list in categories.items():
             available_cmds = [cmd for cmd in cmd_list if cmd in self.commands]
             if available_cmds:
                 print_formatted_text(f"    {category}: {len(available_cmds)} commands")
         print()
-        
+
         # Health Check Summary
         print_formatted_text(PromptHTML("<ansiyellow><b>🏥 Health Check Summary:</b></ansiyellow>"))
-        
+
         health_score = 0
         total_checks = 5
-        
+
         # Check 1: At least one API key is set
         has_api_key = any(os.getenv(key) for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"])
         if has_api_key:
@@ -2006,28 +1692,28 @@ class SpoonAICLI:
             print_formatted_text(PromptHTML("  <ansigreen>✓ LLM API key configured</ansigreen>"))
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ No LLM API key found</ansired>"))
-        
+
         # Check 2: SECRET_KEY is set
         if os.getenv("SECRET_KEY"):
             health_score += 1
             print_formatted_text(PromptHTML("  <ansigreen>✓ Security key configured</ansigreen>"))
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ SECRET_KEY not set (security risk)</ansired>"))
-        
+
         # Check 3: Config file exists
         if config_file.exists():
             health_score += 1
             print_formatted_text(PromptHTML("  <ansigreen>✓ Configuration file present</ansigreen>"))
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ No configuration file</ansired>"))
-        
+
         # Check 4: Agent is loaded
         if self.current_agent:
             health_score += 1
             print_formatted_text(PromptHTML("  <ansigreen>✓ Agent is loaded and ready</ansigreen>"))
         else:
             print_formatted_text(PromptHTML("  <ansired>✗ No agent loaded</ansired>"))
-        
+
         # Check 5: Dependencies check (basic)
         try:
             import spoon_ai
@@ -2035,7 +1721,7 @@ class SpoonAICLI:
             print_formatted_text(PromptHTML("  <ansigreen>✓ Core dependencies available</ansigreen>"))
         except ImportError:
             print_formatted_text(PromptHTML("  <ansired>✗ Core dependencies missing</ansired>"))
-        
+
         # Overall health score
         health_percentage = (health_score / total_checks) * 100
         if health_percentage >= 80:
@@ -2047,10 +1733,10 @@ class SpoonAICLI:
         else:
             health_color = "ansired"
             health_status = "Poor"
-            
+
         print()
         print_formatted_text(PromptHTML(f"  <{health_color}><b>Overall Health: {health_status} ({health_score}/{total_checks} checks passed)</b></{health_color}>"))
-        
+
         if health_score < total_checks:
             print()
             print_formatted_text(PromptHTML("<ansiyellow><b>💡 Recommendations:</b></ansiyellow>"))
@@ -2062,5 +1748,230 @@ class SpoonAICLI:
                 print_formatted_text("  • Run 'config' command to set up initial configuration")
             if not self.current_agent:
                 print_formatted_text("  • Load an agent with 'load-agent <name>' to start using SpoonAI")
-        
+
         print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+    def _handle_migrate_config(self, input_list: List[str]):
+        """Handle configuration migration command"""
+        from spoon_ai.config.migrate_config import migrate_config, interactive_migration
+
+        print_formatted_text(PromptHTML("<ansiblue><b>🔄 Configuration Migration</b></ansiblue>"))
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+
+        # Parse arguments
+        config_file = "config.json"
+        dry_run = False
+        interactive = False
+
+        i = 0
+        while i < len(input_list):
+            arg = input_list[i]
+            if arg in ["-f", "--file"]:
+                if i + 1 < len(input_list):
+                    config_file = input_list[i + 1]
+                    i += 1
+                else:
+                    logger.error("Missing file path after -f/--file")
+                    return
+            elif arg in ["--dry-run", "-d"]:
+                dry_run = True
+            elif arg in ["--interactive", "-i"]:
+                interactive = True
+            elif arg in ["-h", "--help"]:
+                self._show_migrate_help()
+                return
+            i += 1
+
+        try:
+            if interactive or not input_list:
+                # Run interactive migration
+                success = interactive_migration()
+            else:
+                # Run direct migration
+                success = migrate_config(
+                    input_file=config_file,
+                    output_file=None,
+                    backup=True,
+                    validate=True,
+                    dry_run=dry_run
+                )
+
+            if success:
+                print_formatted_text(PromptHTML("<ansigreen>✅ Migration completed successfully!</ansigreen>"))
+                if not dry_run:
+                    print_formatted_text("💡 Tip: Reload your agent to use the new configuration")
+            else:
+                print_formatted_text(PromptHTML("<ansired>❌ Migration failed. Check the error messages above.</ansired>"))
+
+        except Exception as e:
+            logger.error(f"Migration error: {e}")
+            print_formatted_text(PromptHTML(f"<ansired>❌ Migration failed: {e}</ansired>"))
+
+    def _handle_check_config(self, input_list: List[str]):
+        """Handle configuration check command"""
+        print_formatted_text(PromptHTML("<ansiblue><b>🔍 Configuration Check</b></ansiblue>"))
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+
+        config_file = "config.json"
+        if input_list and not input_list[0].startswith("-"):
+            config_file = input_list[0]
+
+        try:
+            if not Path(config_file).exists():
+                print_formatted_text(PromptHTML(f"<ansired>❌ Configuration file not found: {config_file}</ansired>"))
+                return
+
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+
+            # Check if migration is needed
+            manager = ConfigManager(config_file)
+            is_legacy = manager._detect_legacy_config(config_data)
+
+            if is_legacy:
+                print_formatted_text(PromptHTML("<ansiyellow>⚠️  Legacy configuration format detected</ansiyellow>"))
+
+                # Show what needs migration
+                legacy_sections = []
+                if "tool_sets" in config_data:
+                    legacy_sections.append(f"tool_sets ({len(config_data['tool_sets'])} items)")
+                if "mcp_servers" in config_data:
+                    legacy_sections.append(f"mcp_servers ({len(config_data['mcp_servers'])} items)")
+
+                if legacy_sections:
+                    print_formatted_text(f"📋 Legacy sections found: {', '.join(legacy_sections)}")
+
+                agents_count = len(config_data.get("agents", {}))
+                print_formatted_text(f"👥 Agents to migrate: {agents_count}")
+
+                print_formatted_text(PromptHTML("<ansiyellow>💡 Run 'migrate-config' to upgrade to the new format</ansiyellow>"))
+            else:
+                print_formatted_text(PromptHTML("<ansigreen>✅ Configuration is already in the new unified format</ansigreen>"))
+
+                # Show current configuration summary
+                agents = config_data.get("agents", {})
+                if agents:
+                    print_formatted_text(f"👥 Agents configured: {len(agents)}")
+
+                    total_tools = 0
+                    for agent_name, agent_config in agents.items():
+                        tools = agent_config.get("tools", [])
+                        total_tools += len(tools)
+                        if tools:
+                            print_formatted_text(f"  • {agent_name}: {len(tools)} tools")
+
+                    print_formatted_text(f"🔧 Total tools: {total_tools}")
+                else:
+                    print_formatted_text(PromptHTML("<ansiyellow>⚠️  No agents configured</ansiyellow>"))
+
+        except json.JSONDecodeError as e:
+            print_formatted_text(PromptHTML(f"<ansired>❌ Invalid JSON in configuration file: {e}</ansired>"))
+        except Exception as e:
+            print_formatted_text(PromptHTML(f"<ansired>❌ Error checking configuration: {e}</ansired>"))
+
+    def _handle_validate_config(self, input_list: List[str]):
+        """Handle configuration validation command"""
+        from spoon_ai.config.migrate_config import validate_environment_variables, check_mcp_server_availability
+
+        print_formatted_text(PromptHTML("<ansiblue><b>✅ Configuration Validation</b></ansiblue>"))
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+
+        config_file = "config.json"
+        check_env = "--check-env" in input_list or "-e" in input_list
+        check_servers = "--check-servers" in input_list or "-s" in input_list
+
+        if input_list and not input_list[0].startswith("-"):
+            config_file = input_list[0]
+
+        try:
+            if not Path(config_file).exists():
+                print_formatted_text(PromptHTML(f"<ansired>❌ Configuration file not found: {config_file}</ansired>"))
+                return
+
+            # Load and validate configuration
+            manager = ConfigManager(config_file)
+            config = manager.load_config()
+
+            print_formatted_text(PromptHTML("<ansigreen>✅ Configuration loaded successfully</ansigreen>"))
+
+            # Run validation
+            issues = manager.validate_configuration()
+
+            if issues:
+                print_formatted_text(PromptHTML("<ansired>❌ Configuration validation issues found:</ansired>"))
+                for issue in issues:
+                    print_formatted_text(f"  • {issue}")
+            else:
+                print_formatted_text(PromptHTML("<ansigreen>✅ Configuration validation passed</ansigreen>"))
+
+            # Check environment variables if requested
+            if check_env or not input_list:
+                print_formatted_text(PromptHTML("\n<ansiyellow><b>🔑 Environment Variables Check:</b></ansiyellow>"))
+
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+
+                missing_vars = validate_environment_variables(config_data)
+
+                if missing_vars:
+                    print_formatted_text(PromptHTML("<ansired>❌ Missing environment variables:</ansired>"))
+                    for var in missing_vars:
+                        print_formatted_text(f"  • {var}")
+                else:
+                    print_formatted_text(PromptHTML("<ansigreen>✅ All required environment variables are configured</ansigreen>"))
+
+            # Check MCP server availability if requested
+            if check_servers or not input_list:
+                print_formatted_text(PromptHTML("\n<ansiyellow><b>🖥️  MCP Server Availability Check:</b></ansiyellow>"))
+
+                with open(config_file, 'r') as f:
+                    config_data = json.load(f)
+
+                unavailable = check_mcp_server_availability(config_data)
+
+                if unavailable:
+                    print_formatted_text(PromptHTML("<ansired>❌ Unavailable MCP server commands:</ansired>"))
+                    for server in unavailable:
+                        print_formatted_text(f"  • {server}")
+                    print_formatted_text(PromptHTML("\n<ansiyellow>💡 Installation suggestions:</ansiyellow>"))
+                    print_formatted_text("  • For npx: npm install -g npm")
+                    print_formatted_text("  • For uvx: pip install uv")
+                else:
+                    print_formatted_text(PromptHTML("<ansigreen>✅ All MCP server commands are available</ansigreen>"))
+
+            # Summary
+            print_formatted_text(PromptHTML("\n<ansiyellow><b>📊 Validation Summary:</b></ansiyellow>"))
+
+            total_issues = len(issues)
+            if check_env or not input_list:
+                total_issues += len(missing_vars) if 'missing_vars' in locals() else 0
+            if check_servers or not input_list:
+                total_issues += len(unavailable) if 'unavailable' in locals() else 0
+
+            if total_issues == 0:
+                print_formatted_text(PromptHTML("<ansigreen>🎉 Configuration is fully valid and ready to use!</ansigreen>"))
+            else:
+                print_formatted_text(PromptHTML(f"<ansiyellow>⚠️  Found {total_issues} issues that need attention</ansiyellow>"))
+
+        except Exception as e:
+            print_formatted_text(PromptHTML(f"<ansired>❌ Validation failed: {e}</ansired>"))
+
+    def _show_migrate_help(self):
+        """Show help for migration command"""
+        print_formatted_text(PromptHTML("<ansiblue><b>🔄 Configuration Migration Help</b></ansiblue>"))
+        print_formatted_text(PromptHTML("<ansiwhite>═══════════════════════════════════════</ansiwhite>"))
+        print_formatted_text("Usage:")
+        print_formatted_text("  migrate-config                    # Interactive migration")
+        print_formatted_text("  migrate-config -f config.json     # Migrate specific file")
+        print_formatted_text("  migrate-config --dry-run          # Preview changes without applying")
+        print_formatted_text("  migrate-config --interactive      # Force interactive mode")
+        print_formatted_text("")
+        print_formatted_text("Options:")
+        print_formatted_text("  -f, --file FILE     Configuration file to migrate (default: config.json)")
+        print_formatted_text("  -d, --dry-run       Show what would be changed without making changes")
+        print_formatted_text("  -i, --interactive   Run in interactive mode")
+        print_formatted_text("  -h, --help          Show this help message")
+        print_formatted_text("")
+        print_formatted_text("Examples:")
+        print_formatted_text("  migrate-config                           # Interactive migration")
+        print_formatted_text("  migrate-config -f my_config.json         # Migrate specific file")
+        print_formatted_text("  migrate-config --dry-run                 # Preview migration")
