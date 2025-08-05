@@ -73,72 +73,142 @@ $ pip install -r requirements.txt
 
 Prefer faster install? See docs/installation.md for uv-based setup.
 
-## 🔐 API Key & Environment Setup
+## 🔐 Configuration Setup
 
-Create a .env file in the root directory:
+SpoonOS uses a unified configuration system that supports multiple setup methods. Choose the one that works best for your workflow:
+
+### Method 1: Environment Variables (.env file) - Recommended
+
+Create a `.env` file in the root directory:
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in your keys:
+Fill in your API keys:
 
 ```bash
+# LLM Provider Keys
 OPENAI_API_KEY=sk-your-openai-key
 ANTHROPIC_API_KEY=sk-your-claude-key
 DEEPSEEK_API_KEY=your-deepseek-key
 GEMINI_API_KEY=your-gemini-api-key
+
+# Web3 Configuration
 PRIVATE_KEY=your-wallet-private-key
 RPC_URL=https://mainnet.rpc
 CHAIN_ID=12345
+
+# Tool-specific Keys
+TAVILY_API_KEY=your-tavily-api-key
+OKX_API_KEY=your-okx-api-key
+OKX_SECRET_KEY=your-okx-secret-key
+OKX_API_PASSPHRASE=your-okx-passphrase
 ```
 
-Then in your Python entry file:
+Then load it in your Python entry file:
 
-```bash
+```python
 from dotenv import load_dotenv
 load_dotenv(override=True)
 ```
 
-For advanced config methods (CLI setup, config.json, PowerShell), see docs/configuration.md.
+### Method 2: CLI Configuration
 
-### Configuration Model
+Start the CLI and configure interactively:
 
-SpoonOS uses a hybrid configuration system that combines a `.env` file for initial setup with a dynamic `config.json` for runtime settings. This provides flexibility for both static environment setup and on-the-fly adjustments via the CLI.
+```bash
+python main.py
 
-#### Loading Priority
+# Configure API keys
+> config api_key openai sk-your-openai-key
+> config api_key anthropic sk-your-claude-key
 
-The configuration is loaded with the following priority:
+# View current configuration
+> config
+```
 
-1.  **`config.json` (Highest Priority)**: This file is the primary source of configuration at runtime. If it exists, its values are used directly, **overriding** any corresponding environment variables set in `.env`. You can modify this file using the `config` command in the CLI.
+### Method 3: Direct config.json
 
-2.  **Environment Variables (`.env`) (Lowest Priority)**: This file is used for initial setup. On the first run, if `config.json` is not found, the system will read the variables from your `.env` file to generate a new `config.json`. Any changes to `.env` after `config.json` has been created will **not** be reflected unless you delete `config.json` and restart the application.
-
-This model ensures that sensitive keys and environment-specific settings are kept in `.env` (which should not be committed to version control), while `config.json` handles user-level customizations and runtime state.
-
-#### `config.json` Parameters
-
-The `config.json` file manages agent and API settings. Below are the supported parameters:
-
-| Parameter       | Type     | Description                                                                                                      | Default     |
-| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------- | ----------- |
-| `api_keys`      | `object` | A dictionary containing API keys for different LLM providers (e.g., `openai`, `anthropic`, `deepseek`).          | `{}`        |
-| `base_url`      | `string` | The base URL for the API endpoint, particularly useful for custom or proxy servers like OpenRouter.              | `""`        |
-| `default_agent` | `string` | The default agent to use for tasks.                                                                              | `"default"` |
-| `llm_provider`  | `string` | The name of the LLM provider to use (e.g., `openai`, `anthropic`). Overrides provider detection from model name. | `"openai"`  |
-| `model_name`    | `string` | The specific model to use for the selected provider (e.g., `gpt-4.1`, `claude-sonnet-4-20250514`).               | `null`      |
-
-Here is an example `config.json` where a user wants to use OpenAI. You only need to provide the key for the service you intend to use.
+Create or edit `config.json` directly for advanced configurations:
 
 ```json
 {
   "api_keys": {
-    "openai": "sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "openai": "sk-your-openai-key",
+    "anthropic": "sk-your-claude-key"
   },
-  "base_url": "https://api.openai.com/v1",
-  "default_agent": "default",
-  "llm_provider": "openai",
-  "model_name": "gpt-4.1"
+  "default_agent": "trading_agent",
+  "agents": {
+    "trading_agent": {
+      "class": "SpoonReactMCP",
+      "tools": [
+        {
+          "name": "tavily-search",
+          "type": "mcp",
+          "enabled": true,
+          "mcp_server": {
+            "command": "npm",
+            "args": ["exec", "--yes", "--", "tavily-mcp"],
+            "env": {"TAVILY_API_KEY": "your-tavily-key"}
+          }
+        },
+        {
+          "name": "crypto_powerdata_cex",
+          "type": "builtin",
+          "enabled": true,
+          "env": {
+            "OKX_API_KEY": "your-okx-key",
+            "OKX_SECRET_KEY": "your-okx-secret"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+📖 **[Complete Configuration Guide](doc/configuration.md)**
+
+### Configuration Priority
+
+SpoonOS uses a hybrid configuration system:
+
+1. **`config.json`** (Highest Priority) - Runtime configuration, can be modified via CLI
+2. **`.env` file** (Fallback) - Initial setup, used to generate `config.json` if it doesn't exist
+
+### Tool Configuration
+
+SpoonOS supports two main tool types:
+
+- **MCP Tools**: External tools via Model Context Protocol (e.g., web search, GitHub)
+- **Built-in Tools**: Native SpoonOS tools (e.g., crypto data, blockchain analysis)
+
+Example agent with both tool types:
+
+```json
+{
+  "agents": {
+    "my_agent": {
+      "class": "SpoonReactMCP",
+      "tools": [
+        {
+          "name": "tavily-search",
+          "type": "mcp",
+          "mcp_server": {
+            "command": "npm",
+            "args": ["exec", "--yes", "--", "tavily-mcp"],
+            "env": {"TAVILY_API_KEY": "your-key"}
+          }
+        },
+        {
+          "name": "crypto_data",
+          "type": "builtin",
+          "env": {"OKX_API_KEY": "your-key"}
+        }
+      ]
+    }
+  }
 }
 ```
 
@@ -241,7 +311,7 @@ class CustomProvider(LLMProviderInterface):
     async def initialize(self, config):
         self.api_key = config["api_key"]
         # Initialize your provider
-    
+
     async def chat(self, messages, **kwargs):
         # Implement chat functionality
         return LLMResponse(
@@ -250,7 +320,7 @@ class CustomProvider(LLMProviderInterface):
             model="custom-model",
             finish_reason="stop"
         )
-    
+
     # Implement other required methods...
 ```
 
@@ -301,7 +371,6 @@ openrouter_agent = SpoonReactAI(
 )
 ```
 
-
 ## 📊 Enhanced Graph System
 
 SpoonOS includes a powerful graph-based workflow orchestration system inspired by LangGraph, designed for building complex AI agent workflows with state management, multi-agent coordination, and human-in-the-loop patterns.
@@ -309,7 +378,7 @@ SpoonOS includes a powerful graph-based workflow orchestration system inspired b
 ### Key Features
 
 - **StateGraph Architecture** - Build workflows using nodes, edges, and conditional routing
-- **Multi-Agent Coordination** - Supervisor patterns and agent routing capabilities  
+- **Multi-Agent Coordination** - Supervisor patterns and agent routing capabilities
 - **Human-in-the-Loop** - Interrupt/resume mechanisms for human approval workflows
 - **Streaming Execution** - Real-time monitoring with values, updates, and debug modes
 - **LLM Integration** - Seamless integration with SpoonOS LLM Manager
@@ -347,31 +416,51 @@ result = await compiled.invoke({"counter": 0, "completed": False})
 
 🎯 **[Comprehensive Demo](examples/llm_integrated_graph_demo.py)**
 
-
 ## 🚀 Quick Start
 
-### Start the MCP Server
-
-```bash
-# Start the MCP server with all available tools
-python -m spoon_ai.tools.mcp_tools_collection
-
-# The server will start and display:
-# MCP Server running on stdio transport
-# Available tools: [list of tools]
-```
-
-### Start the CLI
+### 1. Start the CLI
 
 ```bash
 python main.py
 ```
 
-Try chatting with your agent:
+### 2. Load an Agent
 
 ```bash
-> action chat
-> Hello, Spoon!
+# Load the default trading agent (includes web search + crypto tools)
+> load-agent trading_agent
+
+# Or load a specific agent
+> load-agent web_researcher
+```
+
+### 3. Start Chatting
+
+```bash
+# Simple chat
+> action chat "Hello, what can you help me with?"
+
+# Use tools automatically
+> action chat "Search for latest Bitcoin news"
+
+# Get crypto market data
+> action chat "Get BTC price and trading volume"
+```
+
+### 4. Explore Available Commands
+
+```bash
+# List all available commands
+> help
+
+# View current configuration
+> config
+
+# List available agents
+> list-agents
+
+# Check tool status
+> action list_mcp_tools
 ```
 
 ## 🧩 Build Your Own Agent
@@ -465,26 +554,42 @@ chatbot = ChatBot(
 
 ## 🗂️ Project Structure
 
-- [README.md](./README.md)
-- [.env.example](./.env.example)
-- [requirements.txt](./requirements.txt)
-- [main.py](./main.py)
-- [examples/](./examples)
-  - [agent/](./examples/agent/) – 🧠 Agent demos (Weather)
-  - [mcp/](./examples/mcp/) – 🔌 Tool server examples
-  - [llm_integrated_graph_demo.py](./examples/llm_integrated_graph_demo.py) – 📊 Complete graph system demo
-- [spoon_ai/](./spoon_ai) – 🍴 Core agent framework
-  - [graph.py](./spoon_ai/graph.py) – 📊 Enhanced graph system implementation
-  - [llm/](./spoon_ai/llm/) – 🏗️ Unified LLM architecture
-- [tests/](./tests)
-  - [test_graph.py](./tests/test_graph.py) – 📊 Graph system test suite
-- [docs/](./docs)
-  - [GRAPH_SYSTEM_COMPLETE_GUIDE.md](./docs/GRAPH_SYSTEM_COMPLETE_GUIDE.md) – 📊 Complete graph system guide
-- [doc/](./doc)
-  - [installation.md](./doc/installation.md)
-  - [configuration.md](./doc/configuration.md)
-  - [openrouter.md](./doc/openrouter.md)
-  - [cli.md](./doc/cli.md)
-  - [agent.md](./doc/agent.md)
-  - [graph_agent.md](./doc/graph_agent.md) – 📊 Enhanced graph system guide
-  - [mcp_mode_usage.md](./doc/mcp_mode_usage.md)
+```text
+spoon-core/
+├── 📄 README.md                    # This file
+├── 🔧 main.py                      # CLI entry point
+├── ⚙️ config.json                  # Runtime configuration
+├── 🔐 .env.example                 # Environment template
+├── 📦 requirements.txt             # Python dependencies
+│
+├── 📁 spoon_ai/                    # Core framework
+│   ├── 🤖 agents/                  # Agent implementations
+│   ├── 🛠️ tools/                   # Built-in tools
+│   ├── 🧠 llm/                     # LLM providers & management
+│   ├── 📊 graph.py                 # Graph workflow system
+│   └── 💬 chat.py                  # Chat interface
+│
+├── 📁 examples/                    # Usage examples
+│   ├── 🤖 agent/                   # Custom agent demos
+│   ├── 🔌 mcp/                     # MCP tool examples
+│   └── 📊 graph_demo.py            # Graph system demo
+│
+├── 📁 doc/                         # Documentation
+│   ├── 📖 configuration.md         # Setup & config guide
+│   ├── 🤖 agent.md                 # Agent development
+│   ├── 📊 graph_agent.md           # Graph workflows
+│   ├── 🔌 mcp_mode_usage.md        # MCP integration
+│   └── 💻 cli.md                   # CLI reference
+│
+└── 📁 tests/                       # Test suite
+    ├── 🧪 test_agents.py
+    ├── 🧪 test_tools.py
+    └── 🧪 test_graph.py
+```
+
+### Key Files
+
+- **`main.py`** - Start here! CLI entry point
+- **`config.json`** - Main configuration file (auto-generated)
+- **`doc/configuration.md`** - Complete setup guide
+- **`examples/`** - Ready-to-run examples
