@@ -10,7 +10,7 @@ import logging
 from spoon_ai.chat import ChatBot
 from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from spoon_ai.tools import ToolManager
-from spoon_ai.utils.config_manager import ConfigManager
+
 
 from .toolcall import ToolCallAgent
 from .mcp_client_mixin import MCPClientMixin
@@ -20,27 +20,20 @@ logger = logging.getLogger(__name__)
 def create_configured_chatbot():
     """Create a ChatBot instance with intelligent provider selection."""
     from spoon_ai.llm.config import ConfigurationManager
-    
+
     # Get the optimal provider based on configuration and availability
     try:
         config_manager = ConfigurationManager()
         optimal_provider = config_manager.get_default_provider()
-        
+
         logger.info(f"Creating ChatBot with optimal provider: {optimal_provider}")
-        
-        # Use the new LLM manager architecture with the selected provider
-        return ChatBot(use_llm_manager=True, llm_provider=optimal_provider)
-        
+
+        # Use the LLM manager architecture with the selected provider
+        return ChatBot(llm_provider=optimal_provider)
+
     except Exception as e:
-        logger.warning(f"Failed to initialize with LLM manager, falling back to legacy mode: {e}")
-        try:
-            # Try legacy mode with intelligent provider selection
-            config_manager = ConfigurationManager()
-            optimal_provider = config_manager.get_default_provider()
-            return ChatBot(use_llm_manager=False, llm_provider=optimal_provider)
-        except Exception as e2:
-            logger.error(f"Failed to initialize ChatBot with optimal provider, using default: {e2}")
-            return ChatBot(use_llm_manager=False)
+        logger.error(f"Failed to initialize ChatBot with LLM manager: {e}")
+        raise RuntimeError(f"Failed to initialize ChatBot: {e}") from e
 
 class SpoonReactAI(ToolCallAgent):
 
