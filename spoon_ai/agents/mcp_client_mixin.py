@@ -76,12 +76,29 @@ class MCPClientMixin:
             if not res:
                 return ""
 
+            # Handle different types of MCP responses
             for item in res:
+                # If it's a text response, check if it's a coroutine object string
                 if hasattr(item, 'text') and item.text is not None:
-                    return item.text
+                    text = item.text
+                    # Check if the text indicates a coroutine object (FastMCP async tool issue)
+                    if "<coroutine object" in text and "at 0x" in text:
+                        # This indicates the MCP server returned a coroutine object instead of executing it
+                        # Return an error message indicating the issue
+                        return f"Error: MCP tool '{tool_name}' returned a coroutine object instead of executing it. This suggests the tool is async but not properly handled by the MCP server."
+                    return text
+                # If it's a JSON response, return the JSON content
+                elif hasattr(item, 'json') and item.json is not None:
+                    import json
+                    return json.dumps(item.json, ensure_ascii=False, indent=2)
 
+            # Fallback to string representation
             if res:
-                return str(res[0])
+                result_str = str(res[0])
+                # Check for coroutine object in fallback as well
+                if "<coroutine object" in result_str and "at 0x" in result_str:
+                    return f"Error: MCP tool '{tool_name}' returned a coroutine object instead of executing it. This suggests the tool is async but not properly handled by the MCP server."
+                return result_str
 
             return ""
 

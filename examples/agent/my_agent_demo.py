@@ -66,7 +66,7 @@ class SmartWeatherTool(BaseTool):
             outfit = "Long sleeves or a light jacket are recommended."
         else:
             outfit = "The weather is hot, so it is recommended to wear short sleeves or cool clothes"
-      
+
         return (
         f"📍 City: {city}\n"
         f"🌡 Current temperature: {temperature}°C\n"
@@ -111,29 +111,15 @@ class MyInfoAgent(ToolCallAgent):
 
 async def main():
     print("=== Using InfoAssistantAgent with New LLM Architecture ===")
-    
-    # Option 1: Use new LLM manager architecture (recommended)
-    try:
-        info_agent = MyInfoAgent(
-            llm=ChatBot(
-                use_llm_manager=True,
-                llm_provider="openai",
-                model_name="anthropic/claude-sonnet-4"
-            )
+
+    # Use LLM manager architecture (only option now)
+    info_agent = MyInfoAgent(
+        llm=ChatBot(
+            llm_provider="openai",
+            model_name="anthropic/claude-sonnet-4"
         )
-        print("✓ Using new LLM manager architecture")
-    except Exception as e:
-        print(f"⚠ Falling back to legacy mode: {e}")
-        # Option 2: Fallback to legacy mode for compatibility
-        info_agent = MyInfoAgent(
-            llm=ChatBot(
-                llm_provider="openai",
-                model_name="anthropic/claude-sonnet-4", 
-                base_url="https://openrouter.ai/api/v1",
-                use_llm_manager=False
-            )
-        )
-        print("✓ Using legacy ChatBot architecture")
+    )
+    print("✓ Using LLM manager architecture")
 
     # Reset the Agent state
     info_agent.clear()
@@ -142,7 +128,7 @@ async def main():
     print("\n🤖 Agent is processing your request...")
     response = await info_agent.run("What is the weather like in hongkong today?")
     print(f"\n📋 Answer: {response}\n")
-    
+
     # Show agent statistics if using new architecture
     if hasattr(info_agent.llm, 'use_llm_manager') and info_agent.llm.use_llm_manager:
         try:
@@ -157,4 +143,4 @@ async def main():
             print(f"⚠ Could not retrieve statistics: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())
