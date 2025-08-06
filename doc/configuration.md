@@ -529,88 +529,259 @@ chmod 600 .env
 
 ## 8. 🏗️ LLM Provider Configuration
 
-SpoonOS supports multiple LLM providers through a unified configuration system. You can configure providers individually and set up fallback chains for high availability.
+SpoonOS supports multiple LLM providers through a **flexible configuration system** with smart fallback logic. You can configure providers with minimal settings or full customization.
 
-### Provider Configuration Options
+### 🎯 Configuration Priority System
 
-Each provider supports the following configuration options:
+The LLM configuration follows a clear priority hierarchy:
 
-| Option | Type | Description | Default |
-|--------|------|-------------|---------|
-| `api_key` | string | Provider API key | Required |
-| `model` | string | Model name to use | Provider default |
-| `max_tokens` | integer | Maximum tokens per request | 4096 |
-| `temperature` | float | Response randomness (0.0-1.0) | 0.3 |
-| `timeout` | integer | Request timeout in seconds | 30 |
-| `retry_attempts` | integer | Number of retry attempts | 3 |
-| `base_url` | string | Custom API endpoint | Provider default |
-| `custom_headers` | object | Additional HTTP headers | {} |
+```
+1. providers[provider_name] section (highest priority)
+2. api_keys[provider_name] (for API key fallback)
+3. Environment variables (provider-specific)
+4. Default values (built-in provider defaults)
+```
 
-### Provider-Specific Configuration
+### 🔧 Flexible Configuration Options
 
-#### OpenAI Configuration
+#### Option 1: Minimal Configuration (Recommended)
+Only configure API keys, everything else uses smart defaults:
+
+```json
+{
+  "api_keys": {
+    "anthropic": "sk-ant-your-key",
+    "openai": "sk-your-openai-key",
+    "openrouter": "sk-or-your-key"
+  }
+}
+```
+
+#### Option 2: Mixed Configuration
+API keys in `api_keys`, custom settings in `providers`:
+
+```json
+{
+  "api_keys": {
+    "anthropic": "sk-ant-your-key",
+    "openai": "sk-your-openai-key"
+  },
+  "providers": {
+    "openai": {
+      "model": "gpt-4.1",
+      "temperature": 0.5
+    },
+    "anthropic": {
+      "temperature": 0.1
+    }
+  }
+}
+```
+
+#### Option 3: Full Provider Configuration
+Complete configuration in `providers` section:
+
 ```json
 {
   "providers": {
     "openai": {
       "api_key": "sk-your-openai-key",
       "model": "gpt-4.1",
-      "max_tokens": 4096,
-      "temperature": 0.3,
-      "timeout": 30,
-      "retry_attempts": 3,
-      "base_url": "https://api.openai.com/v1"
+      "temperature": 0.3
     }
   }
 }
 ```
 
-#### Anthropic Configuration
+### 📋 Configuration Options Reference
+
+| Option | Type | Required | Description | Default |
+|--------|------|----------|-------------|---------|
+| `api_key` | string | **Yes** | Provider API key | None |
+| `model` | string | No | Model name to use | Provider-specific default |
+| `max_tokens` | integer | No | Maximum tokens per request | 4096 |
+| `temperature` | float | No | Response randomness (0.0-1.0) | Provider-specific |
+| `timeout` | integer | No | Request timeout in seconds | 30 |
+| `retry_attempts` | integer | No | Number of retry attempts | 3 |
+| `base_url` | string | No | Custom API endpoint | Provider-specific |
+| `custom_headers` | object | No | Additional HTTP headers | {} |
+| `extra_params` | object | No | Additional provider parameters | {} |
+
+### 🎨 Provider-Specific Defaults
+
+Each provider has optimized default values. You only need to specify what you want to override:
+
+#### OpenAI
+**Default Values:**
+- Model: `gpt-4.1`
+- Base URL: `https://api.openai.com/v1`
+- Temperature: `0.3`
+- Max Tokens: `4096`
+
+**Minimal Configuration:**
+```json
+{
+  "api_keys": {
+    "openai": "sk-your-openai-key"
+  }
+}
+```
+
+**Custom Configuration:**
+```json
+{
+  "api_keys": {
+    "openai": "sk-your-openai-key"
+  },
+  "providers": {
+    "openai": {
+      "model": "gpt-4.1",
+      "temperature": 0.5
+    }
+  }
+}
+```
+
+#### Anthropic
+**Default Values:**
+- Model: `claude-sonnet-4-20250514`
+- Base URL: `https://api.anthropic.com`
+- Temperature: `0.1` (optimized for Claude)
+- Max Tokens: `4096`
+
+**Minimal Configuration:**
+```json
+{
+  "api_keys": {
+    "anthropic": "sk-ant-your-key"
+  }
+}
+```
+
+#### OpenRouter
+**Default Values:**
+- Model: `anthropic/claude-sonnet-4`
+- Base URL: `https://openrouter.ai/api/v1`
+- Temperature: `0.3`
+- Custom Headers: Includes referer and title
+
+**Minimal Configuration:**
+```json
+{
+  "api_keys": {
+    "openrouter": "sk-or-your-key"
+  }
+}
+```
+
+#### DeepSeek
+**Default Values:**
+- Model: `deepseek-reasoner`
+- Base URL: `https://api.deepseek.com/v1`
+- Temperature: `0.2` (optimized for reasoning)
+- Max Tokens: `65536` (large context support)
+
+#### Gemini
+**Default Values:**
+- Model: `gemini-2.0-flash-exp`
+- Base URL: `https://generativelanguage.googleapis.com/v1beta`
+- Temperature: `0.1` (optimized for Gemini)
+- Max Tokens: `4096`
+
+### 🌐 Global LLM Settings
+
+Configure global LLM behavior and fallback chains:
+
+```json
+{
+  "llm_settings": {
+    "default_provider": "anthropic",
+    "fallback_chain": ["anthropic", "openrouter", "openai"],
+    "enable_monitoring": true,
+    "enable_caching": true,
+    "enable_debug_logging": false,
+    "max_concurrent_requests": 20
+  }
+}
+```
+
+**LLM Settings Options:**
+
+| Option | Type | Required | Description | Default |
+|--------|------|----------|-------------|---------|
+| `default_provider` | string | No | Primary provider to use | Auto-detected |
+| `fallback_chain` | array | No | Provider fallback order | Auto-generated |
+| `enable_monitoring` | boolean | No | Enable usage monitoring | true |
+| `enable_caching` | boolean | No | Enable response caching | true |
+| `enable_debug_logging` | boolean | No | Enable debug logs | false |
+| `max_concurrent_requests` | integer | No | Max parallel requests | 20 |
+
+### 📝 Complete Configuration Examples
+
+#### Example 1: Minimal Setup (Recommended for beginners)
+```json
+{
+  "api_keys": {
+    "anthropic": "sk-ant-your-key",
+    "openrouter": "sk-or-your-key"
+  },
+  "llm_settings": {
+    "default_provider": "anthropic",
+    "fallback_chain": ["anthropic", "openrouter"]
+  }
+}
+```
+
+#### Example 2: Mixed Configuration (Recommended for most users)
+```json
+{
+  "api_keys": {
+    "anthropic": "sk-ant-your-key",
+    "openai": "sk-your-openai-key",
+    "openrouter": "sk-or-your-key"
+  },
+  "providers": {
+    "openai": {
+      "model": "gpt-4.1",
+      "temperature": 0.5
+    },
+    "openrouter": {
+      "model": "anthropic/claude-sonnet-4"
+    }
+  },
+  "llm_settings": {
+    "default_provider": "anthropic",
+    "fallback_chain": ["anthropic", "openai", "openrouter"]
+  }
+}
+```
+
+#### Example 3: Advanced Configuration (Power users)
 ```json
 {
   "providers": {
     "anthropic": {
       "api_key": "sk-ant-your-key",
-      "model": "claude-3-5-sonnet-20241022",
+      "model": "claude-sonnet-4-20250514",
+      "temperature": 0.1,
       "max_tokens": 4096,
+      "timeout": 60
+    },
+    "openrouter": {
+      "api_key": "sk-or-your-key",
+      "model": "anthropic/claude-sonnet-4",
       "temperature": 0.3,
-      "timeout": 30,
-      "retry_attempts": 3
+      "custom_headers": {
+        "HTTP-Referer": "https://your-app.com",
+        "X-Title": "Your App Name"
+      }
     }
-  }
-}
-```
-
-#### Gemini Configuration
-```json
-{
-  "providers": {
-    "gemini": {
-      "api_key": "your-gemini-key",
-      "model": "gemini-2.0-flash-exp",
-      "max_tokens": 4096,
-      "temperature": 0.3,
-      "timeout": 30
-    }
-  }
-}
-```
-
-### Global LLM Settings
-
-Configure global LLM behavior:
-
-```json
-{
+  },
   "llm_settings": {
-    "default_provider": "openai",
-    "fallback_chain": ["openai", "anthropic", "gemini"],
+    "default_provider": "anthropic",
+    "fallback_chain": ["anthropic", "openrouter"],
     "enable_monitoring": true,
-    "enable_caching": true,
-    "enable_debug_logging": false,
-    "max_concurrent_requests": 10,
-    "cache_ttl": 3600,
-    "health_check_interval": 300
+    "max_concurrent_requests": 10
   }
 }
 ```

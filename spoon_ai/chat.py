@@ -39,32 +39,175 @@ def to_dict(message: Message) -> dict:
 
 
 class ChatBot:
-    def __init__(self, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, **kwargs):
-        """Initialize ChatBot with LLM Manager architecture only."""
+    def __init__(self, use_llm_manager: bool = True, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, **kwargs):
+        """Initialize ChatBot with hierarchical configuration priority system.
+
+        Configuration Priority System:
+        1. Full manual override (highest priority) - all params provided
+        2. Partial override with config fallback - llm_provider provided, api_key from config
+        3. Full config-based loading - only use_llm_manager=True, loads from config.json
+
+        Args:
+            use_llm_manager: Enable LLM manager architecture (default: True)
+            model_name: Model name override
+            llm_provider: Provider name override
+            api_key: API key override
+            base_url: Base URL override
+            **kwargs: Additional parameters
+        """
+        self.use_llm_manager = use_llm_manager
         self.model_name = model_name
         self.llm_provider = llm_provider
         self.api_key = api_key
         self.base_url = base_url
-        
-        # Initialize LLM manager
+        self.llm_manager = None
+
+        # Store original parameters for priority mode detection
+        self._original_llm_provider = llm_provider
+        self._original_api_key = api_key
+
+        if not self.use_llm_manager:
+            logger.warning("use_llm_manager=False is deprecated. LLM Manager architecture is now required.")
+            # Force use of LLM manager for compatibility
+            self.use_llm_manager = True
+
+        # Initialize based on configuration priority
+        self._initialize_with_priority()
+
+        logger.info(f"ChatBot initialized with LLM Manager architecture (priority mode: {self._get_priority_mode()})")
+
+    def _get_priority_mode(self) -> str:
+        """Determine which priority mode is being used."""
+        # Use original parameters to determine mode (before config loading)
+        if self._original_api_key and self._original_llm_provider:
+            return "full_manual_override"
+        elif self._original_llm_provider and not self._original_api_key:
+            return "partial_override_with_config_fallback"
+        elif self.use_llm_manager and not self._original_llm_provider:
+            return "full_config_based_loading"
+        else:
+            return "default_config_loading"
+
+    def _initialize_with_priority(self) -> None:
+        """Initialize ChatBot based on configuration priority system."""
+        from spoon_ai.llm.config import ConfigurationManager
+
+        # Always initialize LLM manager
         self.llm_manager = get_llm_manager()
-        
-        # If api_key and/or base_url are provided, update the provider configuration
-        if self.api_key or self.base_url:
-            self._update_provider_config(self.llm_provider, self.api_key, self.base_url, self.model_name)
-        
-        logger.info("ChatBot initialized with LLM Manager architecture")
+
+        # Priority 1: Full manual override (highest priority)
+        if self.api_key and self.llm_provider:
+            logger.info("Using full manual override mode")
+            self._apply_manual_override()
+            return
+
+        # Priority 2: Partial override with config fallback
+        if self.llm_provider and not self.api_key:
+            logger.info("Using partial override with config fallback mode")
+            self._apply_partial_override_with_config()
+            return
+
+        # Priority 3: Full config-based loading
+        if self.use_llm_manager and not self.llm_provider:
+            logger.info("Using full config-based loading mode")
+            self._apply_full_config_loading()
+            return
+
+        # Default: Use config with any provided overrides
+        logger.info("Using default config loading with overrides")
+        self._apply_default_config_loading()
+
+    def _apply_manual_override(self) -> None:
+        """Apply full manual override configuration."""
+        # All parameters provided manually - highest priority
+        self._update_provider_config(
+            provider=self.llm_provider,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            model_name=self.model_name
+        )
+        logger.info(f"Applied manual override for provider: {self.llm_provider}")
+
+    def _apply_partial_override_with_config(self) -> None:
+        """Apply partial override with config fallback."""
+        from spoon_ai.llm.config import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+
+        # Get config values for the specified provider
+        try:
+            provider_config = config_manager._get_provider_config_dict(self.llm_provider)
+
+            # Use config values for missing parameters
+            config_api_key = provider_config.get('api_key')
+            config_base_url = provider_config.get('base_url')
+            config_model = provider_config.get('model')
+
+            # Apply configuration with manual overrides taking priority
+            self._update_provider_config(
+                provider=self.llm_provider,
+                api_key=self.api_key or config_api_key,
+                base_url=self.base_url or config_base_url,
+                model_name=self.model_name or config_model
+            )
+
+            logger.info(f"Applied partial override with config fallback for provider: {self.llm_provider}")
+
+        except Exception as e:
+            logger.error(f"Failed to load config for provider {self.llm_provider}: {e}")
+            # Fallback to manual values only
+            self._update_provider_config(
+                provider=self.llm_provider,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                model_name=self.model_name
+            )
+
+    def _apply_full_config_loading(self) -> None:
+        """Apply full config-based loading using default provider and fallback chain."""
+        from spoon_ai.llm.config import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+
+        try:
+            # Use default provider from config
+            default_provider = config_manager.get_default_provider()
+            fallback_chain = config_manager.get_fallback_chain()
+
+            if default_provider:
+                self.llm_provider = default_provider
+                logger.info(f"Using default provider from config: {default_provider}")
+
+            if fallback_chain:
+                self.llm_manager.set_fallback_chain(fallback_chain)
+                logger.info(f"Set fallback chain from config: {fallback_chain}")
+
+        except Exception as e:
+            logger.error(f"Failed to load full config: {e}")
+            # Let LLM manager handle provider selection
+            pass
+
+    def _apply_default_config_loading(self) -> None:
+        """Apply default config loading with any provided overrides."""
+        # Apply any manual overrides if provided
+        if self.api_key or self.base_url or self.model_name:
+            self._update_provider_config(
+                provider=self.llm_provider,
+                api_key=self.api_key,
+                base_url=self.base_url,
+                model_name=self.model_name
+            )
 
     def _update_provider_config(self, provider: str, api_key: str = None, base_url: str = None, model_name: str = None):
         """Update provider configuration in the LLM manager."""
         if not provider:
             logger.warning("No provider specified for configuration update")
             return
-            
+
         try:
             # Get the current configuration manager
             config_manager = self.llm_manager.config_manager
-            
+
             # Create a temporary configuration update
             config_updates = {}
             if api_key:
@@ -73,7 +216,7 @@ class ChatBot:
                 config_updates['base_url'] = base_url
             if model_name:
                 config_updates['model'] = model_name
-                
+
             # Update the provider configuration in memory
             if hasattr(config_manager, '_provider_configs'):
                 if provider in config_manager._provider_configs:
@@ -99,7 +242,7 @@ class ChatBot:
                     )
                     config_manager._provider_configs[provider] = new_config
                     logger.info(f"Created new provider config for {provider}")
-            
+
         except Exception as e:
             logger.error(f"Failed to update provider configuration: {e}")
 

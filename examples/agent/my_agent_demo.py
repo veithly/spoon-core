@@ -116,7 +116,7 @@ async def main():
     info_agent = MyInfoAgent(
         llm=ChatBot(
             llm_provider="openai",
-            model_name="anthropic/claude-sonnet-4"
+            model_name="gpt-4.1"
         )
     )
     print("✓ Using LLM manager architecture")
