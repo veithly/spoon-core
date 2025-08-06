@@ -41,7 +41,7 @@ class ProviderConfig:
     retry_attempts: int = 3
     custom_headers: Dict[str, str] = field(default_factory=dict)
     extra_params: Dict[str, Any] = field(default_factory=dict)
-    
+
     def __post_init__(self):
         """Validate configuration after initialization."""
         if not self.name:
@@ -56,10 +56,10 @@ class ProviderConfig:
             raise ConfigurationError(f"timeout must be positive, got {self.timeout}")
         if self.retry_attempts < 0:
             raise ConfigurationError(f"retry_attempts must be non-negative, got {self.retry_attempts}")
-    
+
     def model_dump(self) -> Dict[str, Any]:
         """Convert the configuration to a dictionary.
-        
+
         Returns:
             Dict[str, Any]: Configuration as dictionary
         """
@@ -79,21 +79,21 @@ class ProviderConfig:
 
 class ConfigurationManager:
     """Manages configuration loading and validation for LLM providers."""
-    
+
     def __init__(self, config_path: Optional[str] = None):
         """Initialize configuration manager.
-        
+
         Args:
             config_path: Path to configuration file (optional)
         """
         # Load .env file if available
         self._load_dotenv()
-        
+
         self.config_path = config_path or self._find_config_file()
         self._config_cache: Dict[str, Any] = {}
         self._provider_configs: Dict[str, ProviderConfig] = {}
         self._load_config()
-    
+
     def _load_dotenv(self) -> None:
         """Load environment variables from .env file if available."""
         if HAS_DOTENV:
@@ -109,37 +109,37 @@ class ConfigurationManager:
                 load_dotenv()
         else:
             logger.debug("python-dotenv not available, skipping .env file loading")
-    
+
     def _find_config_file(self) -> Optional[str]:
         """Find configuration file in common locations.
-        
+
         Returns:
             Optional[str]: Path to configuration file if found
         """
         possible_paths = [
             "config.json",
-            "config/config.json", 
+            "config/config.json",
             "config.toml",
             "config/config.toml",
             os.path.expanduser("~/.spoon/config.json"),
             os.path.expanduser("~/.spoon/config.toml")
         ]
-        
+
         for path in possible_paths:
             if os.path.exists(path):
                 logger.info(f"Found configuration file: {path}")
                 return path
-        
+
         logger.warning("No configuration file found, using environment variables only")
         return None
-    
+
     def _load_config(self) -> None:
         """Load configuration from file."""
         if not self.config_path or not os.path.exists(self.config_path):
             logger.info("No configuration file available, using environment variables")
             self._config_cache = {}
             return
-        
+
         try:
             if self.config_path.endswith('.json'):
                 with open(self.config_path, 'r') as f:
@@ -153,33 +153,33 @@ class ConfigurationManager:
                 self._config_cache = toml.load(self.config_path)
             else:
                 raise ConfigurationError(f"Unsupported configuration file format: {self.config_path}")
-            
+
             logger.info(f"Loaded configuration from {self.config_path}")
-            
+
         except Exception as e:
             raise ConfigurationError(
                 f"Failed to load configuration from {self.config_path}: {str(e)}",
                 context={"config_path": self.config_path, "error": str(e)}
             )
-    
+
     def load_provider_config(self, provider_name: str) -> ProviderConfig:
         """Load and validate provider configuration.
-        
+
         Args:
             provider_name: Name of the provider
-            
+
         Returns:
             ProviderConfig: Validated provider configuration
-            
+
         Raises:
             ConfigurationError: If configuration is invalid or missing
         """
         if provider_name in self._provider_configs:
             return self._provider_configs[provider_name]
-        
+
         # Get provider-specific configuration
         provider_config = self._get_provider_config_dict(provider_name)
-        
+
         try:
             config = ProviderConfig(
                 name=provider_name,
@@ -193,45 +193,66 @@ class ConfigurationManager:
                 custom_headers=provider_config.get('custom_headers', {}),
                 extra_params=provider_config.get('extra_params', {})
             )
-            
+
             # Cache the validated config
             self._provider_configs[provider_name] = config
             return config
-            
+
         except Exception as e:
             raise ConfigurationError(
                 f"Invalid configuration for provider '{provider_name}': {str(e)}",
                 config_key=provider_name,
                 context={"provider_config": provider_config, "error": str(e)}
             )
-    
+
     def _get_provider_config_dict(self, provider_name: str) -> Dict[str, Any]:
-        """Get provider configuration dictionary from various sources.
-        
+        """Get provider configuration dictionary with flexible fallback logic.
+
+        Configuration Priority (highest to lowest):
+        1. providers[provider_name] section (complete provider config)
+        2. api_keys[provider_name] (for API key only, if not in providers)
+        3. Environment variables (provider-specific)
+        4. Default values (provider-specific defaults)
+
+        This allows flexible configuration:
+        - Only api_keys section: providers section not needed
+        - Only providers section: api_keys section not needed
+        - Mixed: providers can omit api_key if in api_keys section
+        - Minimal config: only api_key needed, rest uses defaults
+
         Args:
             provider_name: Name of the provider
-            
+
         Returns:
-            Dict[str, Any]: Provider configuration dictionary
+            Dict[str, Any]: Provider configuration dictionary with defaults
         """
         config = {}
-        
-        # 1. Load from configuration file
+
+        # 1. Load from configuration file with smart fallback
         if self._config_cache:
-            # Try provider-specific section first
+            # Try provider-specific section first (highest priority)
             if 'providers' in self._config_cache and provider_name in self._config_cache['providers']:
-                config.update(self._config_cache['providers'][provider_name])
-            
-            # Try legacy api_keys section
-            if 'api_keys' in self._config_cache and provider_name in self._config_cache['api_keys']:
-                config['api_key'] = self._config_cache['api_keys'][provider_name]
-            
-            # Try global LLM config
+                provider_config = self._config_cache['providers'][provider_name]
+                config.update(provider_config)
+                logger.debug(f"Loaded provider config from providers section for {provider_name}")
+
+            # Smart API key fallback: use api_keys section if no api_key in providers
+            if not config.get('api_key') and 'api_keys' in self._config_cache:
+                if provider_name in self._config_cache['api_keys']:
+                    api_key = self._config_cache['api_keys'][provider_name]
+                    if api_key and api_key.strip():  # Only use non-empty api_keys
+                        config['api_key'] = api_key
+                        logger.debug(f"Using API key from api_keys section for {provider_name}")
+
+            # Try global LLM config (lowest priority from config file)
             if 'llm' in self._config_cache:
                 llm_config = self._config_cache['llm']
                 if llm_config.get('provider') == provider_name:
-                    config.update(llm_config)
-        
+                    # Only update if not already set (preserve higher priority values)
+                    for key, value in llm_config.items():
+                        if key not in config or not config[key]:
+                            config[key] = value
+
         # 2. Load from environment variables
         env_mappings = {
             'api_key': f'{provider_name.upper()}_API_KEY',
@@ -241,7 +262,7 @@ class ConfigurationManager:
             'temperature': f'{provider_name.upper()}_TEMPERATURE',
             'timeout': f'{provider_name.upper()}_TIMEOUT'
         }
-        
+
         for config_key, env_key in env_mappings.items():
             env_value = os.getenv(env_key)
             if env_value:
@@ -258,65 +279,93 @@ class ConfigurationManager:
                         logger.warning(f"Invalid float value for {env_key}: {env_value}")
                 else:
                     config[config_key] = env_value
-        
+
         # 2.1. Fallback to generic environment variables for backward compatibility
         if 'base_url' not in config:
             generic_base_url = os.getenv('BASE_URL')
             if generic_base_url:
                 config['base_url'] = generic_base_url
                 logger.info(f"Using generic BASE_URL for {provider_name}: {generic_base_url}")
-        
+
         # 3. Apply provider-specific defaults
         defaults = self._get_provider_defaults(provider_name)
         for key, value in defaults.items():
             if key not in config:
                 config[key] = value
-        
+
         return config
-    
+
     def _get_provider_defaults(self, provider_name: str) -> Dict[str, Any]:
-        """Get default configuration for a provider.
-        
+        """Get comprehensive default configuration for a provider.
+
+        Provides sensible defaults for all configuration options, allowing
+        minimal configuration where only api_key is required.
+
         Args:
             provider_name: Name of the provider
-            
+
         Returns:
-            Dict[str, Any]: Default configuration
+            Dict[str, Any]: Complete default configuration
         """
-        defaults = {
+        # Common defaults for all providers
+        common_defaults = {
+            'max_tokens': 4096,
+            'temperature': 0.3,
+            'timeout': 30,
+            'retry_attempts': 3,
+            'custom_headers': {},
+            'extra_params': {}
+        }
+
+        # Provider-specific defaults
+        provider_defaults = {
             'openai': {
                 'model': 'gpt-4.1',
-                'base_url': 'https://api.openai.com/v1'
+                'base_url': 'https://api.openai.com/v1',
+                **common_defaults
             },
             'openrouter': {
-                'model': 'openai/gpt-4.1',
-                'base_url': 'https://openrouter.ai/api/v1'
+                'model': 'anthropic/claude-sonnet-4',
+                'base_url': 'https://openrouter.ai/api/v1',
+                'custom_headers': {
+                    'HTTP-Referer': 'https://github.com/spoon-ai/spoon-core',
+                    'X-Title': 'SpoonAI Agent'
+                },
+                **common_defaults
             },
             'deepseek': {
-                'model': 'deepseek-chat',
-                'base_url': 'https://api.deepseek.com/v1'
+                'model': 'deepseek-reasoner',
+                'base_url': 'https://api.deepseek.com/v1',
+                'max_tokens': 65536,  # DeepSeek supports larger context
+                'temperature': 0.2,   # Slightly lower for reasoning model
+                **{k: v for k, v in common_defaults.items() if k not in ['max_tokens', 'temperature']}
             },
             'anthropic': {
                 'model': 'claude-sonnet-4-20250514',
-                'base_url': 'https://api.anthropic.com'
+                'base_url': 'https://api.anthropic.com',
+                'temperature': 0.1,   # Lower temperature for Claude
+                **{k: v for k, v in common_defaults.items() if k != 'temperature'}
             },
             'gemini': {
-                'model': 'gemini-2.5-pro',
-                'base_url': 'https://generativelanguage.googleapis.com'
+                'model': 'gemini-2.0-flash-exp',
+                'base_url': 'https://generativelanguage.googleapis.com/v1beta',
+                'temperature': 0.1,   # Lower temperature for Gemini
+                **{k: v for k, v in common_defaults.items() if k != 'temperature'}
             }
         }
-        
-        return defaults.get(provider_name, {})
-    
+
+        # Return provider-specific defaults or common defaults for unknown providers
+        return provider_defaults.get(provider_name, common_defaults)
+
     def validate_config(self, config: ProviderConfig) -> bool:
         """Validate provider configuration.
-        
+
         Args:
             config: Provider configuration to validate
-            
+
         Returns:
             bool: True if configuration is valid
-            
+
         Raises:
             ConfigurationError: If configuration is invalid
         """
@@ -326,10 +375,10 @@ class ConfigurationManager:
             return True
         except Exception as e:
             raise ConfigurationError(f"Configuration validation failed: {str(e)}")
-    
+
     def get_default_provider(self) -> str:
         """Get default provider from configuration with intelligent selection.
-        
+
         Returns:
             str: Default provider name
         """
@@ -341,25 +390,25 @@ class ConfigurationManager:
                 if provider:
                     logger.info(f"Using provider from config file llm_settings: {provider}")
                     return provider
-            
+
             # Check legacy llm.provider format
             if 'llm' in self._config_cache:
                 provider = self._config_cache['llm'].get('provider')
                 if provider:
                     logger.info(f"Using provider from config file llm: {provider}")
                     return provider
-        
+
         # 2. Check environment variable for explicit preference
         env_provider = os.getenv('DEFAULT_LLM_PROVIDER')
         if env_provider:
             logger.info(f"Using provider from DEFAULT_LLM_PROVIDER: {env_provider}")
             return env_provider
-        
+
         # 3. Intelligent selection based on available API keys and quality
         # Priority order: anthropic (best quality) -> openai -> openrouter -> deepseek -> gemini
         provider_priority = ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']
         available_providers = []
-        
+
         for provider in provider_priority:
             try:
                 config = self._get_provider_config_dict(provider)
@@ -369,19 +418,19 @@ class ConfigurationManager:
             except Exception as e:
                 logger.debug(f"No valid config for {provider}: {e}")
                 continue
-        
+
         if available_providers:
             selected = available_providers[0]  # First in priority order
             logger.info(f"Intelligently selected {selected} as default provider (available: {available_providers})")
             return selected
-        
+
         # 4. Ultimate fallback
         logger.warning("No API keys found for any provider, falling back to openai")
         return 'openai'
-    
+
     def get_fallback_chain(self) -> List[str]:
         """Get fallback chain from configuration.
-        
+
         Returns:
             List[str]: List of provider names in fallback order
         """
@@ -391,49 +440,49 @@ class ConfigurationManager:
             if fallback_chain:
                 logger.info(f"Using fallback chain from config file: {fallback_chain}")
                 return fallback_chain
-        
+
         # Fallback to intelligent selection based on available providers
         available_providers = self.get_available_providers_by_priority()
         if available_providers:
             logger.info(f"Using intelligent fallback chain: {available_providers}")
             return available_providers
-        
+
         # Ultimate fallback
         logger.warning("No fallback chain configured, using default")
         return ['openai']
-    
+
     def list_configured_providers(self) -> List[str]:
         """List all configured providers.
-        
+
         Returns:
             List[str]: List of provider names that have configuration
         """
         providers = set()
-        
+
         # From configuration file
         if self._config_cache:
             if 'providers' in self._config_cache:
                 providers.update(self._config_cache['providers'].keys())
             if 'api_keys' in self._config_cache:
                 providers.update(self._config_cache['api_keys'].keys())
-        
+
         # From environment variables
         for provider in ['openai', 'openrouter', 'deepseek', 'anthropic', 'gemini']:
             if os.getenv(f'{provider.upper()}_API_KEY'):
                 providers.add(provider)
-        
+
         return list(providers)
-    
+
     def get_available_providers_by_priority(self) -> List[str]:
         """Get available providers ordered by priority and quality.
-        
+
         Returns:
             List[str]: List of available provider names in priority order
         """
         # Define priority order based on quality and capabilities
         priority_order = ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']
         available_providers = []
-        
+
         for provider in priority_order:
             try:
                 config = self._get_provider_config_dict(provider)
@@ -441,22 +490,22 @@ class ConfigurationManager:
                     available_providers.append(provider)
             except Exception:
                 continue
-        
+
         return available_providers
-    
+
     def get_provider_info(self) -> Dict[str, Dict[str, Any]]:
         """Get information about all providers and their availability.
-        
+
         Returns:
             Dict[str, Dict[str, Any]]: Provider information including availability
         """
         provider_info = {}
-        
+
         for provider in ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']:
             try:
                 config = self._get_provider_config_dict(provider)
                 has_api_key = bool(config.get('api_key'))
-                
+
                 provider_info[provider] = {
                     'available': has_api_key,
                     'model': config.get('model', 'Unknown'),
@@ -468,9 +517,9 @@ class ConfigurationManager:
                     'available': False,
                     'error': str(e)
                 }
-        
+
         return provider_info
-    
+
     def reload_config(self) -> None:
         """Reload configuration from file."""
         self._config_cache.clear()
