@@ -4,6 +4,7 @@ import asyncio
 
 from spoon_ai.schema import Message, LLMResponse
 from spoon_ai.llm.manager import get_llm_manager
+from spoon_ai.llm.errors import ConfigurationError
 from pydantic import BaseModel, Field
 
 logger = getLogger(__name__)
@@ -143,10 +144,28 @@ class ChatBot:
             config_base_url = provider_config.get('base_url')
             config_model = provider_config.get('model')
 
+            # Validate provider consistency: ensure API key matches requested provider
+            final_api_key = self.api_key or config_api_key
+            if final_api_key and not self._validate_provider_api_key_match(self.llm_provider, final_api_key):
+                # Get available providers for helpful error message
+                available_providers = config_manager.list_configured_providers()
+                logger.error(f"Provider/API key mismatch detected: requested '{self.llm_provider}' but API key appears to be for different provider")
+                raise ConfigurationError(
+                    f"API key mismatch for provider '{self.llm_provider}'. "
+                    f"Please ensure the API key in your configuration matches the requested provider. "
+                    f"Available providers: {available_providers}",
+                    config_key=self.llm_provider,
+                    context={
+                        "requested_provider": self.llm_provider,
+                        "available_providers": available_providers,
+                        "api_key_prefix": final_api_key[:10] + "..." if final_api_key else None
+                    }
+                )
+
             # Apply configuration with manual overrides taking priority
             self._update_provider_config(
                 provider=self.llm_provider,
-                api_key=self.api_key or config_api_key,
+                api_key=final_api_key,
                 base_url=self.base_url or config_base_url,
                 model_name=self.model_name or config_model
             )
@@ -245,6 +264,44 @@ class ChatBot:
 
         except Exception as e:
             logger.error(f"Failed to update provider configuration: {e}")
+
+    def _validate_provider_api_key_match(self, provider_name: str, api_key: str) -> bool:
+        """Validate that an API key belongs to the specified provider family.
+
+        Args:
+            provider_name: Name of the provider (e.g., 'openai', 'anthropic')
+            api_key: API key to validate
+
+        Returns:
+            bool: True if API key matches provider, False otherwise
+        """
+        if not api_key or not provider_name:
+            return True  # Skip validation for empty values
+
+        # Provider family mapping based on API key prefixes
+        provider_families = {
+            'openai': ['sk-'],
+            'anthropic': ['sk-ant-'],
+            'openrouter': ['sk-or-'],
+            'deepseek': ['sk-'],
+            'gemini': ['AIza']
+        }
+
+        expected_prefixes = provider_families.get(provider_name.lower(), [])
+        if not expected_prefixes:
+            # Unknown provider - skip validation
+            logger.debug(f"Unknown provider '{provider_name}', skipping API key validation")
+            return True
+
+        # Check if API key starts with any expected prefix
+        is_match = any(api_key.startswith(prefix) for prefix in expected_prefixes)
+
+        if not is_match:
+            logger.debug(f"API key validation failed: provider '{provider_name}' expects prefixes {expected_prefixes}, got key starting with '{api_key[:10]}...'")
+        else:
+            logger.debug(f"API key validation passed for provider '{provider_name}'")
+
+        return is_match
 
     async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
         """Ask method using the LLM manager architecture."""
