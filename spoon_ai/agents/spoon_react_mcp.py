@@ -1,3 +1,4 @@
+import asyncio
 from spoon_ai.agents.spoon_react import SpoonReactAI
 from spoon_ai.tools.tool_manager import ToolManager
 from pydantic import Field
@@ -23,25 +24,31 @@ class SpoonReactMCP(SpoonReactAI):
         # Return MCP tools that are available in the tool manager
         # Create proper MCPTool objects that match the expected interface
         mcp_tools = []
+        
+        # Pre-load parameters for all MCP tools concurrently
+        async def load_tool_params(tool):
+            if hasattr(tool, 'ensure_parameters_loaded'):
+                try:
+                    await asyncio.wait_for(tool.ensure_parameters_loaded(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout loading parameters for tool: {tool.name}")
+            return tool
 
-        for tool_name, tool in self.avaliable_tools.tool_map.items():
-            # Check if this is an MCP tool by looking for mcp_transport attribute
-            if hasattr(tool, 'mcp_transport') and tool.mcp_transport is not None:
-                # Pre-load the schema from the MCP server
-                if hasattr(tool, 'ensure_parameters_loaded'):
-                    await tool.ensure_parameters_loaded()
+        mcp_tool_instances = [tool for tool in self.avaliable_tools.tool_map.values() if hasattr(tool, 'mcp_config')]
+        loaded_tools = await asyncio.gather(*[load_tool_params(tool) for tool in mcp_tool_instances])
 
-                # Create proper MCPTool instance for the tool system
-                mcp_tool = MCPTool(
-                    name=tool.name,
-                    description=tool.description,
-                    inputSchema=tool.parameters if tool.parameters else {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                )
-                mcp_tools.append(mcp_tool)
+        for tool in loaded_tools:
+            # Create proper MCPTool instance for the tool system
+            mcp_tool = MCPTool(
+                name=tool.name,
+                description=tool.description,
+                inputSchema=tool.parameters if tool.parameters else {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            )
+            mcp_tools.append(mcp_tool)
 
         if mcp_tools:
             logger.info(f"Found {len(mcp_tools)} MCP tools: {[t.name for t in mcp_tools]}")

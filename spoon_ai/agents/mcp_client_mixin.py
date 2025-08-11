@@ -1,11 +1,6 @@
-from typing import Union, Dict, Any, Optional, List, AsyncIterator, AsyncContextManager
+from typing import Union, Dict, Any, Optional
 import asyncio
-import uuid
 from contextlib import asynccontextmanager
-
-from fastmcp.client.transports import (FastMCPTransport, PythonStdioTransport,
-                                       SSETransport, WSTransport, NpxStdioTransport,
-                                       FastMCPStdioTransport, UvxStdioTransport)
 from fastmcp.client import Client as MCPClient
 import logging
 
