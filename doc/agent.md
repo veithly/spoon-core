@@ -1,136 +1,238 @@
+
 # 🤖 Agent Development Guide
 
-This guide explains how to **develop, extend, and understand agents in SpoonOS Core Developer Framework (SCDF)**.
-**For configuration file details, see [`configuration.md`](./configuration.md).**
+This guide provides a comprehensive walkthrough for developing and configuring agents in the SpoonOS Core Developer Framework (SCDF). We will use a practical example, the `SpoonMacroAnalysisAgent`, to illustrate key concepts, including agent definition, tool integration, and execution.
+
+For details on the configuration file system, see [`configuration.md`](./configuration.md).
 
 ---
 
-## 1. Agent Architecture & Lifecycle
+## 1. Core Concepts: Agent and Tools
 
-SpoonOS agents are autonomous reasoning entities that follow the **ReAct (Reasoning + Acting) loop** and can be extended for custom logic and tool integration.
+In SpoonOS, an **Agent** is an autonomous entity that leverages **Tools** to achieve specific goals. Our example, `SpoonMacroAnalysisAgent`, is designed to perform macroeconomic analysis on cryptocurrencies by combining market data with the latest news.
 
-### Core Agent Types
+### Agent Architecture
 
-- **BaseAgent**: Abstract base for all agents. Defines the main lifecycle and state management.
-- **ReActAgent**: Implements the ReAct loop (`think` → `act` → feedback).
-- **ToolCallAgent**: Adds tool selection and calling logic.
-- **SpoonReactAI**: Standard agent with built-in crypto tools (no MCP support).
-- **SpoonReactMCP**: Inherits from SpoonReactAI, adds MCP protocol support for external tools (including studio tools, MCP tools, and built-in tools).
-- **CustomAgent**: User-extendable agent for custom logic and tools.
+`SpoonMacroAnalysisAgent` inherits from `SpoonReactMCP`, a powerful base class that provides:
+- **ReAct Loop**: A reasoning and acting cycle for intelligent decision-making.
+- **MCP Support**: Built-in capabilities to connect with external tools via the Model Context Protocol (MCP).
 
-### Agent Lifecycle (Code Logic)
+### Tool Integration
 
-1. **Initialization**: Agent is created, tools are registered (from config or code).
-2. **Observation**: Receives user input or environment context.
-3. **Reasoning**: `think()` method plans the next step.
-4. **Action**: `act()` method executes a tool or action.
-5. **Feedback**: Tool results are processed for further reasoning.
-6. **Loop**: Steps 3-5 repeat until goal is reached or `max_steps` is hit.
-7. **Finish**: Agent returns the final result.
+Agents can use two main types of tools:
 
-**Key code locations:**
-- [`react.py`](../spoon_ai/agents/react.py): `ReActAgent` base logic, `think`/`act`/`step`.
-- [`toolcall.py`](../spoon_ai/agents/toolcall.py): Tool selection, tool call, and memory.
-- [`spoon_react.py`](../spoon_ai/agents/spoon_react.py): `SpoonReactAI` implementation.
-- [`spoon_react_mcp.py`](../spoon_ai/agents/spoon_react_mcp.py): `SpoonReactMCP` with MCP integration.
-- [`custom_agent.py`](../spoon_ai/agents/custom_agent.py): User-extendable agent.
+1.  **Built-in Tools**: Python classes that are part of the core framework or custom toolkits. In our example, `CryptoPowerDataCEXTool` is a built-in tool that provides cryptocurrency market data.
+2.  **MCP Tools**: External tools accessed via the MCP protocol. `tavily_search`, used for web searches, is an example of an MCP tool.
 
 ---
 
-## 2. Tool Integration: Built-in, MCP, and Studio Tools
+## 2. Building an Agent: A Step-by-Step Example
 
-Agents in SpoonOS can use **three types of tools**:
-- **Built-in tools**: Provided by the core system (e.g., crypto_tools).
-- **MCP tools**: Tools provided by MCP servers (e.g., Tavily, Brave, GitHub, etc).
-- **Studio tools**: Tools registered and managed via the Spoon Studio platform (no need to configure SSE or custom transport).
+Let's break down the implementation of `SpoonMacroAnalysisAgent` from the `spoon_search_agent.py` example.
 
-**All tool types can be configured directly in the agent's `tools` array in config.**
-You do **not** need to manually configure SSE or transport for studio/MCP tools—just declare them in config and the system will handle the connection.
+### Step 1: Define the Agent Class
 
-**Example agent config (see `configuration.md` for full details):**
-```json
-{
-  "agents": {
-    "my_agent": {
-      "class": "SpoonReactMCP",
-      "description": "Agent with built-in, MCP, and studio tools",
-      "tools": [
-        { "name": "crypto_tools", "type": "builtin" },
-        { "name": "tavily_search", "type": "mcp" },
-        { "name": "studio_tool_example", "type": "studio" }
-      ]
-    }
-  }
-}
-```
-- **Built-in tools**: `"type": "builtin"`
-- **MCP tools**: `"type": "mcp"` (system will auto-connect to the correct MCP server)
-- **Studio tools**: `"type": "studio"` (auto-managed by Spoon Studio, no manual transport config needed)
-
----
-
-## 3. Extending Agents (Code-Level)
-
-### a. Create a Custom Tool
+First, we define the agent by inheriting from `SpoonReactMCP` and setting its core properties:
 
 ```python
-from spoon_ai.tools.base import BaseTool
+class SpoonMacroAnalysisAgent(SpoonReactMCP):
+    name: str = "SpoonMacroAnalysisAgent"
+    system_prompt: str = (
+        '''You are a cryptocurrency market analyst. Your task is to provide a comprehensive
+        macroeconomic analysis of a given token.
 
-class MyCustomTool(BaseTool):
-    name: str = "my_custom_tool"
-    description: str = "Custom tool for specific tasks"
-    parameters: dict = {
-        "type": "object",
-        "properties": {
-            "param1": {"type": "string", "description": "First parameter"},
-            "param2": {"type": "integer", "description": "Second parameter"}
+        To do this, you will perform the following steps:
+        1. Use the `crypto_power_data_cex` tool to get the latest candlestick data and
+           technical indicators (like EMA, RSI, MACD) for the token.
+        2. Use the `tavily_search` tool to find the latest news and market sentiment
+           related to the token. You MUST call the tool with the `query` parameter.
+        3. Synthesize the quantitative data and qualitative information to form a holistic analysis.
+        4. Present the final analysis, including a summary of the data, key news insights,
+           and your overall assessment of the token's market position.'''
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.avaliable_tools = ToolManager([])
+```
+
+- **`name`**: A unique identifier for the agent.
+- **`system_prompt`**: A directive that guides the AI model, explaining its role, the tools available, and how to use them.
+- **`__init__`**: Initializes the agent and its `ToolManager`, which will hold the tools.
+
+### Step 2: Configure and Load Tools
+
+In the `initialize` method, we set up and load the necessary tools.
+
+#### Built-in Tool Configuration
+
+Loading a built-in tool is straightforward. Simply import and instantiate it:
+
+```python
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
+
+# Inside the initialize method:
+crypto_tool = CryptoPowerDataCEXTool()
+```
+
+#### MCP Tool Configuration
+
+Configuring MCP tools is now simpler and more direct. Instead of a separate method, we define the configuration right where the tool is instantiated, using the `mcp_config` parameter:
+
+```python
+from spoon_ai.tools.mcp_tool import MCPTool
+
+# Inside the initialize method:
+tavily_key = os.getenv("TAVILY_API_KEY", "")
+if not tavily_key or tavily_key == "your-tavily-api-key-here":
+    raise ValueError("TAVILY_API_KEY is not set or is a placeholder.")
+
+tavily_tool = MCPTool(
+    name="tavily_search",
+    description="Performs a web search using the Tavily API.",
+    mcp_config={
+        "command": "npx",
+        "args": ["--yes", "tavily-mcp"],
+        "env": {
+            "TAVILY_API_KEY": tavily_key
         },
-        "required": ["param1"]
+        "tool_name_mapping": {
+            "tavily_search": "tavily-search"
+        }
     }
-
-    async def execute(self, param1: str, param2: int = 0) -> str:
-        # Tool logic here
-        return f"Processing: {param1}, {param2}"
+)
 ```
 
-### b. Create a Custom Agent
+This approach:
+- Is more intuitive and places the configuration next to its usage.
+- Eliminates the need for a separate `_get_mcp_config` helper method.
+
+#### Add Tools to the ToolManager
+
+Finally, we add both tools to the agent's `ToolManager`:
 
 ```python
-from spoon_ai.agents import ToolCallAgent
-from spoon_ai.tools import ToolManager
-from pydantic import Field
-
-class MyCustomAgent(ToolCallAgent):
-    name: str = "my_custom_agent"
-    description: str = "My custom Agent"
-    max_steps: int = 5
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
-        MyCustomTool(),
-        # Add more tools...
-    ]))
+# Inside the initialize method:
+self.avaliable_tools = ToolManager([tavily_tool, crypto_tool])
+logger.info(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")
 ```
 
-### c. Add/Remove Tools Dynamically
+This makes the tools available for the agent to use.
+
+### Step 3: Execute the Agent
+
+The `main` function orchestrates the agent's execution:
 
 ```python
-agent = MyCustomAgent()
-agent.add_tool(MyCustomTool())
-agent.remove_tool("my_custom_tool")
+async def main():
+    # 1. Create the Agent instance
+    agent = SpoonMacroAnalysisAgent(llm=ChatBot(llm_provider="openai", model_name="gpt-4.1"))
+
+    # 2. Initialize the agent and its tools
+    await agent.initialize()
+
+    # 3. Define and run the analysis query
+    query = "Perform a macro analysis of the NEO token."
+    response = await agent.run(query)
+
+    print(f"\n--- Analysis Complete ---\n{response}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+This function:
+1.  Instantiates the `SpoonMacroAnalysisAgent`.
+2.  Calls `agent.initialize()` to load the tools.
+3.  Defines a `query` and calls `agent.run()` to start the analysis.
 
 ---
 
-## 4. Agent Execution Example
+## 3. Full Code Example
+
+Here is the complete, refactored code for `spoon_search_agent.py`:
 
 ```python
+import os
+import sys
 import asyncio
+import logging
+from typing import Dict, Any
+
+# Ensure the toolkit is in the Python path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../spoon-toolkit')))
+
+from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
+from spoon_ai.tools.mcp_tool import MCPTool
+from spoon_ai.tools.tool_manager import ToolManager
 from spoon_ai.chat import ChatBot
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class SpoonMacroAnalysisAgent(SpoonReactMCP):
+    name: str = "SpoonMacroAnalysisAgent"
+    system_prompt: str = (
+        '''You are a cryptocurrency market analyst. Your task is to provide a comprehensive
+        macroeconomic analysis of a given token.
+
+        To do this, you will perform the following steps:
+        1. Use the `crypto_power_data_cex` tool to get the latest candlestick data and
+           technical indicators (like EMA, RSI, MACD) for the token.
+        2. Use the `tavily_search` tool to find the latest news and market sentiment
+           related to the token. You MUST call the tool with the `query` parameter.
+        3. Synthesize the quantitative data and qualitative information to form a holistic analysis.
+        4. Present the final analysis, including a summary of the data, key news insights,
+           and your overall assessment of the token's market position.'''
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.avaliable_tools = ToolManager([])
+
+    async def initialize(self):
+        logger.info("Initializing agent and loading tools...")
+        
+        tavily_key = os.getenv("TAVILY_API_KEY", "")
+        if not tavily_key or tavily_key == "your-tavily-api-key-here":
+            raise ValueError("TAVILY_API_KEY is not set or is a placeholder.")
+
+        tavily_tool = MCPTool(
+            name="tavily_search",
+            description="Performs a web search using the Tavily API.",
+            mcp_config={
+                "command": "npx",
+                "args": ["--yes", "tavily-mcp"],
+                "env": {
+                    "TAVILY_API_KEY": tavily_key
+                }
+            }
+        )
+        
+        crypto_tool = CryptoPowerDataCEXTool()
+        self.avaliable_tools = ToolManager([tavily_tool, crypto_tool])
+        logger.info(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")
 
 async def main():
-    agent = MyCustomAgent(llm=ChatBot(llm_provider="openai", model_name="gpt-4.1"))
-    agent.clear()  # Reset state
-    response = await agent.run("What is the weather in Hong Kong?")
-    print(f"Answer: {response}")
+    print("--- SpoonOS Macro Analysis Agent Demo ---")
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    if not tavily_key or tavily_key == "your-tavily-api-key-here":
+        logger.error("TAVILY_API_KEY is not set or contains a placeholder. Please set a valid API key.")
+        return
+
+    agent = SpoonMacroAnalysisAgent(llm=ChatBot(llm_provider="openai", model_name="gpt-4.1"))
+    print("Agent instance created.")
+
+    await agent.initialize()
+
+    query = "Perform a macro analysis of the NEO token."
+    print(f"\nRunning query: {query}")
+    print("-" * 30)
+
+    response = await agent.run(query)
+
+    print(f"\n--- Analysis Complete ---\n{response}")
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -138,48 +240,8 @@ if __name__ == "__main__":
 
 ---
 
-## 5. Advanced: Multi-Provider & Fallback
+## 4. Next Steps
 
-You can use the LLM Manager for advanced provider fallback and multi-provider logic.
-
-```python
-from spoon_ai.llm import LLMManager, ConfigurationManager
-
-config_manager = ConfigurationManager()
-llm_manager = LLMManager(config_manager)
-llm_manager.set_fallback_chain(["openai", "anthropic", "gemini"])
-
-agent = MyCustomAgent(llm=llm_manager)
-```
-
----
-
-## 6. Debugging & Best Practices
-
-- Use `max_steps` to control loop length.
-- Add logging in `execute()` for custom tools.
-- Use `agent.clear()` to reset state between runs.
-- Handle exceptions in tools to test agent fallback.
-- Use `list_tools()` to see all registered tools.
-
----
-
-## 7. Built-in & Example Agents
-
-- **Built-in**: `react`, `spoon_react`, `spoon_react_mcp` (see codebase for details).
-- **Examples**: See [`examples/agent/`](../examples/agent/) for runnable demos.
-
----
-
-## 8. Configuration
-
-**All agent configuration (JSON, environment variables, CLI) is documented in [`configuration.md`](./configuration.md).**
-This includes: agent registration, tool config (including MCP and studio tools), LLM provider config, MCP server config, and schema reference.
-
----
-
-## Next Steps
-
-- [Configuration Guide](./configuration.md)
-- [MCP Mode Usage](./mcp_mode_usage.md)
-- [Graph Agent](./graph_agent.md)
+- **Customize the Agent**: Modify the `system_prompt` to change the agent's behavior or add new tools to the `ToolManager`.
+- **Explore More Tools**: Look into other built-in toolkits or connect to different MCP services.
+- **Read the Configuration Guide**: For more advanced setups using `config.json`, see the [Configuration Guide](./configuration.md).

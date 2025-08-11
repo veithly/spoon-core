@@ -1,5 +1,5 @@
 from spoon_ai.agents.spoon_react import SpoonReactAI
-from spoon_ai.agents.mcp_client_mixin import MCPClientMixin
+from spoon_ai.tools.mcp_tool import MCPTool as MCPClientMixin
 from fastmcp.client.transports import SSETransport
 from spoon_ai.tools.tool_manager import ToolManager
 from pydantic import Field
@@ -87,7 +87,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())
 
 
 
