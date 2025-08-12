@@ -438,6 +438,10 @@ class SpoonAICLI:
             # Load tools using the unified system
             tools = await self.config_manager.load_agent_tools(name)
 
+            # Set the agent's name to the configuration name
+            if hasattr(agent_instance, 'name'):
+                agent_instance.name = name
+
             # Add tools to agent's tool manager
             if hasattr(agent_instance, 'avaliable_tools') and tools:
                 agent_instance.avaliable_tools.add_tools(*tools)

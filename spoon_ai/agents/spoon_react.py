@@ -13,7 +13,6 @@ from spoon_ai.tools import ToolManager
 
 
 from .toolcall import ToolCallAgent
-from .mcp_client_mixin import MCPClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,6 @@ class SpoonReactAI(ToolCallAgent):
         """Initialize SpoonReactAI with both ToolCallAgent and MCPClientMixin initialization"""
         # Call parent class initializers
         ToolCallAgent.__init__(self, **kwargs)
-        MCPClientMixin.__init__(self, mcp_transport=kwargs.get('mcp_transport', SSETransport("http://127.0.0.1:8765/sse")))
 
     async def initialize(self, __context: Any = None):
         """Initialize async components and subscribe to topics"""
