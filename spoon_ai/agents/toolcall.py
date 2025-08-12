@@ -15,7 +15,6 @@ from spoon_ai.prompts.toolcall import SYSTEM_PROMPT as TOOLCALL_SYSTEM_PROMPT
 from spoon_ai.schema import TOOL_CHOICE_TYPE, AgentState, ToolCall, ToolChoice, Message, Role
 from spoon_ai.tools import ToolManager
 from mcp.types import Tool as MCPTool
-from spoon_ai.tools.mcp_tool import MCPTool as SpoonMCPTool
 
 logging.getLogger("spoon_ai").setLevel(logging.INFO)
 
@@ -95,12 +94,16 @@ class ToolCallAgent(ReActAgent):
         # Use cached MCP tools to avoid repeated server calls
         mcp_tools = await self._get_cached_mcp_tools()
 
-        def convert_mcp_tool(tool: MCPTool) -> SpoonMCPTool:
-            return SpoonMCPTool(
-                name=tool.name,
-                description=tool.description,
-                parameters=tool.inputSchema,
-            ).to_param()
+        def convert_mcp_tool(tool: MCPTool) -> dict:
+            # Convert MCPTool to function call parameter format
+            return {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.inputSchema
+                }
+            }
 
         all_tools = self.avaliable_tools.to_params()
         mcp_tools_params = [convert_mcp_tool(tool) for tool in mcp_tools]
@@ -239,8 +242,15 @@ class ToolCallAgent(ReActAgent):
 
         results = []
         for tool_call in self.tool_calls:
-            result = await self.execute_tool(tool_call)
-            logger.info(f"Tool {tool_call.function.name} executed with result: {result}")
+            try:
+                result = await self.execute_tool(tool_call)
+                logger.info(f"Tool {tool_call.function.name} executed with result: {result}")
+            except Exception as e:
+                # Ensure we always create a tool response, even on failure
+                result = f"Error executing tool {tool_call.function.name}: {str(e)}"
+                logger.error(f"Tool {tool_call.function.name} execution failed: {e}")
+
+            # Always add a tool message for each tool call to satisfy OpenAI API requirements
             self.add_message("tool", result, tool_call_id=tool_call.id, tool_name=tool_call.function.name)
             results.append(result)
         return "\n\n".join(results)
@@ -267,8 +277,11 @@ class ToolCallAgent(ReActAgent):
                 raise ValueError(f"Tool {tool_call.function.name} not found")
 
             kwargs = parse_tool_arguments(tool_call.function.arguments)
-            result = await self.call_mcp_tool(tool_call.function.name, **kwargs)
-            return result
+            try:
+                result = await self.call_mcp_tool(tool_call.function.name, **kwargs)
+                return result
+            except Exception as e:
+                return f"MCP tool execution failed: {str(e)}"
 
         if not tool_call or not tool_call.function or not tool_call.function.name:
             return "Error: Invalid tool call"

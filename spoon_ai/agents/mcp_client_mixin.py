@@ -1,68 +1,54 @@
-from typing import Union, Dict, Any, Optional, List, AsyncIterator, AsyncContextManager
+from typing import Union, Dict, Any, Optional
 import asyncio
-import uuid
 from contextlib import asynccontextmanager
-
-from fastmcp.client.transports import (FastMCPTransport, PythonStdioTransport,
-                                       SSETransport, WSTransport, NpxStdioTransport,
-                                       FastMCPStdioTransport, UvxStdioTransport)
 from fastmcp.client import Client as MCPClient
 import logging
 
 logger = logging.getLogger(__name__)
 
 class MCPClientMixin:
-    def __init__(self, mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, NpxStdioTransport, FastMCPTransport, FastMCPStdioTransport, UvxStdioTransport]):
-        self.mcp_transport = mcp_transport
-        self._client = MCPClient(self.mcp_transport)
+    def __init__(self, mcp_transport):
+        self._client = MCPClient(mcp_transport)
         self._last_sender = None
         self._last_topic = None
         self._last_message_id = None
-        self.output_topic = None
 
-        # We'll keep track of the active client session
-        self._active_session = None
-        self._session_lock = asyncio.Lock()
-        # save the session for each task
-        self._task_sessions = {}
+        # Session management is now simplified - no caching needed
 
     @asynccontextmanager
     async def get_session(self):
-        """
-        Get a session to the MCP server using the proper context manager pattern.
-        This follows the official usage: async with Client(...) as client
-
-        Yields:
-            An active client session
-        """
-        # Generate a unique task ID using UUID
-        task_id = id(asyncio.current_task())
-
-        # Check if the current task already has a session
-        if task_id in self._task_sessions:
-            try:
-                yield self._task_sessions[task_id]
-            finally:
-                pass
-            return
-
-        # If not, create a new session
-        async with self._session_lock:
-            # Create a new session for the current task
+        """Create a new session for each use to avoid connection issues."""
+        session = None
+        try:
+            # Always create a fresh session to avoid connection reuse issues
             session = await self._client.__aenter__()
-            self._task_sessions[task_id] = session
-
-            try:
-                yield session
-            finally:
-                # Clean up the session
+            yield session
+        except asyncio.CancelledError:
+            logger.warning("MCP session was cancelled")
+            raise
+        except Exception as e:
+            # Convert generic TaskGroup errors to more specific error messages
+            error_msg = str(e)
+            if "unhandled errors in a TaskGroup" in error_msg:
+                # Try to extract more specific error information
+                if hasattr(e, '__cause__') and e.__cause__:
+                    specific_error = str(e.__cause__)
+                    logger.error(f"MCP session error (TaskGroup): {specific_error}")
+                    raise ConnectionError(f"MCP connection failed: {specific_error}") from e
+                else:
+                    logger.error(f"MCP session error (TaskGroup): {error_msg}")
+                    raise ConnectionError("MCP connection failed: Task execution error") from e
+            else:
+                logger.error(f"MCP session error: {e}")
+                raise
+        finally:
+            if session:
                 try:
                     await self._client.__aexit__(None, None, None)
+                except asyncio.CancelledError:
+                    logger.warning("MCP session close was cancelled")
                 except Exception as e:
                     logger.error(f"Error closing MCP session: {e}")
-                finally:
-                    if task_id in self._task_sessions:
-                        del self._task_sessions[task_id]
 
     async def list_mcp_tools(self):
         """Get the list of available tools from the MCP server"""
@@ -71,36 +57,43 @@ class MCPClientMixin:
 
     async def call_mcp_tool(self, tool_name: str, **kwargs):
         """Call a tool on the MCP server"""
-        async with self.get_session() as session:
-            res = await session.call_tool(tool_name, arguments=kwargs)
-            if not res:
-                return ""
+        try:
+            async with self.get_session() as session:
+                res = await session.call_tool(tool_name, arguments=kwargs)
+                if not res:
+                    return ""
 
-            # Handle different types of MCP responses
-            for item in res:
-                # If it's a text response, check if it's a coroutine object string
-                if hasattr(item, 'text') and item.text is not None:
-                    text = item.text
-                    # Check if the text indicates a coroutine object (FastMCP async tool issue)
-                    if "<coroutine object" in text and "at 0x" in text:
-                        # This indicates the MCP server returned a coroutine object instead of executing it
-                        # Return an error message indicating the issue
+                # Handle different types of MCP responses
+                for item in res:
+                    # If it's a text response, check if it's a coroutine object string
+                    if hasattr(item, 'text') and item.text is not None:
+                        text = item.text
+                        # Check if the text indicates a coroutine object (FastMCP async tool issue)
+                        if "<coroutine object" in text and "at 0x" in text:
+                            # This indicates the MCP server returned a coroutine object instead of executing it
+                            # Return an error message indicating the issue
+                            return f"Error: MCP tool '{tool_name}' returned a coroutine object instead of executing it. This suggests the tool is async but not properly handled by the MCP server."
+                        return text
+                    # If it's a JSON response, return the JSON content
+                    elif hasattr(item, 'json') and item.json is not None:
+                        import json
+                        return json.dumps(item.json, ensure_ascii=False, indent=2)
+
+                # Fallback to string representation
+                if res:
+                    result_str = str(res[0])
+                    # Check for coroutine object in fallback as well
+                    if "<coroutine object" in result_str and "at 0x" in result_str:
                         return f"Error: MCP tool '{tool_name}' returned a coroutine object instead of executing it. This suggests the tool is async but not properly handled by the MCP server."
-                    return text
-                # If it's a JSON response, return the JSON content
-                elif hasattr(item, 'json') and item.json is not None:
-                    import json
-                    return json.dumps(item.json, ensure_ascii=False, indent=2)
+                    return result_str
 
-            # Fallback to string representation
-            if res:
-                result_str = str(res[0])
-                # Check for coroutine object in fallback as well
-                if "<coroutine object" in result_str and "at 0x" in result_str:
-                    return f"Error: MCP tool '{tool_name}' returned a coroutine object instead of executing it. This suggests the tool is async but not properly handled by the MCP server."
-                return result_str
-
-            return ""
+                return ""
+        except asyncio.CancelledError:
+            logger.warning(f"MCP tool call '{tool_name}' was cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"MCP tool '{tool_name}' call failed: {e}")
+            return f"MCP tool '{tool_name}' execution failed: {str(e)}"
 
     async def send_mcp_message(self, recipient: str, message: Union[str, Dict[str, Any]],
                               topic: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> bool:
@@ -209,15 +202,5 @@ class MCPClientMixin:
             raise
 
     async def cleanup(self):
-        """
-        Clean up resources (no explicit disconnection needed with context manager pattern)
-        """
+        """Clean up MCP client resources."""
         logger.info("MCP client resources cleaned up")
-        # Clean up all task sessions
-        for task_id, session in list(self._task_sessions.items()):
-            try:
-                await self._client.__aexit__(None, None, None)
-            except Exception as e:
-                logger.error(f"Error closing MCP session during cleanup: {e}")
-            finally:
-                del self._task_sessions[task_id]
