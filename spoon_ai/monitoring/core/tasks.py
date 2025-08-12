@@ -32,14 +32,15 @@ class MonitoringTaskManager:
         # Validate configuration
         self._validate_config(config)
         
-        # Set expiration time (default 24 hours)
+        # Create timestamps once to ensure consistency
+        creation_time = datetime.now()
         expires_in_hours = config.get("expires_in_hours", 24)
-        expiry_time = datetime.now() + timedelta(hours=expires_in_hours)
+        expiry_time = creation_time + timedelta(hours=expires_in_hours)
         
         # Store task metadata
         self.tasks[task_id] = {
             "status": TaskStatus.ACTIVE,
-            "created_at": datetime.now(),
+            "created_at": creation_time,
             "expires_at": expiry_time,
             "config": config,
             "last_checked": None,
@@ -66,7 +67,7 @@ class MonitoringTaskManager:
         self._task_wrapper(task_id, config)
         return {
             "task_id": task_id,
-            "created_at": datetime.now().isoformat(),
+            "created_at": creation_time.isoformat(),
             "expires_at": expiry_time.isoformat(),
             "config": config,
             "status": TaskStatus.ACTIVE
