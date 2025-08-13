@@ -600,3 +600,7 @@ spoon-core/
 - **`config.json`** - Main configuration file (auto-generated)
 - **`doc/configuration.md`** - Complete setup guide
 - **`examples/`** - Ready-to-run examples
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=XSpoonAi/spoon-core&type=Date)](https://www.star-history.com/#XSpoonAi/spoon-core&Date)
