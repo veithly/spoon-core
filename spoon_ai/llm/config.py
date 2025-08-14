@@ -309,7 +309,7 @@ class ConfigurationManager:
         """
         # Common defaults for all providers
         common_defaults = {
-            'max_tokens': 4096,
+            'max_tokens': 32768,
             'temperature': 0.3,
             'timeout': 30,
             'retry_attempts': 3,
@@ -343,11 +343,13 @@ class ConfigurationManager:
             'anthropic': {
                 'model': 'claude-sonnet-4-20250514',
                 'base_url': 'https://api.anthropic.com',
+                'max_tokens': 200000,
                 'temperature': 0.1,   # Lower temperature for Claude
                 **{k: v for k, v in common_defaults.items() if k != 'temperature'}
             },
             'gemini': {
-                'model': 'gemini-2.0-flash-exp',
+                'model': 'gemini-2.5-pro',
+                'max_tokens': 250000,
                 'base_url': 'https://generativelanguage.googleapis.com/v1beta',
                 'temperature': 0.1,   # Lower temperature for Gemini
                 **{k: v for k, v in common_defaults.items() if k != 'temperature'}
@@ -405,8 +407,8 @@ class ConfigurationManager:
             return env_provider
 
         # 3. Intelligent selection based on available API keys and quality
-        # Priority order: anthropic (best quality) -> openai -> openrouter -> deepseek -> gemini
-        provider_priority = ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']
+        # Priority order: openai (GPT-4.1 default) -> anthropic -> openrouter -> deepseek -> gemini
+        provider_priority = ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini']
         available_providers = []
 
         for provider in provider_priority:
@@ -467,7 +469,7 @@ class ConfigurationManager:
                 providers.update(self._config_cache['api_keys'].keys())
 
         # From environment variables
-        for provider in ['openai', 'openrouter', 'deepseek', 'anthropic', 'gemini']:
+        for provider in ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini']:
             if os.getenv(f'{provider.upper()}_API_KEY'):
                 providers.add(provider)
 
@@ -480,7 +482,7 @@ class ConfigurationManager:
             List[str]: List of available provider names in priority order
         """
         # Define priority order based on quality and capabilities
-        priority_order = ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']
+        priority_order = ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini']
         available_providers = []
 
         for provider in priority_order:
@@ -501,7 +503,7 @@ class ConfigurationManager:
         """
         provider_info = {}
 
-        for provider in ['anthropic', 'openai', 'openrouter', 'deepseek', 'gemini']:
+        for provider in ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini']:
             try:
                 config = self._get_provider_config_dict(provider)
                 has_api_key = bool(config.get('api_key'))
