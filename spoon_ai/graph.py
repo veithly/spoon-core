@@ -15,11 +15,14 @@ import asyncio
 import logging
 import uuid
 import json
-from typing import Dict, Any, Callable, Union, Optional, Tuple, List, Annotated, TypedDict, Literal
+import time
+import functools
+from typing import Dict, Any, Callable, Union, Optional, Tuple, List, Annotated, TypedDict, Literal, Set
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 import operator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from spoon_ai.schema import Message
 from spoon_ai.llm.manager import get_llm_manager
@@ -94,6 +97,65 @@ class InterruptError(Exception):
         self.interrupt_id = interrupt_id or str(uuid.uuid4())
         self.node = node
         super().__init__(f"Graph interrupted at node '{node}': {interrupt_data}")
+
+
+# Enhanced Data Structures for improved functionality
+@dataclass
+class NodeContext:
+    """Enhanced node execution context with runtime information"""
+    node_name: str
+    iteration: int
+    thread_id: str
+    execution_time: float = 0.0
+    start_time: Optional[datetime] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    parent_context: Optional['NodeContext'] = None
+    execution_path: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if self.start_time is None:
+            self.start_time = datetime.now()
+
+
+@dataclass
+class NodeResult:
+    """Standardized node execution result"""
+    updates: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    logs: List[str] = field(default_factory=list)
+    goto: Optional[str] = None
+    error: Optional[str] = None
+    confidence: float = 1.0
+    reasoning: Optional[str] = None
+    
+    def to_command(self) -> 'Command':
+        """Convert to Command object for backward compatibility"""
+        return Command(
+            update=self.updates,
+            goto=self.goto,
+            resume=None
+        )
+
+
+@dataclass
+class RouterResult:
+    """Enhanced routing result with confidence and reasoning"""
+    next_node: str
+    confidence: float
+    reasoning: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    alternative_paths: List[Tuple[str, float]] = field(default_factory=list)
+
+
+@dataclass
+class ParallelBranchConfig:
+    """Configuration for parallel branch execution"""
+    branch_name: str
+    nodes: List[str]
+    join_strategy: Literal["all_complete", "first_complete", "timeout"] = "all_complete"
+    timeout: Optional[float] = None
+    join_condition: Optional[Callable[[List[NodeResult]], bool]] = None
+    error_strategy: Literal["fail_fast", "continue", "retry"] = "fail_fast"
 
 
 @dataclass
@@ -266,6 +328,7 @@ class InMemoryCheckpointer:
         }
 
 
+# Enhanced Reducers and Validators
 def add_messages(existing: List[Any], new: List[Any]) -> List[Any]:
     """Reducer function for adding messages to a list."""
     if existing is None:
@@ -273,6 +336,141 @@ def add_messages(existing: List[Any], new: List[Any]) -> List[Any]:
     if new is None:
         return existing
     return existing + new
+
+
+def merge_dicts(existing: Dict, new: Dict) -> Dict:
+    """Merge dictionaries with deep merge support"""
+    if existing is None:
+        return new or {}
+    if new is None:
+        return existing
+    
+    result = existing.copy()
+    for key, value in new.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = merge_dicts(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def append_history(existing: List, new: Dict) -> List:
+    """Append history records with timestamp"""
+    if existing is None:
+        existing = []
+    if new is None:
+        return existing
+    
+    history_entry = {"timestamp": datetime.now().isoformat(), **new}
+    return existing + [history_entry]
+
+
+def union_sets(existing: Set, new: Set) -> Set:
+    """Set union operation"""
+    if existing is None:
+        existing = set()
+    if new is None:
+        return existing
+    return existing | new
+
+
+def validate_range(min_val: float, max_val: float):
+    """Range validator factory"""
+    def validator(value: float) -> float:
+        if not isinstance(value, (int, float)):
+            raise ValueError(f"Value must be numeric, got {type(value)}")
+        if not min_val <= value <= max_val:
+            raise ValueError(f"Value {value} not in range [{min_val}, {max_val}]")
+        return float(value)
+    return validator
+
+
+def validate_enum(allowed_values: List[Any]):
+    """Enum validator factory"""
+    def validator(value: Any) -> Any:
+        if value not in allowed_values:
+            raise ValueError(f"Value {value} not in allowed values: {allowed_values}")
+        return value
+    return validator
+
+
+# Node Decorators for standardization
+def node_decorator(func: Callable) -> Callable:
+    """Enhanced node function standardization decorator"""
+    @functools.wraps(func)
+    async def async_wrapper(state: Dict[str, Any], context: NodeContext = None) -> NodeResult:
+        return await _execute_node_with_context(func, state, context, is_async=True)
+    
+    @functools.wraps(func)
+    def sync_wrapper(state: Dict[str, Any], context: NodeContext = None) -> NodeResult:
+        return _execute_node_with_context(func, state, context, is_async=False)
+    
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper
+
+
+def router_decorator(func: Callable) -> Callable:
+    """Enhanced router function decorator"""
+    @functools.wraps(func)
+    async def async_wrapper(state: Dict[str, Any], context: NodeContext = None) -> RouterResult:
+        if asyncio.iscoroutinefunction(func):
+            return await func(state, context)
+        else:
+            return func(state, context)
+    
+    @functools.wraps(func)
+    def sync_wrapper(state: Dict[str, Any], context: NodeContext = None) -> RouterResult:
+        return func(state, context)
+    
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper
+
+
+async def _execute_node_with_context(func: Callable, state: Dict[str, Any], 
+                                    context: NodeContext, is_async: bool) -> NodeResult:
+    """Execute node with enhanced context and error handling"""
+    start_time = time.time()
+    
+    try:
+        if context:
+            context.start_time = datetime.now()
+        
+        if is_async:
+            result = await func(state, context)
+        else:
+            result = func(state, context)
+        
+        execution_time = time.time() - start_time
+        
+        # Handle different return types
+        if isinstance(result, NodeResult):
+            result.metadata.setdefault("execution_time", execution_time)
+            return result
+        elif isinstance(result, dict):
+            return NodeResult(
+                updates=result,
+                metadata={"execution_time": execution_time},
+                logs=[f"Node executed successfully in {execution_time:.3f}s"]
+            )
+        else:
+            return NodeResult(
+                updates={"result": result},
+                metadata={"execution_time": execution_time},
+                logs=[f"Node executed successfully in {execution_time:.3f}s"]
+            )
+            
+    except Exception as e:
+        execution_time = time.time() - start_time
+        logger.error(f"Node execution failed: {str(e)}")
+        return NodeResult(
+            error=str(e),
+            metadata={"execution_time": execution_time, "error_type": type(e).__name__},
+            logs=[f"Node execution failed after {execution_time:.3f}s: {str(e)}"]
+        )
 
 
 def interrupt(data: Dict[str, Any]) -> Any:
@@ -305,19 +503,24 @@ class StateGraph:
         self.checkpointer = checkpointer or InMemoryCheckpointer()
         self.nodes: Dict[str, Callable] = {}
         self.edges: Dict[str, Union[Callable, Tuple[Callable, Dict[str, str]]]] = {}
+        self.parallel_branches: Dict[str, ParallelBranchConfig] = {}
         self.entry_point: Optional[str] = None
         self._compiled = False
         self.interrupts: Dict[str, InterruptError] = {}
         self.llm_manager = get_llm_manager()
+        self.monitoring_enabled = False
+        self.execution_metrics: Dict[str, Any] = {}
+        self.monitored_metrics: List[str] = []
 
-    def add_node(self, name: str, action: Callable) -> "StateGraph":
+    def add_node(self, name: str, action: Callable, parallel_group: Optional[str] = None) -> "StateGraph":
         """
-        Add a node to the graph.
+        Add a node to the graph with optional parallel group assignment.
         
         Args:
             name: Unique identifier for the node
             action: Function or coroutine that processes the state
                    Should accept state dict and return dict of updates or Command
+            parallel_group: Optional parallel group name for concurrent execution
         
         Returns:
             Self for method chaining
@@ -353,8 +556,23 @@ class StateGraph:
                 details={"name": name, "action_type": type(action)}
             )
 
+        # Wrap function with node decorator if not already wrapped
+        if not hasattr(action, '__wrapped__'):
+            action = node_decorator(action)
+
         self.nodes[name] = action
-        logger.debug(f"Added node '{name}' to graph")
+        
+        # Handle parallel group assignment
+        if parallel_group:
+            if parallel_group not in self.parallel_branches:
+                self.parallel_branches[parallel_group] = ParallelBranchConfig(
+                    branch_name=parallel_group,
+                    nodes=[]
+                )
+            self.parallel_branches[parallel_group].nodes.append(name)
+        
+        logger.debug(f"Added node '{name}' to graph" + 
+                    (f" in parallel group '{parallel_group}'" if parallel_group else ""))
         return self
     
     def add_llm_node(self, 
@@ -433,6 +651,40 @@ class StateGraph:
         self.edges[start_node] = lambda state: end_node
         logger.debug(f"Added edge from '{start_node}' to '{end_node}'")
         return self
+    
+    def add_parallel_nodes(self, node_names: List[str], 
+                          join_strategy: Literal["all_complete", "first_complete", "timeout"] = "all_complete",
+                          timeout: Optional[float] = None) -> "StateGraph":
+        """Add multiple nodes for parallel execution"""
+        branch_name = f"parallel_branch_{len(self.parallel_branches)}"
+        
+        config = ParallelBranchConfig(
+            branch_name=branch_name,
+            nodes=node_names,
+            join_strategy=join_strategy,
+            timeout=timeout
+        )
+        
+        self.parallel_branches[branch_name] = config
+        logger.debug(f"Added parallel branch '{branch_name}' with {len(node_names)} nodes")
+        return self
+    
+    def add_parallel_branch(self, branch_name: str, nodes: List[str],
+                           join_condition: Optional[Callable[[List[NodeResult]], bool]] = None,
+                           timeout: Optional[float] = None,
+                           join_strategy: Literal["all_complete", "first_complete", "timeout"] = "all_complete") -> "StateGraph":
+        """Add a named parallel branch with custom join condition"""
+        config = ParallelBranchConfig(
+            branch_name=branch_name,
+            nodes=nodes,
+            join_strategy=join_strategy,
+            timeout=timeout,
+            join_condition=join_condition
+        )
+        
+        self.parallel_branches[branch_name] = config
+        logger.debug(f"Added parallel branch '{branch_name}' with custom join condition")
+        return self
 
     def add_conditional_edges(
         self,
@@ -499,6 +751,36 @@ class StateGraph:
         self.edges[start_node] = (condition, path_map)
         logger.debug(f"Added conditional edges from '{start_node}' with {len(path_map)} paths")
         return self
+    
+    def add_enhanced_conditional_edges(self, start_node: str, 
+                                     router_func: Callable[[Dict[str, Any], NodeContext], RouterResult],
+                                     fallback_node: str = "END") -> "StateGraph":
+        """Add conditional edges with enhanced routing"""
+        if start_node not in self.nodes:
+            raise GraphConfigurationError(
+                f"Start node '{start_node}' does not exist",
+                component="enhanced_conditional_edge",
+                details={"start_node": start_node, "available_nodes": list(self.nodes.keys())}
+            )
+        
+        # Wrap router function if needed
+        if not hasattr(router_func, '__wrapped__'):
+            router_func = router_decorator(router_func)
+        
+        async def enhanced_router(state: Dict[str, Any], context: NodeContext = None) -> str:
+            try:
+                result = await router_func(state, context)
+                if isinstance(result, RouterResult):
+                    logger.debug(f"Router decision: {result.next_node} (confidence: {result.confidence:.2f}) - {result.reasoning}")
+                    return result.next_node
+                else:
+                    return result
+            except Exception as e:
+                logger.error(f"Router function failed: {e}, using fallback: {fallback_node}")
+                return fallback_node
+        
+        self.edges[start_node] = enhanced_router
+        return self
 
     def set_entry_point(self, node_name: str) -> "StateGraph":
         """
@@ -525,6 +807,14 @@ class StateGraph:
 
         self.entry_point = node_name
         logger.debug(f"Set entry point to '{node_name}'")
+        return self
+    
+    def enable_monitoring(self, metrics: List[str] = None) -> "StateGraph":
+        """Enable real-time monitoring"""
+        self.monitoring_enabled = True
+        default_metrics = ["execution_time", "node_success_rate", "state_size", "memory_usage"]
+        self.monitored_metrics = metrics or default_metrics
+        logger.info(f"Enabled monitoring for metrics: {self.monitored_metrics}")
         return self
 
     def compile(self) -> "CompiledGraph":
@@ -578,7 +868,8 @@ class StateGraph:
             )
 
         self._compiled = True
-        logger.info(f"Compiled graph with {len(self.nodes)} nodes and entry point '{self.entry_point}'")
+        logger.info(f"Compiled enhanced graph with {len(self.nodes)} nodes, "
+                   f"{len(self.parallel_branches)} parallel branches, and entry point '{self.entry_point}'")
         return CompiledGraph(self)
     
     def _find_reachable_nodes(self, current_node: str, reachable: set, visited: set = None) -> None:
@@ -615,6 +906,7 @@ class CompiledGraph:
         """Initialize with a compiled StateGraph."""
         self.graph = graph
         self.execution_history: List[Dict[str, Any]] = []
+        self.parallel_executor = ThreadPoolExecutor(max_workers=10)
 
     async def invoke(self, initial_state: Optional[Dict[str, Any]] = None, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the graph from the entry point."""
@@ -640,6 +932,14 @@ class CompiledGraph:
                 iteration += 1
                 execution_path.append(current_node)
 
+                # Create node context
+                context = NodeContext(
+                    node_name=current_node,
+                    iteration=iteration,
+                    thread_id=thread_id,
+                    execution_path=execution_path.copy()
+                )
+
                 logger.debug(f"Executing node '{current_node}' (iteration {iteration})")
 
                 # Save checkpoint before execution
@@ -659,12 +959,39 @@ class CompiledGraph:
                     logger.warning(f"Unexpected error saving checkpoint: {e}")
                     # Continue execution even if checkpoint fails
 
+                # Check if this is a parallel branch
+                parallel_branch = self._find_parallel_branch(current_node)
+                if parallel_branch:
+                    result = await self._execute_parallel_branch(parallel_branch, state, context)
+                    # Skip to next node after parallel execution
+                    current_node = await self._get_next_node(current_node, state, context)
+                    continue
+
                 # Execute the current node
                 try:
-                    result = await self._execute_node(current_node, state)
+                    result = await self._execute_node_enhanced(current_node, state, context)
                     
-                    # Handle Command objects
-                    if isinstance(result, Command):
+                    # Handle NodeResult objects
+                    if isinstance(result, NodeResult):
+                        if result.error:
+                            logger.error(f"Node '{current_node}' failed: {result.error}")
+                            # Could implement retry logic here
+                            break
+                        
+                        # Update state
+                        if result.updates:
+                            self._update_state_with_reducers(state, result.updates)
+                        
+                        # Handle goto
+                        if result.goto:
+                            current_node = result.goto
+                            if current_node == "END":
+                                logger.info("Graph execution completed via NodeResult")
+                                break
+                            continue
+                    
+                    # Handle Command objects (backward compatibility)
+                    elif isinstance(result, Command):
                         if result.update:
                             self._update_state_with_reducers(state, result.update)
                         if result.goto:
@@ -724,7 +1051,7 @@ class CompiledGraph:
                 })
 
                 # Determine next node
-                next_node = await self._get_next_node(current_node, state)
+                next_node = await self._get_next_node(current_node, state, context)
 
                 if next_node == current_node:
                     logger.warning(f"Node '{current_node}' routes to itself, stopping execution")
@@ -941,7 +1268,7 @@ class CompiledGraph:
                 state=state
             ) from e
 
-    async def _get_next_node(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
+    async def _get_next_node(self, current_node: str, state: Dict[str, Any], context: NodeContext = None) -> Optional[str]:
         """
         Determine the next node to execute based on edges and state.
         
@@ -998,10 +1325,23 @@ class CompiledGraph:
         # Handle simple edges
         elif callable(edge):
             try:
-                if asyncio.iscoroutinefunction(edge):
-                    next_node = await edge(state)
+                # Check if edge function expects context
+                import inspect
+                sig = inspect.signature(edge)
+                params = list(sig.parameters.keys())
+                
+                if len(params) >= 2 and 'context' in params:
+                    # Edge function expects context
+                    if asyncio.iscoroutinefunction(edge):
+                        next_node = await edge(state, context)
+                    else:
+                        next_node = edge(state, context)
                 else:
-                    next_node = edge(state)
+                    # Legacy edge function
+                    if asyncio.iscoroutinefunction(edge):
+                        next_node = await edge(state)
+                    else:
+                        next_node = edge(state)
 
                 logger.debug(f"Edge from '{current_node}' -> '{next_node}'")
                 return next_node
@@ -1072,3 +1412,188 @@ class CompiledGraph:
                 f"State update failed: {str(e)}",
                 actual_value=updates
             ) from e
+    
+    async def _execute_node_enhanced(self, node_name: str, state: Dict[str, Any], context: NodeContext) -> Any:
+        """Execute a node with enhanced context and error handling."""
+        node_action = self.graph.nodes[node_name]
+        
+        try:
+            # Check if the node function expects context
+            import inspect
+            sig = inspect.signature(node_action)
+            params = list(sig.parameters.keys())
+            
+            if len(params) >= 2 and 'context' in params:
+                # Node expects context
+                if asyncio.iscoroutinefunction(node_action):
+                    result = await node_action(state, context)
+                else:
+                    result = node_action(state, context)
+            else:
+                # Legacy node function
+                if asyncio.iscoroutinefunction(node_action):
+                    result = await node_action(state)
+                else:
+                    result = node_action(state)
+            
+            return result
+        except InterruptError:
+            # Re-raise interrupt errors
+            raise
+        except Exception as e:
+            logger.error(f"Node '{node_name}' execution failed: {str(e)}")
+            raise NodeExecutionError(
+                f"Node '{node_name}' failed: {str(e)}", 
+                node_name=node_name,
+                original_error=e,
+                state=state
+            ) from e
+    
+    async def _execute_parallel_branch(self, branch_config: ParallelBranchConfig, 
+                                     state: Dict[str, Any], context: NodeContext) -> List[NodeResult]:
+        """Execute a parallel branch of nodes"""
+        logger.info(f"Executing parallel branch '{branch_config.branch_name}' with {len(branch_config.nodes)} nodes")
+        
+        # Create tasks for parallel execution
+        tasks = []
+        for node_name in branch_config.nodes:
+            if node_name in self.graph.nodes:
+                node_context = NodeContext(
+                    node_name=node_name,
+                    iteration=context.iteration,
+                    thread_id=context.thread_id,
+                    parent_context=context,
+                    execution_path=context.execution_path + [node_name]
+                )
+                
+                task = asyncio.create_task(self._execute_node_enhanced(node_name, state.copy(), node_context))
+                tasks.append((node_name, task))
+        
+        # Execute based on join strategy
+        results = []
+        if branch_config.join_strategy == "all_complete":
+            # Wait for all tasks to complete
+            for node_name, task in tasks:
+                try:
+                    if branch_config.timeout:
+                        result = await asyncio.wait_for(task, timeout=branch_config.timeout)
+                    else:
+                        result = await task
+                    results.append((node_name, result))
+                except asyncio.TimeoutError:
+                    logger.warning(f"Node '{node_name}' timed out in parallel branch")
+                    results.append((node_name, NodeResult(error="Timeout")))
+                except Exception as e:
+                    logger.error(f"Node '{node_name}' failed in parallel branch: {e}")
+                    results.append((node_name, NodeResult(error=str(e))))
+        
+        elif branch_config.join_strategy == "first_complete":
+            # Wait for first completion
+            done, pending = await asyncio.wait(
+                [task for _, task in tasks], 
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=branch_config.timeout
+            )
+            
+            # Cancel pending tasks
+            for task in pending:
+                task.cancel()
+            
+            # Get first result
+            for node_name, task in tasks:
+                if task in done:
+                    try:
+                        result = await task
+                        results.append((node_name, result))
+                        break
+                    except Exception as e:
+                        logger.error(f"First completed node '{node_name}' failed: {e}")
+                        results.append((node_name, NodeResult(error=str(e))))
+        
+        # Apply join condition if specified
+        node_results = [result for _, result in results]
+        if branch_config.join_condition and not branch_config.join_condition(node_results):
+            logger.warning(f"Parallel branch '{branch_config.branch_name}' join condition failed")
+        
+        # Merge results into state
+        for node_name, result in results:
+            if isinstance(result, NodeResult) and result.updates and not result.error:
+                self._update_state_with_reducers(state, result.updates)
+            elif isinstance(result, dict):
+                self._update_state_with_reducers(state, result)
+        
+        logger.info(f"Parallel branch '{branch_config.branch_name}' completed with {len(results)} results")
+        return node_results
+    
+    def _find_parallel_branch(self, node_name: str) -> Optional[ParallelBranchConfig]:
+        """Find if a node belongs to a parallel branch"""
+        for branch_config in self.graph.parallel_branches.values():
+            if node_name in branch_config.nodes:
+                return branch_config
+        return None
+    
+    def visualize_execution_path(self) -> str:
+        """Generate DOT format diagram for execution path"""
+        if not self.execution_history:
+            return "digraph empty { }"
+        
+        dot_content = "digraph execution_path {\n"
+        dot_content += "  rankdir=TB;\n"
+        dot_content += "  node [shape=box, style=rounded];\n"
+        
+        for i, step in enumerate(self.execution_history):
+            node = step["node"]
+            exec_time = step.get("execution_time", 0)
+            dot_content += f'  "{node}_{i}" [label="{node}\\n{exec_time:.3f}s"];\n'
+            
+            if i > 0:
+                prev_node = self.execution_history[i-1]["node"]
+                dot_content += f'  "{prev_node}_{i-1}" -> "{node}_{i}";\n'
+        
+        dot_content += "}"
+        return dot_content
+    
+    def get_execution_stats(self) -> Dict[str, Any]:
+        """Get execution statistics"""
+        if not self.execution_history:
+            return {}
+        
+        total_time = sum(step.get("execution_time", 0) for step in self.execution_history)
+        node_counts = {}
+        
+        for step in self.execution_history:
+            node = step["node"]
+            node_counts[node] = node_counts.get(node, 0) + 1
+        
+        return {
+            "total_execution_time": total_time,
+            "total_steps": len(self.execution_history),
+            "average_step_time": total_time / len(self.execution_history) if self.execution_history else 0,
+            "node_execution_counts": node_counts,
+            "unique_nodes_executed": len(node_counts)
+        }
+
+
+# Example Enhanced State Schema for Cryptocurrency Analysis
+class CryptoAnalysisState(TypedDict):
+    """Enhanced state schema for cryptocurrency analysis"""
+    # Basic data
+    query: str
+    top_pairs: Annotated[List[Dict[str, Any]], operator.add]
+    
+    # Market data with custom reducers
+    market_data: Annotated[Dict[str, Any], merge_dicts]
+    kline_data: Annotated[Dict[str, Any], merge_dicts]
+    
+    # Analysis results
+    trending_coins: Annotated[List[str], operator.add]
+    news_data: Annotated[Dict[str, Any], merge_dicts]
+    
+    # Execution tracking
+    execution_history: Annotated[List[Dict[str, Any]], append_history]
+    analysis_flags: Annotated[Set[str], union_sets]
+    
+    # Final results
+    investment_advice: str
+    confidence_score: Annotated[float, validate_range(0.0, 1.0)]
+    risk_level: Annotated[str, validate_enum(["LOW", "MEDIUM", "HIGH"])]
