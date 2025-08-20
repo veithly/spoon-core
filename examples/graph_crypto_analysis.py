@@ -28,15 +28,13 @@ from spoon_ai.graph import (
     NodeContext,
     NodeResult,
     RouterResult,
-    node_decorator,
-    router_decorator,
     merge_dicts,
     append_history,
     union_sets,
     validate_range,
     validate_enum,
-    operator
 )
+import operator
 
 from spoon_ai.llm.manager import get_llm_manager
 from spoon_ai.schema import Message
@@ -380,6 +378,7 @@ class LLMCryptoAnalyzer:
 
         # Connect to the entry node of the parallel branch; the graph engine will execute the whole branch
         if analyzer_entry_node:
+            # Connect to the entry node of the parallel branch; the engine will execute the whole group
             graph.add_edge("prepare_token_list", analyzer_entry_node)
             graph.add_edge(analyzer_entry_node, "llm_final_aggregation")
 
@@ -388,29 +387,39 @@ class LLMCryptoAnalyzer:
 
         # Set entry point and monitoring
         graph.set_entry_point("fetch_binance_data")
-        graph.enable_monitoring([
-            "execution_time",
-            "llm_response_quality",
-            "api_success_rate",
-            "analysis_depth",
-            "parallel_branch_efficiency"
-        ])
+        # Optional monitoring (no-op if engine doesn't implement it)
+        if hasattr(graph, "enable_monitoring"):
+            graph.enable_monitoring([
+                "execution_time",
+                "llm_response_quality",
+                "api_success_rate",
+                "analysis_depth",
+                "parallel_branch_efficiency"
+            ])
 
         return graph
 
     def _wrap_method(self, method):
-        """Wrap method to handle self binding"""
-        # Create wrapper function without decorators
-        if hasattr(method, '__name__') and 'routing_decision' in method.__name__:
-            # Router method
-            async def router_wrapper(state, context):
-                return await method(state, context)
-            return router_decorator(router_wrapper)
-        else:
-            # Regular node method
-            async def node_wrapper(state, context):
-                return await method(state, context)
-            return node_decorator(node_wrapper)
+        """Wrap instance method into a coroutine accepting only (state), constructing a default NodeContext.
+        Converts NodeResult to Command/update dict for the minimal engine.
+        """
+        async def wrapper(state):
+            node_name = getattr(method, '__name__', 'node')
+            ctx = NodeContext(node_name=node_name, iteration=0, thread_id="example")
+            result = await method(state, ctx)
+            # Normalize return for engine: support NodeResult by mapping to Command/update dict
+            try:
+                from spoon_ai.graph.types import Command as _Command
+            except Exception:
+                _Command = None
+            if isinstance(result, NodeResult):
+                if result.error:
+                    raise RuntimeError(result.error)
+                if _Command and (result.updates or result.goto):
+                    return _Command(update=result.updates or {}, goto=result.goto)
+                return result.updates or {}
+            return result
+        return wrapper
 
     async def _call_llm(self, messages: List[Message], provider: str = None) -> str:
         """Call LLM and return response content"""
