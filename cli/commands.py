@@ -20,6 +20,7 @@ from spoon_ai.retrieval.document_loader import DocumentLoader
 from spoon_ai.schema import Message, Role
 from spoon_ai.trade.aggregator import Aggregator
 from spoon_ai.config.manager import ConfigManager
+from spoon_ai.config.errors import ConfigurationError
 
 
 # Create a log filter to filter out log messages containing specific keywords
@@ -230,7 +231,7 @@ class SpoonAICLI:
             name="llm-status",
             description="Show LLM provider status and configuration",
             handler=self._handle_llm_status,
-            aliases=["llm", "providers"]
+            aliases=["llm", "providers", "list-providers", "provider-status"]
         ))
 
         # Swap Command
@@ -355,18 +356,23 @@ class SpoonAICLI:
             return
 
         name = input_list[0]
+        # Canonicalize known aliases before validation
+        alias_map = {
+            "spoon_react": "react",
+        }
+        canonical = alias_map.get(name, name)
 
         # Get available agents to validate the name
         available_agents = self._get_available_agents()
 
         # Check if agent exists (by name or alias)
         agent_found = False
-        if name in available_agents:
+        if canonical in available_agents:
             agent_found = True
         else:
             # Check aliases
             for agent_name, config in available_agents.items():
-                if name in config.get("aliases", []):
+                if canonical in config.get("aliases", []) or name in config.get("aliases", []):
                     agent_found = True
                     break
 
@@ -375,7 +381,7 @@ class SpoonAICLI:
             return
 
         # Run the async load_agent method
-        await self._load_agent(name)
+        await self._load_agent(canonical)
 
     def _get_available_agents(self) -> Dict[str, Dict[str, Any]]:
         """Get available agents from unified configuration"""
@@ -1593,6 +1599,8 @@ class SpoonAICLI:
             ("OPENAI_API_KEY", "OpenAI API"),
             ("ANTHROPIC_API_KEY", "Anthropic API"),
             ("DEEPSEEK_API_KEY", "DeepSeek API"),
+            ("GEMINI_API_KEY", "Gemini API"),
+            ("OPENROUTER_API_KEY", "OpenRouter API"),
             ("TAVILY_API_KEY", "Tavily Search API"),
             ("SECRET_KEY", "JWT Secret Key"),
             ("TELEGRAM_BOT_TOKEN", "Telegram Bot"),

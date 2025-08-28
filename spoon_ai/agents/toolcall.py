@@ -45,12 +45,12 @@ class ToolCallAgent(ReActAgent):
     async def _get_cached_mcp_tools(self) -> List[MCPTool]:
         """Get MCP tools with caching to avoid repeated server calls."""
         current_time = time.time()
-        
+
         # Thread-safe cache check
         async with asyncio.Lock() if not hasattr(self, '_cache_lock') else asyncio.Lock():
             if not hasattr(self, '_cache_lock'):
                 self._cache_lock = asyncio.Lock()
-                
+
         async with self._cache_lock:
             # Check if cache is valid and not expired
             if (self.mcp_tools_cache is not None and
@@ -58,16 +58,16 @@ class ToolCallAgent(ReActAgent):
                 current_time - self.mcp_tools_cache_timestamp < self.mcp_tools_cache_ttl):
                 logger.info(f"♻️ {self.name} using cached MCP tools ({len(self.mcp_tools_cache)} tools)")
                 return self.mcp_tools_cache.copy() # Return copy to prevent external modification
-            
+
             # Cache expired or invalid - clean up and fetch fresh
             self._invalidate_mcp_cache()
-            
-            
+
+
             if hasattr(self, "list_mcp_tools"):
                 try:
                     logger.info(f"🔄 {self.name} fetching MCP tools from server...")
                     mcp_tools = await self.list_mcp_tools()
-                    
+
                     # Validate and limit cache size (prevent memory bloat)
                     if isinstance(mcp_tools, list) and len(mcp_tools) <= 100:
                         self.mcp_tools_cache = mcp_tools
@@ -77,19 +77,19 @@ class ToolCallAgent(ReActAgent):
                     else:
                         logger.warning(f"⚠️ {self.name} received {len(mcp_tools) if isinstance(mcp_tools, list) else 'invalid'} tools - not caching")
                         return mcp_tools if isinstance(mcp_tools, list) else []
-                    
+
                 except Exception as e:
                     logger.error(f"❌ {self.name} failed to fetch MCP tools: {e}")
                     # Return empty list on error rather than crashing
-                    return []              
-        
+                    return []
+
         return []
-    
-    
+
+
 
     async def think(self) -> bool:
         if self.next_step_prompt:
-            self.add_message("user", self.next_step_prompt)
+            await self.add_message("user", self.next_step_prompt)
 
         # Use cached MCP tools to avoid repeated server calls
         mcp_tools = await self._get_cached_mcp_tools()
@@ -128,7 +128,7 @@ class ToolCallAgent(ReActAgent):
         if not self.tool_calls and self._should_terminate_on_finish_reason(response):
             logger.info(f"🏁 {self.name} terminating due to finish_reason signals (no tool calls)")
             self.state = AgentState.FINISHED
-            self.add_message("assistant", response.content or "Task completed")
+            await self.add_message("assistant", response.content or "Task completed")
             # Set a flag to indicate finish_reason termination and store the content
             self._finish_reason_terminated = True
             self._final_response_content = response.content or "Task completed"
@@ -148,10 +148,10 @@ class ToolCallAgent(ReActAgent):
                     logger.warning(f"{self.name} selected {len(self.tool_calls)} tools, but tool_choice is NONE")
                     return False
                 if response.content:
-                    self.add_message("assistant", response.content)
+                    await self.add_message("assistant", response.content)
                     return True
                 return False
-            self.add_message("assistant", response.content, tool_calls=self.tool_calls)
+            await self.add_message("assistant", response.content, tool_calls=self.tool_calls)
             if self.tool_choices == ToolChoice.REQUIRED and not self.tool_calls:
                 return True
             if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:
@@ -161,7 +161,7 @@ class ToolCallAgent(ReActAgent):
             logger.error(f"{self.name} failed to think: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            self.add_message("assistant", f"Error encountered while thinking: {e}")
+            await self.add_message("assistant", f"Error encountered while thinking: {e}")
             return False
 
     async def run(self, request: Optional[str] = None) -> str:
@@ -172,7 +172,7 @@ class ToolCallAgent(ReActAgent):
         self.state = AgentState.RUNNING
 
         if request is not None:
-            self.memory.add_message(Message(role=Role.USER, content=request))
+            await self.add_message("user", request)
 
         # Reset finish_reason termination flag
         self._finish_reason_terminated = False
@@ -189,8 +189,8 @@ class ToolCallAgent(ReActAgent):
                     logger.info(f"Agent {self.name} is running step {self.current_step}/{self.max_steps}")
 
                     step_result = await self.step()
-                    if self.is_stuck():
-                        self.handle_struck_state()
+                    if await self.is_stuck():
+                        await self.handle_stuck_state()
 
                     # Check if terminated by finish_reason
                     if hasattr(self, '_finish_reason_terminated') and self._finish_reason_terminated:
@@ -251,7 +251,7 @@ class ToolCallAgent(ReActAgent):
                 logger.error(f"Tool {tool_call.function.name} execution failed: {e}")
 
             # Always add a tool message for each tool call to satisfy OpenAI API requirements
-            self.add_message("tool", result, tool_call_id=tool_call.id, tool_name=tool_call.function.name)
+            await self.add_message("tool", result, tool_call_id=tool_call.id, tool_name=tool_call.function.name)
             results.append(result)
         return "\n\n".join(results)
 
@@ -332,7 +332,7 @@ class ToolCallAgent(ReActAgent):
             # Accept either "stop" (OpenAI) or "end_turn" (Anthropic) as valid termination signals
             return native_finish_reason in ["stop", "end_turn"]
         return False
-    
+
     def _invalidate_mcp_cache(self):
         """Properly invalidate and clean up MCP tools cache."""
         self.mcp_tools_cache = None
@@ -344,12 +344,12 @@ class ToolCallAgent(ReActAgent):
         self.tool_calls = []
         self.state = AgentState.IDLE
         self.current_step = 0
-        
+
         #cache cleanup
         self._invalidate_mcp_cache()
-        
+
         # Clean up lock if it exists
         if hasattr(self, '_cache_lock'):
             delattr(self, '_cache_lock')
-            
-        logger.debug(f"🧹 {self.name} fully cleared state and cache")    
+
+        logger.debug(f"🧹 {self.name} fully cleared state and cache")
