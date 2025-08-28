@@ -73,9 +73,9 @@ tavily_tool = MCPTool(
 For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
 
 ```python
-http_tool = MCPTool(
-    name="http_example_tool",
-    mcp_config={"url": "http://127.0.0.1:8765"}
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
 )
 ```
 
@@ -84,9 +84,9 @@ http_tool = MCPTool(
 For SSE-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Simply provide the server's URL.
 
 ```python
-sse_tool = MCPTool(
-    name="sse_example_tool",
-    mcp_config={"url": "http://127.0.0.1:8765/sse"}
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/sse"}
 )
 ```
 

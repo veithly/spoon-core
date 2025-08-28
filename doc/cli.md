@@ -2,14 +2,6 @@
 
 SCDF CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
-## 📦 Prerequisite: Start the MCP Server
-
-Before starting the CLI, make sure the MCP (Message Connectivity Protocol) server is running:
-
-```bash
-python -m spoon_ai.tools.mcp_tools_collection
-```
-
 ## 🚀 Start the CLI
 
 Once the MCP server is running, launch the CLI:
@@ -142,7 +134,7 @@ For MCP-enabled agents, additional configuration is needed (see examples below).
 | `npx` | Node.js packages | `"command": "npx", "args": ["-y", "package-name"]` |
 | `python` | Python scripts | `"script_path": "server.py", "args": ["--port", "8766"]` |
 | `sse` | HTTP streaming | `"url": "http://localhost:8765/sse"` |
-| `websocket` | Real-time | `"url": "ws://localhost:8765/ws"` |
+| `http` | HTTP | `"url": "http://localhost:8765"` |
 
 ### Configuration Commands
 
@@ -205,7 +197,7 @@ This command shows:
   ✓ Security key configured
   ✓ Configuration file present
   ✓ Agent is loaded and ready
-  
+
   Overall Health: Excellent (4/4 checks passed)
 ```
 
@@ -238,7 +230,7 @@ API_KEY updated
 > list-providers
 Available LLM providers:
 ✅ openai (gpt-4.1) - Healthy
-✅ anthropic (claude-sonnet-4-20250514) - Healthy  
+✅ anthropic (claude-sonnet-4-20250514) - Healthy
 ❌ gemini (gemini-2.5-pro) - Unhealthy
 Default provider: openai
 ```
@@ -331,7 +323,7 @@ Preparing to transfer 0.1 SPO to 0x123...
 |-------|----------|----------|
 | **Agent not found** | `Agent 'name' not found` | Use `list-agents` to check available agents, verify spelling |
 | **MCP connection failed** | `Failed to create transport` | Check API keys, verify MCP server is running |
-| **Tool not available** | `Tool 'name' not found` | Check `tool_sets` config, verify MCP server enabled |
+| **Tool not available** | `Tool 'name' not found` | Check `tools` config, verify MCP server enabled |
 | **Duplicate agents** | Same agent appears twice | Fixed in latest version, restart if needed |
 | **API key missing** | Authentication errors | Set environment variables: `TAVILY_API_KEY`, `OPENAI_API_KEY` |
 
@@ -404,17 +396,6 @@ Here's how to configure a custom search agent with MCP integration:
       "command": "npx",
       "args": ["-y", "tavily-mcp"],
       "env": { "TAVILY_API_KEY": "your-key" }
-    }
-  },
-  "tool_sets": {
-    "web_search": {
-      "type": "mcp_server",
-      "server": "tavily-mcp",
-      "enabled": true
-    },
-    "crypto_tools": {
-      "type": "builtin",
-      "enabled": true
     }
   }
 }
