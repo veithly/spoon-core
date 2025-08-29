@@ -1,5 +1,6 @@
 """Configuration manager for unified tool configuration."""
 
+import asyncio
 import json
 import logging
 import os
@@ -82,17 +83,33 @@ class ConfigManager:
 
         try:
             for tool_config in agent_config.tools:
-                try:
-                    tool = await self.tool_factory.create_tool(tool_config)
-                    if tool:  # Skip disabled tools
-                        tools.append(tool)
-                        logger.info(f"Created tool: {tool_config.name}")
-                except Exception as e:
-                    logger.error(f"Failed to create tool {tool_config.name}: {e}")
-                    # Continue with other tools instead of failing completely
-                    continue
+                tool_created = False
+                max_retries = 2 if tool_config.type == "mcp" else 1
+                
+                for attempt in range(max_retries):
+                    try:
+                        tool = await self.tool_factory.create_tool(tool_config)
+                        if tool:  # Skip disabled tools
+                            tools.append(tool)
+                            logger.info(f"Created tool: {tool_config.name}")
+                            tool_created = True
+                            break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Failed to create tool {tool_config.name} (attempt {attempt + 1}/{max_retries}): {e}")
+                            logger.info(f"Retrying tool {tool_config.name}...")
+                            await asyncio.sleep(1)  # Wait 1 second before retry
+                        else:
+                            logger.error(f"Failed to create tool {tool_config.name} after {max_retries} attempts: {e}")
+                            # Continue with other tools instead of failing completely
+                            continue
+                
+                if not tool_created:
+                    logger.warning(f"Skipping tool {tool_config.name} due to creation failure")
 
             logger.info(f"Loaded {len(tools)} tools for agent {agent_name}")
+            if len(tools) == 0:
+                logger.warning(f"No tools were successfully loaded for agent {agent_name}")
             return tools
 
         except Exception as e:

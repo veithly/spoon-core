@@ -303,6 +303,14 @@ class SpoonAICLI:
             aliases=["sysinfo", "status", "info"]
         ))
 
+        # Tool Status Command
+        self.add_command(SpoonCommand(
+            name="tool-status",
+            description="Check tool loading status and diagnose issues",
+            handler=self._handle_tool_status,
+            aliases=["tools", "tool-check"]
+        ))
+
         # Configuration Migration Commands
         self.add_command(SpoonCommand(
             name="migrate-config",
@@ -336,7 +344,9 @@ class SpoonAICLI:
         if len(input_list) <= 1:
             # show all available commands
             logger.info("Available commands:")
-            for command in self.commands.values():
+            # Use set to deduplicate commands (since aliases point to same object)
+            unique_commands = set(self.commands.values())
+            for command in sorted(unique_commands, key=lambda x: x.name):
                 logger.info(f"  {command.name}: {command.description}")
         else:
             # show help for a specific command
@@ -1665,7 +1675,14 @@ class SpoonAICLI:
             print_formatted_text(f"  Agent type: {type(self.current_agent).__name__}")
             if hasattr(self.current_agent, 'avaliable_tools'):
                 tool_count = len(self.current_agent.avaliable_tools.tools)
-                print_formatted_text(f"  Available tools: {tool_count}")
+                if tool_count > 0:
+                    print_formatted_text(PromptHTML(f"  <ansigreen>Available tools: {tool_count}</ansigreen>"))
+                    # Show tool names for debugging
+                    tool_names = [tool.name for tool in self.current_agent.avaliable_tools.tools]
+                    print_formatted_text(f"    Tools: {', '.join(tool_names)}")
+                else:
+                    print_formatted_text(PromptHTML("  <ansired>Available tools: 0</ansired>"))
+                    print_formatted_text("    ⚠️  No tools loaded - check configuration and network connectivity")
             if hasattr(self.current_agent, 'llm') and self.current_agent.llm:
                 llm_info = f"{getattr(self.current_agent.llm, 'llm_provider', 'unknown')}"
                 model_name = getattr(self.current_agent.llm, 'model_name', 'unknown')
@@ -1993,3 +2010,54 @@ class SpoonAICLI:
         print_formatted_text("  migrate-config                           # Interactive migration")
         print_formatted_text("  migrate-config -f my_config.json         # Migrate specific file")
         print_formatted_text("  migrate-config --dry-run                 # Preview migration")
+
+    async def _handle_tool_status(self, input_list: List[str]):
+        """Check tool loading status and diagnose issues"""
+        print("🔧 Tool Status Check")
+        print("=" * 50)
+        
+        if not self.current_agent:
+            print("❌ No agent loaded")
+            print("  Please load an agent first with: load-agent <agent_name>")
+            return
+        
+        print(f"✓ Agent: {self.current_agent.name}")
+        print(f"  Agent type: {type(self.current_agent).__name__}")
+        
+        # Check tools in agent
+        if hasattr(self.current_agent, 'avaliable_tools'):
+            tool_count = len(self.current_agent.avaliable_tools.tools)
+            print(f"✓ Tools loaded: {tool_count}")
+            
+            if tool_count > 0:
+                print("  Tool details:")
+                for i, tool in enumerate(self.current_agent.avaliable_tools.tools, 1):
+                    print(f"    {i}. {tool.name}")
+                    print(f"       Description: {tool.description}")
+                    if hasattr(tool, 'mcp_transport'):
+                        print(f"       Type: MCP tool")
+                    else:
+                        print(f"       Type: Built-in tool")
+            else:
+                print("❌ No tools loaded")
+                print("  Possible causes:")
+                print("    • MCP server connection timeout")
+                print("    • Network connectivity issues")
+                print("    • Configuration errors")
+                print("    • Missing dependencies")
+                
+                # Try to reload tools
+                print("  Attempting to reload tools...")
+                try:
+                    tools = await self.config_manager.load_agent_tools(self.current_agent.name)
+                    if tools:
+                        self.current_agent.avaliable_tools.add_tools(*tools)
+                        print(f"✓ Successfully reloaded {len(tools)} tools")
+                    else:
+                        print("❌ Still no tools after reload")
+                except Exception as e:
+                    print(f"❌ Failed to reload tools: {e}")
+        else:
+            print("❌ Agent doesn't have tool manager")
+        
+        print("=" * 50)
