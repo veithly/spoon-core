@@ -119,22 +119,70 @@ Custom agents can be configured in `spoon-core/config.json`. The basic structure
         "max_steps": 10,
         "tool_choice": "auto"
       },
-      "tools": ["crypto_tools"]
+      "tools": [
+        { "name": "crypto_tools", "type": "builtin", "enabled": true }
+      ]
     }
   }
 }
 ```
 
-For MCP-enabled agents, additional configuration is needed (see examples below).
+For MCP-enabled agents, each tool must be an object with `type: "mcp"` and an `mcp_server` section that specifies how to connect to the MCP server (stdio or URL). Example (DeepWiki via SSE):
+
+```json
+{
+  "agents": {
+    "deepwiki_agent": {
+      "class": "SpoonReactMCP",
+      "description": "DeepWiki agent for GitHub repository documentation",
+      "aliases": ["deepwiki", "docs"],
+      "tools": [
+        {
+          "name": "read_wiki_structure",
+          "type": "mcp",
+          "description": "Get documentation structure for GitHub repos",
+          "mcp_server": {
+            "url": "https://mcp.deepwiki.com/mcp",
+            "transport": "http",
+            "timeout": 30,
+            "headers": {
+              "User-Agent": "SpoonOS-MCP/1.0",
+              "Accept": "application/json, text/event-stream"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Example: Using DeepWiki Agent
+
+After configuring the DeepWiki agent, you can use it to analyze GitHub repositories:
+
+```bash
+# Load the DeepWiki agent
+> load-agent deepwiki_agent
+
+# Ask about XSpoonAi/spoon-core repository
+> Can you analyze the XSpoonAi/spoon-core repository and tell me what this project does?
+
+# Ask about React repository
+> What are the main documentation topics available for facebook/react?
+```
 
 ### MCP Server Types
 
-| Transport | Use Case | Configuration Example |
-|-----------|----------|----------------------|
+SpoonOS supports stdio and URL-based (SSE/WebSocket) MCP servers.
+
+| Method | Use Case | Configuration Example |
+|--------|----------|----------------------|
 | `npx` | Node.js packages | `"command": "npx", "args": ["-y", "package-name"]` |
-| `python` | Python scripts | `"script_path": "server.py", "args": ["--port", "8766"]` |
-| `sse` | HTTP streaming | `"url": "http://localhost:8765/sse"` |
-| `http` | HTTP | `"url": "http://localhost:8765"` |
+| `python` | Python scripts | `"command": "python", "args": ["server.py"]` |
+| `uvx` | uvx-installed CLIs | `"command": "uvx", "args": ["package-or-entrypoint"]` |
+| `http` | HTTP/HTTPS | `"url": "https://example.com/mcp", "transport": "http"` |
+| `sse` | HTTP/HTTPS SSE | `"url": "https://example.com/mcp", "transport": "sse"` |
 
 ### Configuration Commands
 
@@ -376,7 +424,7 @@ python main.py
 
 ### Example: Custom Search Agent Configuration
 
-Here's how to configure a custom search agent with MCP integration:
+Here's how to configure a custom search agent with MCP integration (stdio-based):
 
 ```json
 {
@@ -386,16 +434,18 @@ Here's how to configure a custom search agent with MCP integration:
       "class": "SpoonReactMCP",
       "aliases": ["search", "web"],
       "description": "Custom search agent with web capabilities",
-      "mcp_servers": ["tavily-mcp"],
-      "tools": ["web_search", "crypto_tools"]
-    }
-  },
-  "mcp_servers": {
-    "tavily-mcp": {
-      "transport": "npx",
-      "command": "npx",
-      "args": ["-y", "tavily-mcp"],
-      "env": { "TAVILY_API_KEY": "your-key" }
+      "tools": [
+        {
+          "name": "tavily_search",
+          "type": "mcp",
+          "mcp_server": {
+            "command": "npx",
+            "args": ["-y", "tavily-mcp"],
+            "env": { "TAVILY_API_KEY": "your-key" }
+          }
+        },
+        { "name": "crypto_tools", "type": "builtin" }
+      ]
     }
   }
 }
