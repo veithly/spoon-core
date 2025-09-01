@@ -58,8 +58,13 @@ class MCPTool(BaseTool, MCPClientMixin):
         self._parameters_loaded = False
         self._parameters_loading = False
         self._last_health_check = 0
+        # Support legacy/alias keys from config
         self._health_check_interval = mcp_config.get('health_check_interval', 300)
-        self._connection_timeout = mcp_config.get('connection_timeout', 30)
+        # Prefer explicit connection_timeout, fall back to generic timeout
+        self._connection_timeout = mcp_config.get('connection_timeout', mcp_config.get('timeout', 30))
+        # Also apply per-transport override if present
+        if isinstance(self._connection_timeout, (int, float)) and self._connection_timeout <= 0:
+            self._connection_timeout = 30
         self._max_retries = mcp_config.get('max_retries', 3)
 
         logger.info(f"Initialized MCP tool '{self.name}' with deferred parameter loading")
@@ -228,7 +233,8 @@ class MCPTool(BaseTool, MCPClientMixin):
             if not await self._check_mcp_health():
                 raise ConnectionError(f"MCP server for '{self.name}' is not healthy")
 
-            final_args = kwargs
+            # Remove tool_name from kwargs if it exists to avoid duplicate parameter
+            final_args = {k: v for k, v in kwargs.items() if k != 'tool_name'}
 
             retry_count = 0
             last_exception = None
@@ -277,7 +283,7 @@ class MCPTool(BaseTool, MCPClientMixin):
 
         try:
             async with self.get_session() as session:
-                tools = await asyncio.wait_for(session.list_tools(), timeout=10)
+                tools = await asyncio.wait_for(session.list_tools(), timeout=min(10, max(5, int(self._connection_timeout))))
                 self._last_health_check = current_time
                 logger.debug(f"MCP health check passed for '{self.name}' - {len(tools) if tools else 0} tools available")
                 return True

@@ -79,7 +79,18 @@ deepwiki_tool = MCPTool(
 )
 ```
 
-**3. SSE Transport**
+**HTTP Transport**
+
+For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
+
+```python
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
+)
+```
+
+**SSE Transport**
 
 For SSE-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Simply provide the server's URL.
 

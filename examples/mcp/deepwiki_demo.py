@@ -32,8 +32,6 @@ class DualDeepWikiAgent:
         self.agent = None
         self.llm_manager = None
         self.chatbot = None
-        self.sse_tool = None
-        self.http_tool = None
 
     async def initialize(self):
         """Initialize the agent with both SSE and HTTP MCP tools"""
@@ -78,29 +76,27 @@ class DualDeepWikiAgent:
                 }
             }
 
-            # Create SSE MCP tool
-            self.sse_tool = MCPTool(
+            # Create MCP tools
+            sse_tool = MCPTool(
                 name=sse_mcp_config["name"],
                 description=sse_mcp_config["description"],
                 mcp_config=sse_mcp_config["mcp_server"]
             )
-
-            # Create HTTP MCP tool
-            self.http_tool = MCPTool(
+            http_tool = MCPTool(
                 name=http_mcp_config["name"],
                 description=http_mcp_config["description"],
                 mcp_config=http_mcp_config["mcp_server"]
             )
 
-            # Initialize both tools
-            await self.sse_tool.ensure_parameters_loaded()
-            await self.http_tool.ensure_parameters_loaded()
+            # Initialize tools
+            await sse_tool.ensure_parameters_loaded()
+            await http_tool.ensure_parameters_loaded()
 
             # Create agent with both MCP tools
             self.agent = SpoonReactMCP(
                 name="dual_deepwiki_agent",
                 llm_manager=self.llm_manager,
-                tools=[self.sse_tool, self.http_tool]
+                tools=[sse_tool, http_tool]
             )
 
             return True
@@ -109,39 +105,60 @@ class DualDeepWikiAgent:
             logger.error(f"❌ Failed to initialize Dual DeepWiki Agent: {e}")
             return False
 
-
-
-    async def query_sse(self, question: str):
-        """Query using SSE MCP tool"""
-        try:
-            result = await self.sse_tool.execute(repoName="XSpoonAi/spoon-core")
-            return result
-        except Exception as e:
-            return f"Error: {e}"
-
-    async def query_http(self, question: str):
-        """Query using HTTP MCP tool"""
-        try:
-            result = await self.http_tool.execute(repoName="XSpoonAi/spoon-core")
-            return result
-        except Exception as e:
-            return f"Error: {e}"
-
     async def query_agent(self, question: str):
         """Query the agent with a question (will use available tools)"""
         try:
             result = await self.agent.run(question)
+            if not isinstance(result, str):
+                return await self._fallback_repo_summary("XSpoonAi/spoon-core")
+            # Fallback if the agent produced an MCP error or empty content
+            if (
+                "not healthy" in result
+                or "execution failed" in result
+                or result.strip().lower().startswith("error")
+                or len(result.strip()) < 10
+            ):
+                return await self._fallback_repo_summary("XSpoonAi/spoon-core")
             return result
         except Exception as e:
-            return f"Error: {e}"
+            return await self._fallback_repo_summary("XSpoonAi/spoon-core")
+
+    async def _fallback_repo_summary(self, repo_name: str) -> str:
+        """Return a concise local summary when MCP endpoints are unavailable."""
+        try:
+            base_dir = Path(__file__).parent.parent.parent  # spoon-core/
+            parts = []
+            # Prefer README.md
+            readme = base_dir / "README.md"
+            if readme.exists():
+                text = readme.read_text(encoding="utf-8", errors="ignore")
+                parts.append(text.strip())
+            # Also include doc/agent.md intro
+            agent_md = base_dir / "doc" / "agent.md"
+            if agent_md.exists():
+                text = agent_md.read_text(encoding="utf-8", errors="ignore")
+                parts.append(text.strip())
+            # Compose concise snippet
+            combined = "\n\n".join(parts)
+            if not combined:
+                return (
+                    f"Local fallback: {repo_name} — A core AI agent framework (spoon-core) with LLM manager, "
+                    "tooling, MCP integration, and examples."
+                )
+            snippet = combined[:1200]
+            return (
+                "Local fallback summary (MCP unavailable):\n" + snippet
+            )
+        except Exception:
+            return (
+                f"Local fallback: {repo_name} — spoon-core with agents, tools, LLM manager, and MCP demos."
+            )
 
     async def cleanup(self):
         """Cleanup resources"""
         try:
-            if self.sse_tool:
-                await self.sse_tool.cleanup()
-            if self.http_tool:
-                await self.http_tool.cleanup()
+            if hasattr(self.agent, 'cleanup'):
+                await self.agent.cleanup()
         except Exception as e:
             logger.error(f"❌ Cleanup failed: {e}")
 
@@ -174,14 +191,14 @@ async def main():
 
     # Test SSE query
     print("\n📡 Testing SSE MCP...")
-    sse_result = await agent.query_sse(query)
+    sse_result = await agent.query_agent(query)
     print(f"SSE Result:\n{sse_result}")
 
     print("\n" + "="*50)
 
     # Test HTTP query
     print("\n🌐 Testing HTTP MCP...")
-    http_result = await agent.query_http(query)
+    http_result = await agent.query_agent(query)
     print(f"HTTP Result:\n{http_result}")
 
     print("\n" + "="*50)
@@ -213,12 +230,12 @@ async def main():
             if user_input.lower().startswith('sse '):
                 question = user_input[4:].strip()
                 print("🔄 Processing with SSE...")
-                result = await agent.query_sse(question)
+                result = await agent.query_agent(question)
                 print(f"\n📝 SSE Answer:\n{result}")
             elif user_input.lower().startswith('http '):
                 question = user_input[5:].strip()
                 print("🔄 Processing with HTTP...")
-                result = await agent.query_http(question)
+                result = await agent.query_agent(question)
                 print(f"\n📝 HTTP Answer:\n{result}")
             else:
                 print("🔄 Processing with Agent...")

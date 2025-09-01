@@ -174,7 +174,11 @@ class BaseAgent(BaseModel, ABC):
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState, timeout: Optional[float] = None):
-        """Thread-safe state context manager with deadlock prevention"""
+        """Thread-safe state context manager with deadlock prevention.
+        Acquires the state lock only to perform quick transitions, not for the
+        duration of the work inside the context, avoiding long-held locks and
+        false timeouts during network calls.
+        """
         if not isinstance(new_state, AgentState):
             raise ValueError(f"Invalid state: {new_state}")
 
@@ -186,67 +190,67 @@ class BaseAgent(BaseModel, ABC):
             timeout = max(timeout, 10.0)
         operation_id = str(uuid.uuid4())
 
+        # Capture old_state before mutation (will validate under lock)
+        old_state = self.state
+
         try:
             self._active_operations.add(operation_id)
 
-            # Acquire state lock with timeout to prevent deadlocks
+            # Set new state under lock with timeout using context manager approach
             try:
-                await asyncio.wait_for(self._state_lock.acquire(), timeout)
+                async with asyncio.timeout(timeout):
+                    async with self._state_lock:
+                        old_state = self.state
+                        transition = {
+                            'from': old_state,
+                            'to': new_state,
+                            'timestamp': time.time(),
+                            'operation_id': operation_id
+                        }
+                        self.state = new_state
+                        self._record_state_transition(transition)
+                        logger.debug(f"Agent {self.name}: State {old_state} -> {new_state}")
             except asyncio.TimeoutError:
-                logger.error(f"State lock acquisition timed out after {timeout}s for agent {self.name}")
-                raise RuntimeError(f"State transition timed out - potential deadlock detected")
+                logger.error(f"State transition acquire timed out after {timeout}s for agent {self.name}")
+                raise RuntimeError("State transition timed out - potential deadlock detected")
 
-            old_state = self.state
-
-            # Record state transition
-            transition = {
-                'from': old_state,
-                'to': new_state,
-                'timestamp': time.time(),
-                'operation_id': operation_id
-            }
-
-            # Update state atomically
-            self.state = new_state
-            self._record_state_transition(transition)
-
-            logger.debug(f"Agent {self.name}: State {old_state} -> {new_state}")
-
+            # Execute the wrapped block without holding the state lock
             try:
                 yield
             except Exception as e:
                 logger.error(f"Exception in state context for agent {self.name}: {e}")
-                # Only set ERROR state if we're not already in ERROR
-                if self.state != AgentState.ERROR:
-                    self.state = AgentState.ERROR
-                    self._record_state_transition({
-                        'from': new_state,
-                        'to': AgentState.ERROR,
-                        'timestamp': time.time(),
-                        'operation_id': operation_id,
-                        'error': str(e)
-                    })
-                raise e
-            finally:
-                # Restore state only if it hasn't been changed by another operation
-                if self.state == new_state:
-                    self.state = old_state
-                    self._record_state_transition({
-                        'from': new_state,
-                        'to': old_state,
-                        'timestamp': time.time(),
-                        'operation_id': operation_id,
-                        'restore': True
-                    })
-                # Always release the lock
+                # Attempt to set ERROR state under lock with timeout protection
                 try:
-                    self._state_lock.release()
-                except Exception:
-                    pass
-
-        except asyncio.TimeoutError:
-            logger.error(f"State transition timed out after {timeout}s for agent {self.name}")
-            raise RuntimeError(f"State transition timed out - potential deadlock detected")
+                    async with asyncio.timeout(timeout):
+                        async with self._state_lock:
+                            if self.state != AgentState.ERROR:
+                                self.state = AgentState.ERROR
+                                self._record_state_transition({
+                                    'from': new_state,
+                                    'to': AgentState.ERROR,
+                                    'timestamp': time.time(),
+                                    'operation_id': operation_id,
+                                    'error': str(e)
+                                })
+                except asyncio.TimeoutError:
+                    logger.error(f"Failed to set ERROR state due to timeout for agent {self.name}")
+                raise
+            finally:
+                # Restore previous state under lock unless changed elsewhere
+                try:
+                    async with asyncio.timeout(timeout):
+                        async with self._state_lock:
+                            if self.state == new_state:
+                                self.state = old_state
+                                self._record_state_transition({
+                                    'from': new_state,
+                                    'to': old_state,
+                                    'timestamp': time.time(),
+                                    'operation_id': operation_id,
+                                    'restore': True
+                                })
+                except asyncio.TimeoutError:
+                    logger.error(f"State restoration timed out after {timeout}s for agent {self.name}")
         finally:
             self._active_operations.discard(operation_id)
 
