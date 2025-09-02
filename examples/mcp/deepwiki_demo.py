@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Dual DeepWiki MCP Demo
+MCP Tool Call Demo
 
-This demo showcases both SSE and StreamableHttp MCP connections to DeepWiki.
-It demonstrates how to use the same MCP server with different transport methods.
+This demo showcases agent successfully calling MCP tools.
+It demonstrates how the agent uses MCP tools to process queries.
 """
 
 import asyncio
@@ -25,8 +25,8 @@ import logging
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-class DualDeepWikiAgent:
-    """Agent for testing both SSE and StreamableHttp DeepWiki MCP connections"""
+class MCPToolDemoAgent:
+    """Agent for demonstrating MCP tool calls"""
 
     def __init__(self):
         self.agent = None
@@ -34,7 +34,7 @@ class DualDeepWikiAgent:
         self.chatbot = None
 
     async def initialize(self):
-        """Initialize the agent with both SSE and HTTP MCP tools"""
+        """Initialize the agent with MCP tools"""
         try:
             # Initialize LLM Manager
             self.llm_manager = LLMManager()
@@ -76,7 +76,7 @@ class DualDeepWikiAgent:
                 }
             }
 
-            # Create MCP tools
+            # Create MCP tools (without pre-loading parameters)
             sse_tool = MCPTool(
                 name=sse_mcp_config["name"],
                 description=sse_mcp_config["description"],
@@ -88,13 +88,9 @@ class DualDeepWikiAgent:
                 mcp_config=http_mcp_config["mcp_server"]
             )
 
-            # Initialize tools
-            await sse_tool.ensure_parameters_loaded()
-            await http_tool.ensure_parameters_loaded()
-
-            # Create agent with both MCP tools
+            # Create agent with both MCP tools (tools will be loaded when needed)
             self.agent = SpoonReactMCP(
-                name="dual_deepwiki_agent",
+                name="mcp_demo_agent",
                 llm_manager=self.llm_manager,
                 tools=[sse_tool, http_tool]
             )
@@ -102,57 +98,20 @@ class DualDeepWikiAgent:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Dual DeepWiki Agent: {e}")
+            logger.error(f"❌ Failed to initialize MCP Tool Demo Agent: {e}")
             return False
 
     async def query_agent(self, question: str):
-        """Query the agent with a question (will use available tools)"""
+        """Query the agent with a question (agent will call MCP tools as needed)"""
         try:
             result = await self.agent.run(question)
             if not isinstance(result, str):
-                return await self._fallback_repo_summary("XSpoonAi/spoon-core")
-            # Fallback if the agent produced an MCP error or empty content
-            if (
-                "not healthy" in result
-                or "execution failed" in result
-                or result.strip().lower().startswith("error")
-                or len(result.strip()) < 10
-            ):
-                return await self._fallback_repo_summary("XSpoonAi/spoon-core")
+                return f"❌ Agent returned non-string result: {type(result)}"
             return result
         except Exception as e:
-            return await self._fallback_repo_summary("XSpoonAi/spoon-core")
+            return f"❌ Agent execution failed: {str(e)}"
 
-    async def _fallback_repo_summary(self, repo_name: str) -> str:
-        """Return a concise local summary when MCP endpoints are unavailable."""
-        try:
-            base_dir = Path(__file__).parent.parent.parent  # spoon-core/
-            parts = []
-            # Prefer README.md
-            readme = base_dir / "README.md"
-            if readme.exists():
-                text = readme.read_text(encoding="utf-8", errors="ignore")
-                parts.append(text.strip())
-            # Also include doc/agent.md intro
-            agent_md = base_dir / "doc" / "agent.md"
-            if agent_md.exists():
-                text = agent_md.read_text(encoding="utf-8", errors="ignore")
-                parts.append(text.strip())
-            # Compose concise snippet
-            combined = "\n\n".join(parts)
-            if not combined:
-                return (
-                    f"Local fallback: {repo_name} — A core AI agent framework (spoon-core) with LLM manager, "
-                    "tooling, MCP integration, and examples."
-                )
-            snippet = combined[:1200]
-            return (
-                "Local fallback summary (MCP unavailable):\n" + snippet
-            )
-        except Exception:
-            return (
-                f"Local fallback: {repo_name} — spoon-core with agents, tools, LLM manager, and MCP demos."
-            )
+
 
     async def cleanup(self):
         """Cleanup resources"""
@@ -166,60 +125,48 @@ class DualDeepWikiAgent:
 
 async def main():
     """Main demo function"""
-    print("🚀 Dual DeepWiki MCP Demo")
+    print("🚀 MCP Tool Call Demo")
     print("=" * 50)
-    print("This demo showcases both SSE and StreamableHttp MCP connections")
-    print("to the same DeepWiki server with the same query.")
+    print("This demo showcases agent successfully calling MCP tools")
+    print("to process queries and demonstrate tool integration.")
     print()
 
-    # Initialize agent
-    print("🤖 Initializing Dual DeepWiki Agent...")
-    agent = DualDeepWikiAgent()
+    # Create and initialize agent directly
+    print("🤖 Creating MCP Tool Demo Agent...")
+    agent = MCPToolDemoAgent()
 
+    # Initialize agent
     if not await agent.initialize():
         print("❌ Agent initialization failed. Stopping demo.")
         return
 
-    # Demo queries
-    print("\n💬 Demo Queries")
-    print("Testing the same query with different transport methods...")
+    # Direct agent call demo
+    print("\n🔧 Direct Agent Call Demo")
+    print("Agent will call MCP tools automatically when processing queries...")
 
-    query = "What is XSpoonAi/spoon-core project about?"
+    query = "What is the XSpoonAi/spoon-core project?"
 
     print(f"\n🔍 Query: {query}")
-    print("-" * 50)
+    print("-" * 60)
 
-    # Test SSE query
-    print("\n📡 Testing SSE MCP...")
-    sse_result = await agent.query_agent(query)
-    print(f"SSE Result:\n{sse_result}")
-
-    print("\n" + "="*50)
-
-    # Test HTTP query
-    print("\n🌐 Testing HTTP MCP...")
-    http_result = await agent.query_agent(query)
-    print(f"HTTP Result:\n{http_result}")
-
-    print("\n" + "="*50)
-
-    # Test agent query (will use available tools)
-    print("\n🤖 Testing Agent with both tools...")
+    # Direct agent call
+    print("\n🤖 Agent processing query (MCP tools will be called if needed)...")
     agent_result = await agent.query_agent(query)
     print(f"Agent Result:\n{agent_result}")
 
+    print("\n" + "="*60)
+
     # Interactive demo
-    print("\n💬 Interactive Demo")
-    print("Ask questions about GitHub repositories (type 'quit' to exit):")
-    print("Commands:")
-    print("  'sse <question>' - Use SSE transport")
-    print("  'http <question>' - Use HTTP transport")
-    print("  '<question>' - Use agent (both tools)")
+    print("\n💬 Interactive Agent Demo")
+    print("Ask questions and agent will call MCP tools automatically (type 'quit' to exit):")
+    print("Examples:")
+    print("  'What is XSpoonAi/spoon-core?'")
+    print("  'Analyze this GitHub repository'")
     print("  'quit' - Exit")
 
     while True:
         try:
-            user_input = input("\n🤔 Your input: ").strip()
+            user_input = input("\n🤔 Ask a question: ").strip()
 
             if user_input.lower() in ['quit', 'exit', 'q']:
                 break
@@ -227,20 +174,9 @@ async def main():
             if not user_input:
                 continue
 
-            if user_input.lower().startswith('sse '):
-                question = user_input[4:].strip()
-                print("🔄 Processing with SSE...")
-                result = await agent.query_agent(question)
-                print(f"\n📝 SSE Answer:\n{result}")
-            elif user_input.lower().startswith('http '):
-                question = user_input[5:].strip()
-                print("🔄 Processing with HTTP...")
-                result = await agent.query_agent(question)
-                print(f"\n📝 HTTP Answer:\n{result}")
-            else:
-                print("🔄 Processing with Agent...")
-                result = await agent.query_agent(user_input)
-                print(f"\n📝 Agent Answer:\n{result}")
+            print("🔄 Agent processing (will call MCP tools if needed)...")
+            result = await agent.query_agent(user_input)
+            print(f"\n📝 Agent Response:\n{result}")
 
         except KeyboardInterrupt:
             break

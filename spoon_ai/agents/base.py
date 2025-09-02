@@ -81,9 +81,10 @@ class BaseAgent(BaseModel, ABC):
     output_queue: ThreadSafeOutputQueue = Field(default_factory=ThreadSafeOutputQueue, description="Thread-safe output queue")
     task_done: asyncio.Event = Field(default_factory=asyncio.Event, description="The signal of agent run done")
 
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = {
+        "arbitrary_types_allowed": True,
+        "extra": "allow"
+    }
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

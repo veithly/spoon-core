@@ -9,8 +9,9 @@ class BaseTool(ABC, BaseModel):
     description: str = Field(description="A description of the tool")
     parameters: dict = Field(description="The parameters of the tool")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
 
     async def __call__(self, *args, **kwargs) -> Any:

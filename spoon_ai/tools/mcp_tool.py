@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class MCPTool(BaseTool, MCPClientMixin):
     mcp_config: Dict[str, Any] = Field(default_factory=dict, description="MCP transport and tool configuration")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
     def __init__(self,
                  name: str = "mcp_tool",
