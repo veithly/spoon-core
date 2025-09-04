@@ -174,7 +174,7 @@ class MCPServerManager:
         """Create appropriate transport for the MCP server (stdio, SSE, WebSocket, HTTP)."""
         import shutil
         import platform
-        from fastmcp.client.transports import StreamableHttpTransport, SSETransport, WSTransport
+        from fastmcp.client.transports import StreamableHttpTransport, SSETransport, WSTransport, StdioTransport
 
         # URL-based transports
         if config.url:
