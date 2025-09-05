@@ -52,7 +52,9 @@ In the `initialize` method, we set up and load all necessary tools.
 
 `MCPTool` is designed to be **transport-agnostic**. You can configure it to connect to any MCP server using **stdio**, **HTTP (SSE)**, or **WebSocket**.
 
-**1. Stdio-based Transport (npx, python, etc.)**
+**1. Stdio-based Transport (Recommended)**
+
+**Stdio tools** are the recommended approach for most MCP integrations. They run as subprocesses and communicate via stdin/stdout, with automatic lifecycle management by SpoonOS.
 
 Use the `command` field to execute local command-line tools. The tool's `name` should directly match the MCP tool's name.
 
@@ -63,7 +65,8 @@ tavily_tool = MCPTool(
     mcp_config={
         "command": "npx",
         "args": ["--yes", "tavily-mcp"],
-        "env": {"TAVILY_API_KEY": os.getenv("TAVILY_API_KEY")}
+        "env": {"TAVILY_API_KEY": os.getenv("TAVILY_API_KEY")},
+        "transport": "stdio"
     }
 )
 ```
@@ -184,8 +187,122 @@ if __name__ == "__main__":
 
 ---
 
-## 4. Next Steps
+## 4. MCP Tool Best Practices
 
-- **Customize**: Modify the `system_prompt` or add new tools to the `ToolManager`.
-- **Explore**: Investigate other built-in toolkits or connect to different MCP services.
-- **Advanced Configuration**: For more complex setups, refer to the [Configuration Guide](./configuration.md).
+### Choosing the Right Transport
+
+| Transport | Use Case | Pros | Cons |
+|-----------|----------|------|------|
+| **Stdio** | Most MCP tools (Tavily, GitHub, Brave) | Auto-managed, reliable, up-to-date | Limited to command-line tools |
+| **SSE** | Custom/in-development tools | Flexible, supports custom servers | Manual server management |
+| **WebSocket** | Real-time bidirectional communication | Low latency, persistent connection | Complex setup, manual management |
+
+### Configuration Best Practices
+
+1. **Prefer Stdio for standard tools**: Use stdio transport for well-established MCP tools
+2. **Environment variable management**: Store API keys in environment variables, not in code
+3. **Error handling**: Set appropriate timeouts and retry attempts
+4. **Tool naming**: Use descriptive names that match the tool's functionality
+5. **Resource management**: Limit concurrent tool usage to avoid rate limits
+
+### Example: Production-Ready Tool Configuration
+
+```python
+async def initialize(self):
+    """Initialize agent with production-ready tool configuration"""
+
+    # Validate required environment variables
+    required_env_vars = ["TAVILY_API_KEY", "GITHUB_TOKEN", "OKX_API_KEY"]
+    for var in required_env_vars:
+        if not os.getenv(var):
+            raise ValueError(f"Required environment variable {var} is not set")
+
+    # Configure tools with proper error handling
+    tools = []
+
+    # Stdio-based tools (recommended)
+    try:
+        tavily_tool = MCPTool(
+            name="tavily-search",
+            description="Web search using Tavily API",
+            mcp_config={
+                "command": "npx",
+                "args": ["-y", "tavily-mcp"],
+                "env": {"TAVILY_API_KEY": os.getenv("TAVILY_API_KEY")},
+                "transport": "stdio",
+                "timeout": 30,
+                "retry_attempts": 3
+            }
+        )
+        tools.append(tavily_tool)
+    except Exception as e:
+        logging.warning(f"Failed to initialize Tavily tool: {e}")
+
+    # Built-in tools
+    try:
+        crypto_tool = CryptoPowerDataCEXTool()
+        tools.append(crypto_tool)
+    except Exception as e:
+        logging.warning(f"Failed to initialize crypto tool: {e}")
+
+    self.avaliable_tools = ToolManager(tools)
+    logging.info(f"Initialized {len(tools)} tools successfully")
+```
+
+### Troubleshooting Common Issues
+
+#### Stdio Tool Issues
+
+**Problem**: Tool command not found
+```bash
+Error: Command 'npx' not found
+```
+**Solution**: Ensure Node.js and npm are installed and in PATH
+
+**Problem**: Environment variables not loaded
+```bash
+Error: TAVILY_API_KEY is required
+```
+**Solution**: Check environment variable configuration in mcp_config
+
+#### SSE Tool Issues
+
+**Problem**: Connection refused
+```bash
+Error: Connection refused to http://127.0.0.1:8765/sse
+```
+**Solution**: Ensure the SSE server is running and accessible
+
+**Problem**: Timeout errors
+```bash
+Error: Request timeout after 30 seconds
+```
+**Solution**: Increase timeout in mcp_config or check server performance
+
+#### General Debugging
+
+1. **Enable debug logging**:
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+2. **Check tool availability**:
+```python
+print(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")
+```
+
+3. **Test tool connectivity**:
+```python
+# Test individual tool
+result = await tool.execute("test_function", {})
+```
+
+---
+
+## 5. Next Steps
+
+- **Customize**: Modify the `system_prompt` or add new tools to the `ToolManager`
+- **Explore**: Investigate other built-in toolkits or connect to different MCP services
+- **Advanced Configuration**: For more complex setups, refer to the [Configuration Guide](./configuration.md)
+- **MCP Protocol**: Learn more at [MCP Protocol Documentation](https://modelcontextprotocol.io/)
