@@ -68,25 +68,36 @@ tavily_tool = MCPTool(
 )
 ```
 
-**2. HTTP Transport (via SSE)**
+**2. HTTP Transport**
 
-For HTTP-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Simply provide the server's URL.
+For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
 
 ```python
-http_tool = MCPTool(
-    name="http_example_tool",
-    mcp_config={"url": "http://127.0.0.1:8765/sse"}
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
 )
 ```
 
-**3. WebSocket Transport**
+**HTTP Transport**
 
-For WebSocket-based servers, provide the `ws` or `wss` URL.
+For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
 
 ```python
-ws_tool = MCPTool(
-    name="websocket_example_tool",
-    mcp_config={"url": "ws://127.0.0.1:8766"}
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
+)
+```
+
+**SSE Transport**
+
+For SSE-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Simply provide the server's URL.
+
+```python
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/sse"}
 )
 ```
 
@@ -152,7 +163,7 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
                 "env": {"TAVILY_API_KEY": tavily_key}
             }
         )
-        
+
         crypto_tool = CryptoPowerDataCEXTool()
         self.avaliable_tools = ToolManager([tavily_tool, crypto_tool])
         logging.info(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")
