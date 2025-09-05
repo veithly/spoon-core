@@ -55,7 +55,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - pip package manager (or uv as a faster alternative)
 
 ```bash

@@ -1,0 +1,107 @@
+name: Version Bump and Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+      custom_version:
+        description: 'Custom version (optional, overrides version_type)'
+        required: false
+        type: string
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install bump2version
+
+    - name: Configure Git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+
+    - name: Bump version
+      id: bump
+      run: |
+        if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+          # Use custom version
+          NEW_VERSION="${{ github.event.inputs.custom_version }}"
+          echo "Using custom version: $NEW_VERSION"
+        else
+          # Use version type bump
+          case "${{ github.event.inputs.version_type }}" in
+            patch)
+              bump2version patch --dry-run --list | grep new_version | cut -d'=' -f2
+              ;;
+            minor)
+              bump2version minor --dry-run --list | grep new_version | cut -d'=' -f2
+              ;;
+            major)
+              bump2version major --dry-run --list | grep new_version | cut -d'=' -f2
+              ;;
+          esac
+        fi
+
+        # Extract current version from pyproject.toml
+        CURRENT_VERSION=$(grep '^version =' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+
+        if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+          NEW_VERSION="${{ github.event.inputs.custom_version }}"
+        else
+          # Calculate new version based on type
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          case "${{ github.event.inputs.version_type }}" in
+            patch)
+              NEW_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$((VERSION_PARTS[2] + 1))"
+              ;;
+            minor)
+              NEW_VERSION="${VERSION_PARTS[0]}.$((VERSION_PARTS[1] + 1)).0"
+              ;;
+            major)
+              NEW_VERSION="$((VERSION_PARTS[0] + 1)).0.0"
+              ;;
+          esac
+        fi
+
+        echo "Current version: $CURRENT_VERSION"
+        echo "New version: $NEW_VERSION"
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+        # Update pyproject.toml
+        sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+
+    - name: Commit version bump
+      run: |
+        git add pyproject.toml
+        git commit -m "Bump version to ${{ steps.bump.outputs.new_version }}"
+
+    - name: Create tag
+      run: |
+        git tag "v${{ steps.bump.outputs.new_version }}"
+
+    - name: Push changes and tag
+      run: |
+        git push origin main
+        git push origin "v${{ steps.bump.outputs.new_version }}"
