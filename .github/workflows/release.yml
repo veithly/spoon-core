@@ -34,12 +34,10 @@ jobs:
         twine upload dist/*
 
     - name: Create GitHub Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
         body: |
           Automatic release created for version ${{ github.ref_name }}
 
@@ -48,3 +46,5 @@ jobs:
           - Automatic PyPI publication for spoon-ai-sdk
         draft: false
         prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
