@@ -285,7 +285,7 @@ class MCPServerManager:
                     }
                 }
 
-                stdout, stderr = test_process.communicate(input=json.dumps(init_request), timeout=10)
+                stdout, stderr = test_process.communicate(input=json.dumps(init_request), timeout=30)
 
                 if test_process.returncode != 0:
                     raise Exception(f"Process failed with return code {test_process.returncode}: {stderr}")
