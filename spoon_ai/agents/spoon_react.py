@@ -2,7 +2,7 @@ from typing import List, Union, Any, Dict, Optional
 import asyncio
 from fastmcp.client.transports import (FastMCPTransport, PythonStdioTransport,
                                        SSETransport, WSTransport, NpxStdioTransport,
-                                       FastMCPStdioTransport, UvxStdioTransport)
+                                       FastMCPStdioTransport, UvxStdioTransport, StdioTransport)
 from fastmcp.client import Client as MCPClient
 from pydantic import Field
 import logging
@@ -48,7 +48,7 @@ class SpoonReactAI(ToolCallAgent):
     avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
     llm: ChatBot = Field(default_factory=create_configured_chatbot)
 
-    mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, NpxStdioTransport, FastMCPTransport, FastMCPStdioTransport, UvxStdioTransport] = Field(default="mcp_server")
+    mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, NpxStdioTransport, FastMCPTransport, FastMCPStdioTransport, UvxStdioTransport, StdioTransport] = Field(default="mcp_server")
     mcp_topics: List[str] = Field(default=["spoon_react"])
 
     def __init__(self, **kwargs):

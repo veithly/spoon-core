@@ -2,14 +2,6 @@
 
 SCDF CLI is a powerful command-line tool that provides rich functionality, including interacting with AI agents, managing chat history, processing cryptocurrency transactions, and loading documents.
 
-## 📦 Prerequisite: Start the MCP Server
-
-Before starting the CLI, make sure the MCP (Message Connectivity Protocol) server is running:
-
-```bash
-python -m spoon_ai.tools.mcp_tools_collection
-```
-
 ## 🚀 Start the CLI
 
 Once the MCP server is running, launch the CLI:
@@ -127,22 +119,70 @@ Custom agents can be configured in `spoon-core/config.json`. The basic structure
         "max_steps": 10,
         "tool_choice": "auto"
       },
-      "tools": ["crypto_tools"]
+      "tools": [
+        { "name": "crypto_tools", "type": "builtin", "enabled": true }
+      ]
     }
   }
 }
 ```
 
-For MCP-enabled agents, additional configuration is needed (see examples below).
+For MCP-enabled agents, each tool must be an object with `type: "mcp"` and an `mcp_server` section that specifies how to connect to the MCP server (stdio or URL). Example (DeepWiki via SSE):
+
+```json
+{
+  "agents": {
+    "deepwiki_agent": {
+      "class": "SpoonReactMCP",
+      "description": "DeepWiki agent for GitHub repository documentation",
+      "aliases": ["deepwiki", "docs"],
+      "tools": [
+        {
+          "name": "read_wiki_structure",
+          "type": "mcp",
+          "description": "Get documentation structure for GitHub repos",
+          "mcp_server": {
+            "url": "https://mcp.deepwiki.com/mcp",
+            "transport": "http",
+            "timeout": 30,
+            "headers": {
+              "User-Agent": "SpoonOS-MCP/1.0",
+              "Accept": "application/json, text/event-stream"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Example: Using DeepWiki Agent
+
+After configuring the DeepWiki agent, you can use it to analyze GitHub repositories:
+
+```bash
+# Load the DeepWiki agent
+> load-agent deepwiki_agent
+
+# Ask about XSpoonAi/spoon-core repository
+> Can you analyze the XSpoonAi/spoon-core repository and tell me what this project does?
+
+# Ask about React repository
+> What are the main documentation topics available for facebook/react?
+```
 
 ### MCP Server Types
 
-| Transport | Use Case | Configuration Example |
-|-----------|----------|----------------------|
+SpoonOS supports stdio and URL-based (SSE/WebSocket) MCP servers.
+
+| Method | Use Case | Configuration Example |
+|--------|----------|----------------------|
 | `npx` | Node.js packages | `"command": "npx", "args": ["-y", "package-name"]` |
-| `python` | Python scripts | `"script_path": "server.py", "args": ["--port", "8766"]` |
-| `sse` | HTTP streaming | `"url": "http://localhost:8765/sse"` |
-| `websocket` | Real-time | `"url": "ws://localhost:8765/ws"` |
+| `python` | Python scripts | `"command": "python", "args": ["server.py"]` |
+| `uvx` | uvx-installed CLIs | `"command": "uvx", "args": ["package-or-entrypoint"]` |
+| `http` | HTTP/HTTPS | `"url": "https://example.com/mcp", "transport": "http"` |
+| `sse` | HTTP/HTTPS SSE | `"url": "https://example.com/mcp", "transport": "sse"` |
 
 ### Configuration Commands
 
@@ -205,7 +245,7 @@ This command shows:
   ✓ Security key configured
   ✓ Configuration file present
   ✓ Agent is loaded and ready
-  
+
   Overall Health: Excellent (4/4 checks passed)
 ```
 
@@ -238,7 +278,7 @@ API_KEY updated
 > list-providers
 Available LLM providers:
 ✅ openai (gpt-4.1) - Healthy
-✅ anthropic (claude-sonnet-4-20250514) - Healthy  
+✅ anthropic (claude-sonnet-4-20250514) - Healthy
 ❌ gemini (gemini-2.5-pro) - Unhealthy
 Default provider: openai
 ```
@@ -331,7 +371,7 @@ Preparing to transfer 0.1 SPO to 0x123...
 |-------|----------|----------|
 | **Agent not found** | `Agent 'name' not found` | Use `list-agents` to check available agents, verify spelling |
 | **MCP connection failed** | `Failed to create transport` | Check API keys, verify MCP server is running |
-| **Tool not available** | `Tool 'name' not found` | Check `tool_sets` config, verify MCP server enabled |
+| **Tool not available** | `Tool 'name' not found` | Check `tools` config, verify MCP server enabled |
 | **Duplicate agents** | Same agent appears twice | Fixed in latest version, restart if needed |
 | **API key missing** | Authentication errors | Set environment variables: `TAVILY_API_KEY`, `OPENAI_API_KEY` |
 
@@ -384,7 +424,7 @@ python main.py
 
 ### Example: Custom Search Agent Configuration
 
-Here's how to configure a custom search agent with MCP integration:
+Here's how to configure a custom search agent with MCP integration (stdio-based):
 
 ```json
 {
@@ -394,27 +434,18 @@ Here's how to configure a custom search agent with MCP integration:
       "class": "SpoonReactMCP",
       "aliases": ["search", "web"],
       "description": "Custom search agent with web capabilities",
-      "mcp_servers": ["tavily-mcp"],
-      "tools": ["web_search", "crypto_tools"]
-    }
-  },
-  "mcp_servers": {
-    "tavily-mcp": {
-      "transport": "npx",
-      "command": "npx",
-      "args": ["-y", "tavily-mcp"],
-      "env": { "TAVILY_API_KEY": "your-key" }
-    }
-  },
-  "tool_sets": {
-    "web_search": {
-      "type": "mcp_server",
-      "server": "tavily-mcp",
-      "enabled": true
-    },
-    "crypto_tools": {
-      "type": "builtin",
-      "enabled": true
+      "tools": [
+        {
+          "name": "tavily_search",
+          "type": "mcp",
+          "mcp_server": {
+            "command": "npx",
+            "args": ["-y", "tavily-mcp"],
+            "env": { "TAVILY_API_KEY": "your-key" }
+          }
+        },
+        { "name": "crypto_tools", "type": "builtin" }
+      ]
     }
   }
 }

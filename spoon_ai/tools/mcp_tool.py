@@ -6,7 +6,7 @@ import time
 import logging
 
 from fastmcp.client.transports import (PythonStdioTransport, SSETransport, WSTransport, NpxStdioTransport,
-                                       UvxStdioTransport, StdioTransport)
+                                       UvxStdioTransport, StdioTransport, StreamableHttpTransport)
 from fastmcp.client import Client as MCPClient
 from pydantic import Field
 
@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class MCPTool(BaseTool, MCPClientMixin):
     mcp_config: Dict[str, Any] = Field(default_factory=dict, description="MCP transport and tool configuration")
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
     def __init__(self,
                  name: str = "mcp_tool",
@@ -58,8 +59,13 @@ class MCPTool(BaseTool, MCPClientMixin):
         self._parameters_loaded = False
         self._parameters_loading = False
         self._last_health_check = 0
+        # Support legacy/alias keys from config
         self._health_check_interval = mcp_config.get('health_check_interval', 300)
-        self._connection_timeout = mcp_config.get('connection_timeout', 30)
+        # Prefer explicit connection_timeout, fall back to generic timeout
+        self._connection_timeout = mcp_config.get('connection_timeout', mcp_config.get('timeout', 30))
+        # Also apply per-transport override if present
+        if isinstance(self._connection_timeout, (int, float)) and self._connection_timeout <= 0:
+            self._connection_timeout = 30
         self._max_retries = mcp_config.get('max_retries', 3)
 
         logger.info(f"Initialized MCP tool '{self.name}' with deferred parameter loading")
@@ -74,16 +80,23 @@ class MCPTool(BaseTool, MCPClientMixin):
                 logger.debug(f"Creating WSTransport for URL: {url}")
                 return WSTransport(url)
             elif url.startswith("http://") or url.startswith("https://"):
-                logger.debug(f"Creating SSETransport for URL: {url}")
-                return SSETransport(url)
+                # Check if we should use HTTP or SSE transport
+                transport_type = config.get("transport", "sse")
+                if transport_type == "http":
+                    logger.debug(f"Creating StreamableHttpTransport for URL: {url}")
+                    headers = config.get("headers", {})
+                    return StreamableHttpTransport(url=url, headers=headers)
+                else:
+                    logger.debug(f"Creating SSETransport for URL: {url}")
+                    return SSETransport(url)
             else:
                 raise ValueError(f"Unsupported URL scheme in: {url}")
-        
+
         if command:
             logger.debug(f"Creating stdio-based transport for command: {command}")
             args = config.get("args", [])
             env = config.get("env", {})
-            
+
             merged_env = os.environ.copy()
             merged_env.update(env)
 
@@ -129,14 +142,15 @@ class MCPTool(BaseTool, MCPClientMixin):
                                 if getattr(tool, 'name', '') == self.name:
                                     target_tool = tool
                                     break
-                            
+
                             if not target_tool and tools:
                                 target_tool = tools[0]
 
                             if target_tool:
                                 input_schema = None
                                 tool_description = None
-                                
+                                actual_tool_name = getattr(target_tool, 'name', None)
+
                                 if hasattr(target_tool, 'inputSchema'):
                                     input_schema = target_tool.inputSchema
                                     tool_description = getattr(target_tool, 'description', None)
@@ -147,17 +161,22 @@ class MCPTool(BaseTool, MCPClientMixin):
                                 else:
                                     input_schema = getattr(target_tool, 'parameters', None)
                                     tool_description = getattr(target_tool, 'description', None)
-                                
+
+                                # If the actual server tool name differs from our current name,
+                                # update this tool's name so downstream exposure uses the real name.
+                                if actual_tool_name and actual_tool_name != self.name:
+                                    object.__setattr__(self, 'name', actual_tool_name)
+
                                 if input_schema:
                                     self.parameters = input_schema
                                     logger.debug(f"Applied dynamic schema from MCP server for tool '{self.name}': {input_schema}")
                                 else:
                                     logger.warning(f"No input schema found for MCP tool '{self.name}'")
-                                
+
                                 if tool_description:
                                     self.description = tool_description
                                     logger.debug(f"Updated description for tool '{self.name}': {tool_description}")
-                                
+
                                 self._parameters_loaded = True
                                 logger.debug(f"Successfully configured parameters for tool '{self.name}' from MCP server.")
                                 return
@@ -211,15 +230,16 @@ class MCPTool(BaseTool, MCPClientMixin):
         actual_tool_name = self.name
         try:
             await self.ensure_parameters_loaded()
-            
+
             if not await self._check_mcp_health():
                 raise ConnectionError(f"MCP server for '{self.name}' is not healthy")
-            
-            final_args = kwargs
+
+            # Remove tool_name from kwargs if it exists to avoid duplicate parameter
+            final_args = {k: v for k, v in kwargs.items() if k != 'tool_name'}
 
             retry_count = 0
             last_exception = None
-            
+
             while retry_count < self._max_retries:
                 try:
                     result = await self.call_mcp_tool(actual_tool_name, **final_args)
@@ -248,7 +268,7 @@ class MCPTool(BaseTool, MCPClientMixin):
                 except Exception as e:
                     logger.error(f"MCP tool '{actual_tool_name}' execution failed: {e}")
                     raise
-                    
+
         except asyncio.CancelledError:
             logger.warning(f"MCP tool execution '{actual_tool_name}' was cancelled")
             raise
@@ -261,10 +281,10 @@ class MCPTool(BaseTool, MCPClientMixin):
         current_time = time.time()
         if current_time - self._last_health_check < self._health_check_interval:
             return True
-            
+
         try:
             async with self.get_session() as session:
-                tools = await asyncio.wait_for(session.list_tools(), timeout=10)
+                tools = await asyncio.wait_for(session.list_tools(), timeout=min(10, max(5, int(self._connection_timeout))))
                 self._last_health_check = current_time
                 logger.debug(f"MCP health check passed for '{self.name}' - {len(tools) if tools else 0} tools available")
                 return True
@@ -283,17 +303,34 @@ class MCPTool(BaseTool, MCPClientMixin):
                 res = await asyncio.wait_for(session.call_tool(tool_name, arguments=kwargs), timeout=self._connection_timeout)
                 if not res:
                     return ""
-                for item in res:
-                    if hasattr(item, 'text') and item.text is not None:
-                        text = item.text
-                        if "<coroutine object" in text and "at 0x" in text:
-                            raise RuntimeError(f"MCP tool '{tool_name}' returned a coroutine object instead of executing it.")
-                        return text
-                    elif hasattr(item, 'json') and item.json is not None:
-                        import json
-                        return json.dumps(item.json, ensure_ascii=False, indent=2)
+
+                # Handle different result formats
+                if hasattr(res, 'content') and res.content:
+                    # StreamableHttpTransport returns CallToolResult with content
+                    for item in res.content:
+                        if hasattr(item, 'text') and item.text is not None:
+                            text = item.text
+                            if "<coroutine object" in text and "at 0x" in text:
+                                raise RuntimeError(f"MCP tool '{tool_name}' returned a coroutine object instead of executing it.")
+                            return text
+                        elif hasattr(item, 'json') and item.json is not None:
+                            import json
+                            return json.dumps(item.json, ensure_ascii=False, indent=2)
+                elif hasattr(res, '__iter__'):
+                    # SSE transport returns iterable result
+                    for item in res:
+                        if hasattr(item, 'text') and item.text is not None:
+                            text = item.text
+                            if "<coroutine object" in text and "at 0x" in text:
+                                raise RuntimeError(f"MCP tool '{tool_name}' returned a coroutine object instead of executing it.")
+                            return text
+                        elif hasattr(item, 'json') and item.json is not None:
+                            import json
+                            return json.dumps(item.json, ensure_ascii=False, indent=2)
+
+                # Fallback: convert to string
                 if res:
-                    result_str = str(res[0])
+                    result_str = str(res)
                     if "<coroutine object" in result_str and "at 0x" in result_str:
                         raise RuntimeError(f"MCP tool '{tool_name}' returned a coroutine object instead of executing it.")
                     return result_str
@@ -307,3 +344,30 @@ class MCPTool(BaseTool, MCPClientMixin):
         except Exception as e:
             logger.error(f"MCP tool '{tool_name}' call failed: {e}")
             raise RuntimeError(f"MCP tool '{tool_name}' execution failed: {str(e)}") from e
+
+    async def list_available_tools(self) -> list:
+        """List available tools from the MCP server."""
+        try:
+            if not await self._check_mcp_health():
+                raise ConnectionError(f"MCP server for '{self.name}' is not healthy")
+
+            async with self.get_session() as session:
+                tools = await asyncio.wait_for(session.list_tools(), timeout=self._connection_timeout)
+                if not tools:
+                    return []
+
+                # Convert tools to a list of dictionaries
+                tool_list = []
+                for tool in tools:
+                    tool_dict = {
+                        "name": getattr(tool, 'name', ''),
+                        "description": getattr(tool, 'description', ''),
+                        "inputSchema": getattr(tool, 'inputSchema', None)
+                    }
+                    tool_list.append(tool_dict)
+
+                return tool_list
+
+        except Exception as e:
+            logger.error(f"Failed to list available tools: {e}")
+            return []

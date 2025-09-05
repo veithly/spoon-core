@@ -71,71 +71,36 @@ tavily_tool = MCPTool(
 )
 ```
 
-**Benefits of Stdio Transport:**
-- No server management required
-- Auto-managed lifecycle by SpoonOS
-- Always up to date with latest tool versions
-- Automatic restart on failures
+**2. HTTP Transport**
 
-**Common Stdio MCP Tools:**
+For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
 
 ```python
-# GitHub integration
-github_tool = MCPTool(
-    name="github_tools",
-    description="GitHub repository and issue management",
-    mcp_config={
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github"],
-        "env": {"GITHUB_TOKEN": os.getenv("GITHUB_TOKEN")},
-        "transport": "stdio"
-    }
-)
-
-# Brave Search
-brave_tool = MCPTool(
-    name="brave_search",
-    description="Web search using Brave Search API",
-    mcp_config={
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-        "env": {"BRAVE_API_KEY": os.getenv("BRAVE_API_KEY")},
-        "transport": "stdio"
-    }
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
 )
 ```
 
-**2. HTTP Transport (via SSE) - Advanced Use Cases**
+**HTTP Transport**
 
-For HTTP-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Use this for custom or in-development integrations.
+For HTTP-based MCP servers, `fastmcp` uses **HTTP**. Simply provide the server's URL.
 
 ```python
-http_tool = MCPTool(
-    name="http_example_tool",
-    mcp_config={
-        "url": "http://127.0.0.1:8765/sse",
-        "transport": "sse"
-    }
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/mcp"}
 )
 ```
 
-**Note:** You must manually start and manage SSE servers:
+**SSE Transport**
 
-```bash
-# Start your custom SSE server
-python my_mcp_server.py
-# or
-npx -y @modelcontextprotocol/server-github --sse
-```
-
-**3. WebSocket Transport**
-
-For WebSocket-based servers, provide the `ws` or `wss` URL.
+For SSE-based MCP servers, `fastmcp` uses **Server-Sent Events (SSE)**. Simply provide the server's URL.
 
 ```python
-ws_tool = MCPTool(
-    name="websocket_example_tool",
-    mcp_config={"url": "ws://127.0.0.1:8766"}
+deepwiki_tool = MCPTool(
+    name="deepwiki_tool",
+    mcp_config={"url": "https://mcp.deepwiki.com/sse"}
 )
 ```
 
