@@ -13,6 +13,10 @@ class ToolManager:
         self.tool_map = {tool.name: tool for tool in tools}
         self.indexed = False
 
+    def reindex(self) -> None:
+        """Rebuild the internal name->tool mapping. Useful if tools have been renamed dynamically."""
+        self.tool_map = {tool.name: tool for tool in self.tools}
+
 
     def _lazy_init_pinecone(self):
         if not hasattr(self, "pc"):
@@ -45,7 +49,7 @@ class ToolManager:
         tool = self.tool_map[name]
         if not tool:
             return ToolFailure(f"Tool '{name}' not found. Available tools: {list(self.tool_map.keys())}")
-        
+
         # Ensure tool_input is not None
         if tool_input is None:
             tool_input = {}

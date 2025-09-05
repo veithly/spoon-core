@@ -81,9 +81,10 @@ class BaseAgent(BaseModel, ABC):
     output_queue: ThreadSafeOutputQueue = Field(default_factory=ThreadSafeOutputQueue, description="Thread-safe output queue")
     task_done: asyncio.Event = Field(default_factory=asyncio.Event, description="The signal of agent run done")
 
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = {
+        "arbitrary_types_allowed": True,
+        "extra": "allow"
+    }
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -183,6 +184,11 @@ class BaseAgent(BaseModel, ABC):
             raise ValueError(f"Invalid state: {new_state}")
 
         timeout = timeout or self._state_transition_timeout
+        # If we're about to execute tools, allow a longer transition window
+        # to accommodate MCP session setup/teardown
+        if getattr(self, 'tool_calls', None):
+            # Bump transition timeout modestly when tool calls exist
+            timeout = max(timeout, 10.0)
         operation_id = str(uuid.uuid4())
 
         # Capture old_state before mutation (will validate under lock)
@@ -191,7 +197,7 @@ class BaseAgent(BaseModel, ABC):
         try:
             self._active_operations.add(operation_id)
 
-            # Set new state under lock with timeout
+            # Set new state under lock with timeout using context manager approach
             try:
                 async with asyncio.timeout(timeout):
                     async with self._state_lock:
@@ -214,7 +220,7 @@ class BaseAgent(BaseModel, ABC):
                 yield
             except Exception as e:
                 logger.error(f"Exception in state context for agent {self.name}: {e}")
-                # Attempt to set ERROR state under lock
+                # Attempt to set ERROR state under lock with timeout protection
                 try:
                     async with asyncio.timeout(timeout):
                         async with self._state_lock:
@@ -370,6 +376,21 @@ class BaseAgent(BaseModel, ABC):
             self.next_step_prompt = stuck_prompt
 
         logger.warning(f"Added stuck prompt: {stuck_prompt}")
+
+    # Basic retrieval compatibility: allow loading documents even if agent doesn't use RAG
+    def add_documents(self, documents) -> None:
+        """Store documents on the agent so CLI load-docs works without RAG mixin.
+
+        This default implementation keeps the documents in-memory under
+        self._loaded_documents. Agents that support retrieval should override
+        this method to index documents into their vector store.
+        """
+        try:
+            setattr(self, "_loaded_documents", documents)
+            logger.info(f"Loaded {len(documents) if hasattr(documents, '__len__') else 'N'} document chunks into agent {self.name}")
+        except Exception as e:
+            logger.error(f"Failed to store documents on agent {self.name}: {e}")
+            raise
 
     def save_chat_history(self):
         """Thread-safe chat history saving"""

@@ -309,7 +309,6 @@ class ConfigurationManager:
         """
         # Common defaults for all providers
         common_defaults = {
-            'max_tokens': 32768,
             'temperature': 0.3,
             'timeout': 30,
             'retry_attempts': 3,
