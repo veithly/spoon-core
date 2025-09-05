@@ -44,43 +44,28 @@ jobs:
 
     - name: Bump version
       id: bump
+      env:
+        VERSION_TYPE: ${{ github.event.inputs.version_type }}
+        CUSTOM_VERSION: ${{ github.event.inputs.custom_version }}
       run: |
-        if [ -n "${{ github.event.inputs.custom_version }}" ]; then
-          # Use custom version
-          NEW_VERSION="${{ github.event.inputs.custom_version }}"
-          echo "Using custom version: $NEW_VERSION"
-        else
-          # Use version type bump
-          case "${{ github.event.inputs.version_type }}" in
-            patch)
-              bump2version patch --dry-run --list | grep new_version | cut -d'=' -f2
-              ;;
-            minor)
-              bump2version minor --dry-run --list | grep new_version | cut -d'=' -f2
-              ;;
-            major)
-              bump2version major --dry-run --list | grep new_version | cut -d'=' -f2
-              ;;
-          esac
-        fi
-
         # Extract current version from pyproject.toml
         CURRENT_VERSION=$(grep '^version =' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 
-        if [ -n "${{ github.event.inputs.custom_version }}" ]; then
-          NEW_VERSION="${{ github.event.inputs.custom_version }}"
+        # Check if custom version is provided
+        if [ -n "$CUSTOM_VERSION" ]; then
+          NEW_VERSION="$CUSTOM_VERSION"
+          echo "Using custom version: $NEW_VERSION"
         else
-          # Calculate new version based on type
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          case "${{ github.event.inputs.version_type }}" in
+          # Use version type bump
+          case "$VERSION_TYPE" in
             patch)
-              NEW_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$((VERSION_PARTS[2] + 1))"
+              NEW_VERSION=$(bump2version patch --dry-run --list | grep new_version | cut -d'=' -f2)
               ;;
             minor)
-              NEW_VERSION="${VERSION_PARTS[0]}.$((VERSION_PARTS[1] + 1)).0"
+              NEW_VERSION=$(bump2version minor --dry-run --list | grep new_version | cut -d'=' -f2)
               ;;
             major)
-              NEW_VERSION="$((VERSION_PARTS[0] + 1)).0.0"
+              NEW_VERSION=$(bump2version major --dry-run --list | grep new_version | cut -d'=' -f2)
               ;;
           esac
         fi
@@ -89,19 +74,38 @@ jobs:
         echo "New version: $NEW_VERSION"
         echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-        # Update pyproject.toml
-        sed -i "s/version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" pyproject.toml
+        # Always update version - force the change even if it's the same
+        if [ -n "$CUSTOM_VERSION" ]; then
+          # For custom version, force update to user-specified version
+          echo "Forcing version update to: $NEW_VERSION"
+          sed -i "s/version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
+        else
+          # Use bump2version for standard version bumps
+          bump2version $VERSION_TYPE --allow-dirty
+        fi
+
+        # Always commit the changes, even if version didn't change
+        # This ensures we have a commit record of the version bump
 
     - name: Commit version bump
       run: |
         git add pyproject.toml
-        git commit -m "Bump version to ${{ steps.bump.outputs.new_version }}"
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes detected, creating empty commit for version bump"
+          git commit --allow-empty -m "Bump version to ${{ steps.bump.outputs.new_version }}"
+        else
+          echo "Changes detected, committing version bump"
+          git commit -m "Bump version to ${{ steps.bump.outputs.new_version }}"
+        fi
 
     - name: Create tag
       run: |
-        git tag "v${{ steps.bump.outputs.new_version }}"
+        # Force create tag, overwriting if it already exists
+        git tag -f "v${{ steps.bump.outputs.new_version }}"
 
     - name: Push changes and tag
       run: |
         git push origin main
-        git push origin "v${{ steps.bump.outputs.new_version }}"
+        # Force push tag, overwriting if it already exists on remote
+        git push -f origin "v${{ steps.bump.outputs.new_version }}"
