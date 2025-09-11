@@ -9,13 +9,15 @@ The Graph System is a powerful workflow orchestration framework that enables you
 2. [Core Concepts](#core-concepts)
 3. [Node Development](#node-development)
 4. [Dynamic Routing](#dynamic-routing)
-5. [Parallel Execution](#parallel-execution)
-6. [Monitoring & Metrics](#monitoring--metrics)
+5. [Intelligent Routing](#intelligent-routing)
+6. [Parallel Execution](#parallel-execution)
 7. [Memory Management](#memory-management)
-8. [Error Handling](#error-handling)
-9. [Advanced Features](#advanced-features)
-10. [Best Practices](#best-practices)
-11. [Complete Examples](#complete-examples)
+8. [Memory System](#memory-system)
+9. [Monitoring & Metrics](#monitoring--metrics)
+10. [Error Handling](#error-handling)
+11. [Advanced Features](#advanced-features)
+12. [Best Practices](#best-practices)
+13. [Complete Examples](#complete-examples)
 
 ## Quick Start
 
@@ -386,6 +388,465 @@ async def llm_router(state: ChatState, context) -> RouterResult:
         return RouterResult(next_node="continue_chat", confidence=0.7)
 ```
 
+## Intelligent Routing
+
+SpoonOS provides advanced intelligent routing capabilities for automatic path selection based on user queries, state conditions, and intelligent decision-making.
+
+### Core Features
+
+- **Rule-Based Routing**: String, pattern, and function-based routing rules
+- **Priority System**: Higher priority rules execute first
+- **LLM-Powered Intelligence**: AI-driven complex routing decisions
+- **Pattern Matching**: Regex-based sophisticated pattern recognition
+- **Real-Time Adaptation**: Dynamic routing based on execution context
+
+### Rule-Based Routing
+
+#### Basic Keyword Routing
+
+```python
+from spoon_ai.graph import StateGraph
+
+graph = StateGraph(TradingState)
+
+# Simple keyword routing with priorities
+graph.add_routing_rule("START", "price", "fetch_price_data", priority=10)
+graph.add_routing_rule("START", "buy|sell|trade", "execute_trade", priority=8)
+graph.add_routing_rule("START", "analyze", "analyze_market", priority=7)
+graph.add_routing_rule("START", "risk", "assess_risks", priority=6)
+```
+
+#### Pattern-Based Routing
+
+```python
+# Advanced regex pattern matching
+graph.add_pattern_routing("START", r".*?(?:current|latest).*?(?:price|value).*?",
+                         "fetch_price_data", priority=9)
+graph.add_pattern_routing("START", r".*?(?:should I|recommend).*?(?:buy|sell).*?",
+                         "analyze_market", priority=8)
+graph.add_pattern_routing("START", r".*?(?:execute|place).*?(?:order|trade).*?",
+                         "execute_trade", priority=7)
+```
+
+#### Function-Based Routing
+
+```python
+def confidence_based_router(state: Dict[str, Any], query: str) -> str:
+    """Route based on confidence score and query analysis"""
+    confidence = state.get('confidence_score', 0)
+
+    if confidence > 0.8:
+        return "generate_response"
+    elif confidence > 0.6 and "risk" in query.lower():
+        return "assess_risks"
+    else:
+        return "analyze_market"
+
+graph.add_routing_rule("analysis_complete", confidence_based_router,
+                      "generate_response", priority=15)
+```
+
+### LLM-Powered Intelligent Routing
+
+#### Intelligent Router Setup
+
+```python
+async def intelligent_router(state: Dict[str, Any], query: str) -> str:
+    """LLM-powered routing for complex decision making"""
+    from spoon_ai.llm.manager import LLMManager
+
+    llm_manager = LLMManager()
+
+    intent_prompt = f"""
+    Analyze this trading query and determine the appropriate action:
+
+    Query: "{query}"
+    Current State: {json.dumps(state, indent=2)}
+
+    Available actions:
+    - query_price: Get current price information
+    - analyze_market: Perform technical/fundamental analysis
+    - execute_trade: Execute a trade order
+    - risk_assessment: Assess trading risks
+    - portfolio_review: Review current portfolio
+
+    Respond with ONLY the action name (lowercase, no explanation).
+    """
+
+    messages = [Message(role="user", content=intent_prompt)]
+    response = await llm_manager.chat(messages)
+
+    intent = response.content.strip().lower()
+
+    # Map to appropriate nodes
+    intent_mapping = {
+        'query_price': 'fetch_price_data',
+        'analyze_market': 'analyze_market',
+        'execute_trade': 'execute_trade',
+        'risk_assessment': 'assess_risks',
+        'portfolio_review': 'portfolio_review'
+    }
+
+    return intent_mapping.get(intent, 'fetch_price_data')
+
+# Set intelligent router
+graph.set_intelligent_router(intelligent_router)
+```
+
+### Advanced Routing Patterns
+
+#### Context-Aware Routing
+
+```python
+def context_aware_router(state: Dict[str, Any], query: str) -> str:
+    """Route based on conversation context and state"""
+    # Check conversation history
+    history = state.get('execution_log', [])
+
+    # High-frequency trader pattern
+    if len(history) > 10 and any('trade' in log.lower() for log in history[-5:]):
+        return 'high_frequency_check'
+
+    # Risk-averse pattern
+    if any('loss' in log.lower() for log in history[-3:]):
+        return 'risk_reassessment'
+
+    # Default analysis
+    return 'standard_analysis'
+
+graph.add_routing_rule("decision_point", context_aware_router,
+                      "standard_analysis", priority=10)
+```
+
+#### Multi-Modal Routing
+
+```python
+def multi_modal_router(state: Dict[str, Any], query: str) -> str:
+    """Route based on input type and content analysis"""
+
+    # Check input modalities
+    if state.get('input_type') == 'image':
+        return 'vision_analysis'
+    elif state.get('input_type') == 'data':
+        return 'data_processing'
+    elif state.get('input_type') == 'audio':
+        return 'speech_analysis'
+
+    # Content-based routing
+    query_lower = query.lower()
+
+    if any(word in query_lower for word in ['chart', 'technical', 'indicator']):
+        return 'technical_analysis'
+    elif any(word in query_lower for word in ['news', 'sentiment', 'social']):
+        return 'sentiment_analysis'
+    elif any(word in query_lower for word in ['portfolio', 'allocation', 'balance']):
+        return 'portfolio_management'
+    else:
+        return 'general_analysis'
+
+graph.add_routing_rule("input_received", multi_modal_router,
+                      "general_analysis", priority=12)
+```
+
+### Real-World Trading Bot Example
+
+#### Complete Intelligent Trading Workflow
+
+```python
+"""
+Intelligent TradeBot with Real Data Integration
+"""
+
+from spoon_ai.graph import StateGraph, NodeContext, NodeResult
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
+from spoon_ai.llm.manager import LLMManager
+from typing import Dict, Any, List, Annotated
+import json
+import asyncio
+
+class TradingState(TypedDict):
+    user_query: str
+    intent: str
+    market_data: Dict[str, Any]  # Real market data from PowerData
+    analysis_results: List[str]
+    trade_decision: Dict[str, Any]
+    confidence_score: float
+    execution_log: List[str]
+    routing_decisions: List[str]
+
+class IntelligentTradeBot:
+    def __init__(self):
+        self.powerdata_tool = CryptoPowerDataCEXTool()
+        self.llm_manager = LLMManager()
+        self.graph = self._build_intelligent_graph()
+
+        # Setup intelligent router
+        self.intelligent_router = self._create_intelligent_router()
+
+    def _build_intelligent_graph(self) -> StateGraph:
+        """Build graph with intelligent routing"""
+        graph = StateGraph(TradingState)
+
+        # Add nodes
+        graph.add_node("fetch_price_data", self._fetch_price_data)
+        graph.add_node("analyze_market", self._analyze_market)
+        graph.add_node("execute_trade", self._execute_trade)
+        graph.add_node("assess_risks", self._assess_risks)
+        graph.add_node("generate_response", self._generate_response)
+
+        # Intelligent routing rules (priority-based)
+        graph.add_routing_rule("START", "price", "fetch_price_data", priority=10)
+        graph.add_routing_rule("START", "buy|sell|trade", "execute_trade", priority=8)
+        graph.add_routing_rule("START", "analyze|analysis", "analyze_market", priority=7)
+        graph.add_routing_rule("START", "risk", "assess_risks", priority=6)
+
+        # Pattern-based routing
+        graph.add_pattern_routing("START", r".*?(?:current|latest).*?(?:price|value).*?",
+                                 "fetch_price_data", priority=9)
+        graph.add_pattern_routing("START", r".*?(?:should I|recommend).*?(?:buy|sell).*?",
+                                 "analyze_market", priority=8)
+
+        # Confidence-based conditional routing
+        def confidence_router(state: Dict[str, Any], query: str) -> str:
+            confidence = state.get('confidence_score', 0)
+            if confidence > 0.8:
+                return "generate_response"
+            elif confidence > 0.6:
+                return "assess_risks"
+            else:
+                return "analyze_market"
+
+        graph.add_conditional_edges(
+            "fetch_price_data",
+            confidence_router,
+            {
+                "generate_response": "generate_response",
+                "assess_risks": "assess_risks",
+                "analyze_market": "analyze_market"
+            }
+        )
+
+        # Set intelligent router
+        graph.set_intelligent_router(self.intelligent_router)
+
+        graph.set_entry_point("fetch_price_data")
+
+        return graph
+
+    async def _create_intelligent_router(self):
+        """Create LLM-powered intelligent router"""
+        async def router(state: Dict[str, Any], query: str) -> str:
+            try:
+                intent_prompt = f"""
+                Analyze this trading query and determine the appropriate action:
+
+                Query: "{query}"
+                Market Context: {json.dumps(state.get('market_data', {}), indent=2)}
+
+                Available actions:
+                - query_price: Get current price information
+                - analyze_market: Perform technical/fundamental analysis
+                - execute_trade: Execute a trade order
+                - risk_assessment: Assess trading risks
+
+                Respond with ONLY the action name (lowercase, no explanation).
+                """
+
+                messages = [{"role": "user", "content": intent_prompt}]
+                response = await self.llm_manager.chat(messages)
+
+                intent = response.content.strip().lower()
+                mapping = {
+                    'query_price': 'fetch_price_data',
+                    'analyze_market': 'analyze_market',
+                    'execute_trade': 'execute_trade',
+                    'risk_assessment': 'assess_risks'
+                }
+
+                return mapping.get(intent, 'fetch_price_data')
+            except Exception as e:
+                print(f"Intelligent routing failed: {e}")
+                return 'fetch_price_data'
+
+        return router
+
+    async def _fetch_price_data(self, state: Dict[str, Any], context: NodeContext) -> Dict[str, Any]:
+        """Fetch real market data using PowerData"""
+        try:
+            query = state.get('user_query', '')
+            symbol = self._extract_symbol(query) or 'BTC'
+
+            # Real PowerData integration
+            result = await self.powerdata_tool.execute(
+                exchange="binance",
+                symbol=f"{symbol}/USDT",
+                timeframe="1h",
+                limit=50,
+                indicators_config=json.dumps({
+                    "rsi": [{"timeperiod": 14}],
+                    "ema": [{"timeperiod": 12}, {"timeperiod": 26}],
+                    "macd": [{"fastperiod": 12, "slowperiod": 26}]
+                }),
+                use_enhanced=True
+            )
+
+        market_data = {
+            "symbol": f"{symbol}/USDT",
+            "data": result.output,
+            "timestamp": asyncio.get_event_loop().time(),
+            "source": "powerdata_api"
+        }
+
+        return {
+            "market_data": market_data,
+            "intent": "query_price",
+            "confidence_score": 0.9,
+            "execution_log": [f"Fetched data for {symbol}"],
+            "routing_decisions": ["Price data fetched successfully"]
+        }
+
+    async def _analyze_market(self, state: Dict[str, Any], context: NodeContext) -> Dict[str, Any]:
+        """Perform market analysis using real data"""
+        market_data = state.get('market_data', {})
+        query = state.get('user_query', '')
+
+        analysis_prompt = f"""
+        Analyze this market data and provide trading insights:
+
+        Query: {query}
+        Market Data: {json.dumps(market_data, indent=2)}
+
+        Provide: analysis, recommendation (BUY/SELL/HOLD), confidence (0-1)
+        Format as JSON.
+        """
+
+        messages = [{"role": "user", "content": analysis_prompt}]
+        response = await self.llm_manager.chat(messages)
+
+        try:
+            analysis = json.loads(response.content)
+        except:
+            analysis = {"analysis": response.content, "recommendation": "HOLD", "confidence": 0.5}
+
+        return {
+            "analysis_results": [analysis.get('analysis', 'Analysis completed')],
+            "trade_decision": {
+                "action": analysis.get('recommendation', 'HOLD'),
+                "reasoning": analysis.get('analysis', ''),
+                "symbol": market_data.get('symbol', 'UNKNOWN')
+            },
+            "confidence_score": float(analysis.get('confidence', 0.5)),
+            "intent": "analyze_market",
+            "execution_log": ["Market analysis completed"]
+        }
+
+    async def _execute_trade(self, state: Dict[str, Any], context: NodeContext) -> Dict[str, Any]:
+        """Execute trade"""
+        trade_params = self._parse_trade_params(state.get('user_query', ''))
+        trade_result = {
+            "action": trade_params.get('action', 'HOLD'),
+            "symbol": trade_params.get('symbol', 'BTC/USDT'),
+            "amount": trade_params.get('amount', 0),
+            "status": "SUCCESS",
+            "order_id": f"sim_{asyncio.get_event_loop().time()}",
+            "timestamp": asyncio.get_event_loop().time()
+        }
+
+        return {
+            "trade_decision": trade_result,
+            "confidence_score": 0.95,
+            "intent": "execute_trade",
+            "execution_log": [f"Trade executed: {trade_result['action']}"]
+        }
+
+    def _extract_symbol(self, query: str) -> str:
+        """Extract trading symbol from query"""
+        import re
+        match = re.search(r'\b(BTC|ETH|SOL|ADA|DOT)\b', query.upper())
+        return match.group(1) if match else None
+
+    def _parse_trade_params(self, query: str) -> Dict[str, Any]:
+        """Parse trade parameters from natural language"""
+        query_lower = query.lower()
+
+        action = 'BUY' if 'buy' in query_lower else 'SELL' if 'sell' in query_lower else 'HOLD'
+        symbol_match = re.search(r'\b(btc|eth|sol|ada|dot)\b', query_lower)
+        symbol = symbol_match.group(1).upper() if symbol_match else 'BTC'
+        amount_match = re.search(r'(\d+(?:\.\d+)?)', query_lower)
+        amount = float(amount_match.group(1)) if amount_match else 0.1
+
+        return {
+            'action': action,
+            'symbol': f"{symbol}/USDT",
+            'amount': amount
+        }
+
+
+    async def process_query(self, user_query: str) -> Dict[str, Any]:
+        """Process user query through intelligent routing"""
+        print(f"\n🤖 Processing: '{user_query}'")
+
+        initial_state = {
+            "user_query": user_query,
+            "market_data": {},
+            "analysis_results": [],
+            "execution_log": [],
+            "routing_decisions": []
+        }
+
+        compiled_graph = self.graph.compile()
+        result = await compiled_graph.invoke(initial_state)
+
+        return result
+
+# Usage example
+async def main():
+    bot = IntelligentTradeBot()
+
+    queries = [
+        "What's the current price of BTC?",
+        "Should I buy Ethereum right now?",
+        "Execute a buy order for 0.1 BTC"
+    ]
+
+    for query in queries:
+        result = await bot.process_query(query)
+        print(f"Result: {result.get('trade_decision', 'No decision')}")
+        print(f"Confidence: {result.get('confidence_score', 0):.1%}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Routing Performance & Monitoring
+
+#### Execution Metrics
+
+```python
+# Get detailed execution metrics
+metrics = compiled_graph.get_execution_metrics()
+
+print("Routing Performance:")
+print(f"• Total Executions: {metrics['total_executions']}")
+print(f"• Success Rate: {metrics['success_rate']:.1%}")
+print(f"• Average Routing Time: {metrics['avg_execution_time']:.3f}s")
+print(f"• Node Performance: {metrics['node_stats']}")
+```
+
+#### Real-Time Monitoring
+
+```python
+# Stream execution with routing decisions
+async for state in compiled_graph.stream(initial_state, stream_mode="values"):
+    routing_decisions = state.get('routing_decisions', [])
+    if routing_decisions:
+        print(f"🛣️ Routing: {routing_decisions[-1]}")
+
+    execution_log = state.get('execution_log', [])
+    if execution_log:
+        print(f"📝 Execution: {execution_log[-1]}")
+```
+
 ## Error Handling and Recovery
 
 ### Graph-Level Error Handling
@@ -629,16 +1090,173 @@ if __name__ == "__main__":
 - Use custom join conditions when needed
 
 ### 4. Memory Management
+- **Memory**: Persistent storage with JSON serialization to disk
+- **Advanced Features**: Message search, recent message retrieval, statistics
+- **Session Management**: Multi-session support with automatic loading/saving
+- **Metadata Support**: Custom metadata storage and retrieval
 - Enable automatic state cleanup with `set_default_state_cleanup()`
 - Configure checkpointer limits (max_threads, ttl_seconds)
 - Monitor memory usage in long-running workflows
 
-### 5. Error Handling
+#### Memory Features
+
+```python
+from spoon_ai.graph import Memory
+
+# Create persistent memory with custom path
+memory = Memory(
+    storage_path="./my_memory",
+    session_id="conversation_bot"
+)
+
+# Advanced memory operations
+memory.add_message({"role": "user", "content": "Hello!"})
+results = memory.search_messages("help", limit=5)
+recent = memory.get_recent_messages(hours=24)
+stats = memory.get_statistics()
+
+# Metadata management
+memory.set_metadata("last_interaction", "2024-01-15")
+last_time = memory.get_metadata("last_interaction")
+```
+
+#### Memory Statistics
+
+```python
+stats = agent.get_memory_statistics()
+print(f"Messages: {stats['total_messages']}")
+print(f"Session: {stats['session_id']}")
+print(f"Storage: {stats['storage_path']}")
+print(f"File Size: {stats['file_size']} bytes")
+```
+
+## Memory System
+
+The Memory system replaces the legacy MockMemory with a robust, persistent memory implementation that provides enterprise-grade conversation persistence, search capabilities, and session management.
+
+### Features
+
+- **Persistent Storage**: Automatic JSON serialization to disk with error recovery
+- **Session Management**: Multi-session support with automatic loading/saving
+- **Advanced Search**: Full-text search through message history
+- **Time-based Queries**: Retrieve messages from specific time periods
+- **Metadata Support**: Custom key-value metadata storage
+- **Statistics**: Comprehensive memory usage and performance metrics
+- **Backward Compatibility**: Drop-in replacement for MockMemory
+
+### Basic Usage
+
+```python
+from spoon_ai.graph import GraphAgent, Memory
+
+# Create agent with persistent memory
+agent = GraphAgent(
+    name="MyBot",
+    graph=my_graph,
+    memory_path="./bot_memory",  # Custom storage directory
+    session_id="production_session"  # Specific session identifier
+)
+
+# Memory automatically persists to disk
+await agent.run("Hello, remember this conversation!")
+```
+
+### Advanced Memory Operations
+
+```python
+# Search through message history
+search_results = agent.search_memory("important topic", limit=10)
+
+# Get recent conversations
+recent_messages = agent.get_recent_memory(hours=24)
+
+# Access memory statistics
+stats = agent.get_memory_statistics()
+print(f"Total messages: {stats['total_messages']}")
+print(f"Storage location: {stats['storage_path']}")
+
+# Manage metadata
+agent.set_memory_metadata("last_training", "2024-01-15")
+training_date = agent.get_memory_metadata("last_training")
+
+# Switch sessions
+agent.load_session("different_session")
+```
+
+### Memory File Structure
+
+Memory stores data in JSON format with the following structure:
+
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello!",
+      "timestamp": "2024-01-15T10:30:00.000000"
+    }
+  ],
+  "metadata": {
+    "custom_key": "custom_value",
+    "last_interaction": "2024-01-15"
+  },
+  "last_updated": "2024-01-15T10:30:00.000000",
+  "session_id": "conversation_demo"
+}
+```
+
+### Configuration Options
+
+```python
+# Custom storage path
+memory = Memory(storage_path="/path/to/storage")
+
+# Custom session ID
+memory = Memory(session_id="my_custom_session")
+
+# Both options
+memory = Memory(
+    storage_path="./data",
+    session_id="production_bot"
+)
+```
+
+### Error Handling
+
+Memory includes comprehensive error handling:
+
+- **Disk I/O Errors**: Graceful fallback with warnings
+- **Corrupted Files**: Automatic recovery with backup creation
+- **Permission Issues**: Clear error messages with recovery suggestions
+- **Large Files**: Automatic file size monitoring and optimization
+
+### Performance Considerations
+
+- **Lazy Loading**: Memory files are loaded only when needed
+- **Incremental Saves**: Only changed data is written to disk
+- **Compression**: Future support for compressed storage
+- **Indexing**: Search operations use efficient string matching
+
+### Migration from MockMemory
+
+The Memory system is fully backward compatible:
+
+```python
+# Old code (still works)
+from spoon_ai.graph import MockMemory
+memory = MockMemory()  # Now uses Memory internally
+
+# New recommended approach
+from spoon_ai.graph import Memory
+memory = Memory()  # Direct instantiation
+```
+
+### 6. Error Handling
 - Use appropriate error strategies for parallel groups
 - Implement recovery patterns with RouterResult
 - Leverage checkpoint resume for fault tolerance
 
-### 6. Monitoring
+### 7. Monitoring
 - Enable execution monitoring for production workflows
 - Track node performance metrics with `get_execution_metrics()`
 - Use streaming for real-time monitoring
