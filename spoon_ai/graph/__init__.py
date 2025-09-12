@@ -36,6 +36,16 @@ from .decorators import (
 from .checkpointer import InMemoryCheckpointer
 
 # Engine and agent implementations (now within this package)
-from .engine import StateGraph, CompiledGraph, interrupt
-from .agent import GraphAgent, AgentStateCheckpoint, MockMemory
+from .engine import (
+    StateGraph,
+    CompiledGraph,
+    BaseNode,
+    RunnableNode,
+    ToolNode,
+    ConditionNode,
+    START,
+    END,
+    interrupt
+)
+from .agent import GraphAgent, AgentStateCheckpoint, MockMemory, Memory
 

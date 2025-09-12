@@ -1,13 +1,15 @@
 """
-Graph engine: StateGraph, CompiledGraph, and interrupt API.
+Graph engine: StateGraph, CompiledGraph, and interrupt API - LangGraph style implementation.
 """
 import asyncio
 import logging
 import uuid
 import inspect
 import time
+import re
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal
+from abc import ABC, abstractmethod
 
 from .exceptions import (
     GraphExecutionError,
@@ -32,32 +34,202 @@ from .checkpointer import InMemoryCheckpointer
 
 logger = logging.getLogger(__name__)
 
+# Type variables for generic state handling
+State = TypeVar('State')
+ConfigurableFieldSpec = Dict[str, Any]
+
+# Special nodes in LangGraph style
+START = "__start__"
+END = "__end__"
+
+
+class BaseNode(ABC, Generic[State]):
+    """Base class for all graph nodes - LangGraph style"""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    @abstractmethod
+    async def __call__(self, state: State, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute the node logic"""
+        pass
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(name='{self.name}')"
+
+
+class RunnableNode(BaseNode[State]):
+    """Runnable node that wraps a function - LangGraph style"""
+
+    def __init__(self, name: str, func: Callable[[State], Any]):
+        super().__init__(name)
+        self.func = func
+
+    async def __call__(self, state: State, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute the wrapped function"""
+        try:
+            if asyncio.iscoroutinefunction(self.func):
+                result = await self.func(state)
+            else:
+                result = self.func(state)
+
+            # Handle different return types
+            if isinstance(result, dict):
+                return result
+            elif isinstance(result, (list, tuple)) and len(result) == 2:
+                # Handle (updates, next_node) format
+                updates, next_node = result
+                return {"updates": updates, "next_node": next_node}
+            else:
+                return {"result": result}
+
+        except Exception as e:
+            logger.error(f"Node {self.name} execution failed: {e}")
+            raise NodeExecutionError(f"Node '{self.name}' failed", node_name=self.name, original_error=e, state=state) from e
+
+
+class ToolNode(BaseNode[State]):
+    """Tool node for executing tools - LangGraph style"""
+
+    def __init__(self, name: str, tools: List[Any]):
+        super().__init__(name)
+        self.tools = tools
+
+    async def __call__(self, state: State, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute tools based on state"""
+        # Extract tool calls from state
+        tool_calls = state.get("tool_calls", [])
+        results = []
+
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("name")
+            tool_args = tool_call.get("args", {})
+
+            # Find the tool
+            tool = next((t for t in self.tools if getattr(t, 'name', None) == tool_name), None)
+            if not tool:
+                raise NodeExecutionError(f"Tool '{tool_name}' not found", node_name=self.name, state=state)
+
+            # Execute tool
+            try:
+                if hasattr(tool, 'execute') and asyncio.iscoroutinefunction(tool.execute):
+                    result = await tool.execute(**tool_args)
+                elif hasattr(tool, 'execute'):
+                    result = tool.execute(**tool_args)
+                else:
+                    # Direct function call
+                    result = tool(**tool_args)
+
+                results.append({
+                    "tool_call": tool_call,
+                    "result": result,
+                    "success": True
+                })
+            except Exception as e:
+                results.append({
+                    "tool_call": tool_call,
+                    "result": None,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        return {"tool_results": results}
+
+
+class ConditionNode(BaseNode[State]):
+    """Conditional node for routing decisions - LangGraph style"""
+
+    def __init__(self, name: str, condition_func: Callable[[State], str]):
+        super().__init__(name)
+        self.condition_func = condition_func
+
+    async def __call__(self, state: State, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute condition and return routing decision"""
+        try:
+            result = self.condition_func(state)
+            if asyncio.iscoroutinefunction(self.condition_func):
+                result = await self.condition_func(state)
+
+            return {"condition_result": result, "next_node": result}
+        except Exception as e:
+            logger.error(f"Condition node {self.name} failed: {e}")
+            raise NodeExecutionError(f"Condition '{self.name}' failed", node_name=self.name, original_error=e, state=state) from e
+
 
 def interrupt(data: Dict[str, Any]) -> Any:
     """Interrupt execution and wait for human input."""
     raise InterruptError(data)
 
 
-class StateGraph:
-    """Minimal-yet-complete StateGraph used by examples和tests。"""
+class RouteRule:
+    """Advanced routing rule for automatic path selection"""
 
-    def __init__(self, state_schema: type, checkpointer: InMemoryCheckpointer = None):
+    def __init__(self, condition: Union[str, Callable, Pattern], target: str, priority: int = 0):
+        self.condition = condition
+        self.target = target
+        self.priority = priority
+
+    def matches(self, state: Dict[str, Any], query: str = "") -> bool:
+        """Check if this rule matches the current state/query"""
+        if isinstance(self.condition, str):
+            # Simple string matching
+            return self.condition.lower() in (query + str(state)).lower()
+        elif isinstance(self.condition, Pattern):
+            # Regex pattern matching
+            return bool(self.condition.search(query + str(state)))
+        elif callable(self.condition):
+            # Custom function matching
+            return self.condition(state, query)
+        return False
+
+
+class StateGraph(Generic[State]):
+    """StateGraph implementation following LangGraph patterns"""
+
+    def __init__(self, state_schema: type, checkpointer: Optional[Any] = None, config_schema: Optional[type] = None):
         self.state_schema = state_schema
-        self.checkpointer = checkpointer or InMemoryCheckpointer()
-        self.nodes: Dict[str, Callable] = {}
-        # edges: start_node -> either callable(state)->str or tuple(condition, path_map)
-        self.edges: Dict[str, Any] = {}
-        self.entry_point: Optional[str] = None
+        self.config_schema = config_schema
+        self.checkpointer = checkpointer
+
+        # Node storage - LangGraph style
+        self.nodes: Dict[str, BaseNode[State]] = {}
+        self.node_functions: Dict[str, Callable] = {}  # For backward compatibility
+
+        # Edge management - LangGraph style
+        self.edges: Dict[str, List[tuple]] = {}  # (end_node, condition_func)
+        self.conditional_edges: Dict[str, Dict[str, Callable[[State], bool]]] = {}
+
+        # Special handling for START and END
+        self._entry_point: Optional[str] = None
         self._compiled = False
-        # parallel execution support
+
+        # Enhanced features
+        self.routing_rules: Dict[str, List[RouteRule]] = {}
+        self.intelligent_router: Optional[Callable[[Dict[str, Any], str], str]] = None
+
+        # LLM Router
+        self.llm_router: Optional[Callable[[Dict[str, Any], str], str]] = None
+        self.llm_router_config: Dict[str, Any] = {
+            "model": "gpt-4",
+            "temperature": 0.1,
+            "max_tokens": 100
+        }
+
+        # Parallel execution
+        self.parallel_branches: Dict[str, List[str]] = {}
         self.parallel_groups: Dict[str, List[str]] = {}
-        self.node_to_group: Dict[str, str] = {}
-        self.parallel_entry_nodes: set[str] = set()
         self.parallel_group_configs: Dict[str, Dict[str, Any]] = {}
-        # monitoring & cleanup
+        self.node_to_group: Dict[str, str] = {}
+        self.parallel_entry_nodes: List[str] = []
+
+        # Configuration
+        self.config: Dict[str, Any] = {}
+        self.stream_mode: str = "values"
+        self.stream_channels: List[str] = ["values", "updates", "debug"]
+
+        # Monitoring
         self.monitoring_enabled: bool = False
         self.monitoring_metrics: List[str] = []
-        self.state_cleanup = None  # Optional[Callable[[Dict[str, Any]], None]]
 
     def enable_monitoring(self, metrics: Optional[List[str]] = None) -> "StateGraph":
         self.monitoring_enabled = True
@@ -65,119 +237,371 @@ class StateGraph:
             self.monitoring_metrics = metrics
         return self
 
-    def configure_parallel_group(self, group_name: str, *, join_strategy: str = "all_complete", timeout: Optional[float] = None, error_strategy: str = "fail_fast", join_condition: Optional[Callable] = None) -> "StateGraph":
-        self.parallel_group_configs[group_name] = {
-            "join_strategy": join_strategy,
-            "timeout": timeout,
-            "error_strategy": error_strategy,
-            "join_condition": join_condition,
-        }
-        return self
+    def add_node(self, node_name: str, node: Union[BaseNode[State], Callable[[State], Any]]) -> "StateGraph":
+        """Add a node to the graph - LangGraph style"""
+        if node_name in [START, END]:
+            raise GraphConfigurationError(f"Node name '{node_name}' is reserved", component="node")
 
-    def set_state_cleanup(self, cleaner: Callable[[Dict[str, Any]], None]) -> "StateGraph":
-        self.state_cleanup = cleaner
-        return self
+        if isinstance(node, BaseNode):
+            self.nodes[node_name] = node
+        elif callable(node):
+            # Wrap function in RunnableNode
+            self.nodes[node_name] = RunnableNode(node_name, node)
+            self.node_functions[node_name] = node  # For backward compatibility
+        else:
+            raise GraphConfigurationError(f"Node must be callable or BaseNode instance", component="node")
 
-    def set_default_state_cleanup(self) -> "StateGraph":
-        """Set a default lightweight state cleanup that removes large temporary data"""
-        def default_cleaner(state: Dict[str, Any]) -> None:
-            # Remove temporary data that might accumulate
-            keys_to_clean = []
-            for key, value in state.items():
-                if key.startswith("__temp_") or key.startswith("_cache_"):
-                    keys_to_clean.append(key)
-                elif isinstance(value, (list, dict)) and key.endswith("_history"):
-                    # Limit history lists to last 100 entries
-                    if isinstance(value, list) and len(value) > 100:
-                        state[key] = value[-100:]
-                elif isinstance(value, str) and len(value) > 10000:
-                    # Truncate very large strings
-                    state[key] = value[:10000] + "...[truncated]"
-
-            for key in keys_to_clean:
-                state.pop(key, None)
-
-        self.state_cleanup = default_cleaner
-        return self
-
-    def add_node(self, name: str, action: Callable, parallel_group: Optional[str] = None) -> "StateGraph":
-        if not name or not isinstance(name, str):
-            raise GraphConfigurationError("Node name must be a non-empty string", component="node", details={"name": name})
-        if name in ["START", "END"]:
-            raise GraphConfigurationError(f"Node name '{name}' is reserved", component="node", details={"name": name})
-        if name in self.nodes:
-            raise GraphConfigurationError(f"Node '{name}' already exists", component="node", details={"name": name})
-        if not callable(action):
-            raise GraphConfigurationError("Node action must be callable", component="node", details={"name": name})
-        # Keep original action (tests compare identity). No decorator wrapping here.
-        self.nodes[name] = action
-        # Register parallel group if provided
-        if parallel_group:
-            self.parallel_groups.setdefault(parallel_group, []).append(name)
-            self.node_to_group[name] = parallel_group
         return self
 
     def add_edge(self, start_node: str, end_node: str) -> "StateGraph":
-        if start_node != "START" and start_node not in self.nodes:
+        """Add an unconditional edge - LangGraph style"""
+        if start_node not in self.nodes and start_node != START:
             raise GraphConfigurationError(f"Start node '{start_node}' does not exist", component="edge")
-        if end_node != "END" and end_node not in self.nodes:
+        if end_node not in self.nodes and end_node != END:
             raise GraphConfigurationError(f"End node '{end_node}' does not exist", component="edge")
-        self.edges[start_node] = lambda state: end_node
-        # Mark entry node for parallel group if destination is in a group
-        if end_node in self.node_to_group:
-            self.parallel_entry_nodes.add(end_node)
+
+        if start_node not in self.edges:
+            self.edges[start_node] = []
+        self.edges[start_node].append((end_node, None))
         return self
 
-    def add_conditional_edges(self, start_node: str, condition: Callable[[Dict[str, Any]], str], path_map: Dict[str, str]) -> "StateGraph":
-        if start_node not in self.nodes:
+    def add_conditional_edges(self, start_node: str, condition: Callable[[State], str],
+                             path_map: Dict[str, str]) -> "StateGraph":
+        """Add conditional edges - LangGraph style"""
+        if start_node not in self.nodes and start_node != START:
             raise GraphConfigurationError(f"Start node '{start_node}' does not exist", component="conditional_edge")
-        if not callable(condition):
-            raise GraphConfigurationError("Condition function must be callable", component="conditional_edge")
-        if not path_map:
-            raise GraphConfigurationError("Path map cannot be empty", component="conditional_edge")
-        # Validate destinations
-        invalid = [dest for dest in path_map.values() if dest != "END" and dest not in self.nodes]
-        if invalid:
-            raise GraphConfigurationError(f"Destination nodes do not exist: {invalid}", component="conditional_edge")
-        self.edges[start_node] = (condition, path_map)
+
+        # Validate path_map destinations
+        for path, target in path_map.items():
+            if target not in self.nodes and target != END:
+                raise GraphConfigurationError(f"Target node '{target}' does not exist", component="conditional_edge")
+
+        if start_node not in self.edges:
+            self.edges[start_node] = []
+        self.edges[start_node].append((condition, path_map))
         return self
 
     def set_entry_point(self, node_name: str) -> "StateGraph":
-        if node_name not in self.nodes:
+        """Set the entry point - LangGraph style"""
+        if node_name not in self.nodes and node_name != START:
             raise GraphConfigurationError(f"Entry point node '{node_name}' does not exist", component="entry_point")
-        self.entry_point = node_name
+        self._entry_point = node_name
         return self
 
-    def compile(self) -> "CompiledGraph":
+    def add_tool_node(self, tools: List[Any], name: str = "tools") -> "StateGraph":
+        """Add a tool node - LangGraph style"""
+        tool_node = ToolNode(name, tools)
+        return self.add_node(name, tool_node)
+
+    def add_conditional_node(self, condition_func: Callable[[State], str], name: str = "condition") -> "StateGraph":
+        """Add a conditional node - LangGraph style"""
+        condition_node = ConditionNode(name, condition_func)
+        return self.add_node(name, condition_node)
+
+    def add_parallel_group(self, group_name: str, nodes: List[str],
+                          config: Optional[Dict[str, Any]] = None) -> "StateGraph":
+        """Add a parallel execution group"""
+        # Validate that all nodes exist
+        for node_name in nodes:
+            if node_name not in self.nodes and node_name not in [START, END]:
+                raise GraphConfigurationError(f"Node '{node_name}' does not exist", component="parallel_group")
+
+        self.parallel_groups[group_name] = nodes
+        self.parallel_group_configs[group_name] = config or {}
+
+        # Mark nodes as belonging to this group
+        for node_name in nodes:
+            self.node_to_group[node_name] = group_name
+
+        # Mark first node as entry point for parallel execution
+        if nodes:
+            self.parallel_entry_nodes.append(nodes[0])
+
+        return self
+
+    def add_routing_rule(self, source_node: str, condition: Union[str, Callable[[State, str], bool]],
+                        target_node: str, priority: int = 0) -> "StateGraph":
+        """Add an intelligent routing rule"""
+        if source_node not in self.nodes and source_node != START and source_node != "__start__":
+            raise GraphConfigurationError(f"Source node '{source_node}' does not exist", component="routing_rule")
+        if target_node not in self.nodes and target_node != END and target_node != "__end__":
+            raise GraphConfigurationError(f"Target node '{target_node}' does not exist", component="routing_rule")
+
+        if source_node not in self.routing_rules:
+            self.routing_rules[source_node] = []
+
+        rule = RouteRule(condition, target_node, priority)
+        self.routing_rules[source_node].append(rule)
+
+        # Sort rules by priority (highest first)
+        self.routing_rules[source_node].sort(key=lambda r: r.priority, reverse=True)
+
+        return self
+
+    def add_pattern_routing(self, source_node: str, pattern: str, target_node: str,
+                           priority: int = 0) -> "StateGraph":
+        """Add pattern-based routing rule"""
+        try:
+            compiled_pattern = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            raise GraphConfigurationError(f"Invalid regex pattern: {pattern}", component="pattern_routing")
+
+        return self.add_routing_rule(source_node, compiled_pattern, target_node, priority)
+
+    def set_intelligent_router(self, router_func: Callable[[Dict[str, Any], str], str]) -> "StateGraph":
+        """Set the intelligent router function"""
+        self.intelligent_router = router_func
+        return self
+
+    def set_llm_router(self, router_func: Optional[Callable[[Dict[str, Any], str], str]] = None,
+                       config: Optional[Dict[str, Any]] = None) -> "StateGraph":
+        """Set the LLM-powered router function
+
+        Args:
+            router_func: Custom LLM router function. If None, uses default LLM router.
+            config: Configuration for LLM router (model, temperature, max_tokens, etc.)
+        """
+        if config:
+            self.llm_router_config.update(config)
+
+        if router_func:
+            self.llm_router = router_func
+        else:
+            # Use default LLM router - will be created when needed
+            self.llm_router = self._create_default_llm_router
+
+        return self
+
+    def _create_default_llm_router(self, state: Dict[str, Any], query: str) -> str:
+        """Create and use default LLM router for natural language routing"""
+        try:
+            # Lazy import to avoid circular dependencies
+            from spoon_ai.llm.manager import get_llm_manager
+
+            llm_manager = get_llm_manager()
+            config = self.llm_router_config
+
+            routing_prompt = f"""
+            Analyze this user query and determine the BEST next step in our workflow.
+            Return ONLY the step name from these options:
+
+            Available steps:
+            {self._get_available_steps_for_routing()}
+
+            Query: "{query}"
+
+            Consider the current state and conversation context.
+            Return ONLY the step name (lowercase, no explanation).
+            """
+
+            messages = [{"role": "user", "content": routing_prompt}]
+
+            # Use LLM to determine next step
+            response = llm_manager.chat(messages, **config)
+            next_step = response.content.strip().lower()
+
+            # Validate the response
+            available_steps = self._get_available_step_names()
+            logger.info(f"LLM Router - Query: '{query}'")
+            logger.info(f"LLM Router - Available steps: {available_steps}")
+            logger.info(f"LLM Router - LLM response: '{response.content}'")
+            logger.info(f"LLM Router - Parsed step: '{next_step}'")
+
+            if next_step not in available_steps:
+                logger.warning(f"LLM returned invalid step '{next_step}', available: {available_steps}")
+                # Instead of defaulting to entry point, try to find a reasonable fallback
+                if "price" in query.lower() or "market" in query.lower():
+                    if "fetch_market_data" in available_steps:
+                        return "fetch_market_data"
+                elif "buy" in query.lower() or "sell" in query.lower() or "trade" in query.lower():
+                    if "execute_trade" in available_steps:
+                        return "execute_trade"
+                elif "analyze" in query.lower():
+                    if "analyze_market" in available_steps:
+                        return "analyze_market"
+                else:
+                    if "generate_response" in available_steps:
+                        return "generate_response"
+
+            logger.info(f"LLM Router decided: {next_step}")
+            return next_step
+
+        except Exception as e:
+            logger.error(f"LLM routing failed: {e}")
+            # Fallback to entry point
+            return self._entry_point or list(self.nodes.keys())[0]
+
+    def _get_available_steps_for_routing(self) -> str:
+        """Get available steps description for LLM routing"""
+        steps = []
+        for node_name in self.nodes.keys():
+            if node_name not in [START, END]:
+                steps.append(f"- {node_name}: Execute {node_name.replace('_', ' ')}")
+
+        if not steps:
+            return "- analyze_intent: Analyze user intent"
+
+        return "\n".join(steps)
+
+    def _get_available_step_names(self) -> List[str]:
+        """Get list of available step names for validation"""
+        return [name for name in self.nodes.keys() if name not in [START, END]]
+
+    def enable_llm_routing(self, config: Optional[Dict[str, Any]] = None) -> "StateGraph":
+        """Enable LLM-powered natural language routing
+
+        This automatically sets up LLM routing for the graph entry point.
+        """
+        if config:
+            self.llm_router_config.update(config)
+
+        # Set LLM router as the intelligent router
+        self.set_llm_router()
+        return self
+
+    def compile(self, checkpointer: Optional[Any] = None) -> "CompiledGraph":
+        """Compile the graph - LangGraph style"""
         errors: List[str] = []
-        if not self.entry_point:
+
+        if not self._entry_point:
             errors.append("Graph must have an entry point")
+
         if not self.nodes:
             errors.append("Graph must have at least one node")
+
         if errors:
             raise GraphConfigurationError(
                 f"Graph compilation failed: {'; '.join(errors)}",
                 component="compilation",
-                details={"errors": errors},
+                details={"errors": errors}
             )
+
         self._compiled = True
-        return CompiledGraph(self)
+        return CompiledGraph(self, checkpointer)
 
-    def resume_from_checkpoint(self, thread_id: str, checkpoint_id: Optional[str] = None) -> "CompiledGraph":
-        """Create a CompiledGraph that can resume from a specific checkpoint"""
-        compiled = CompiledGraph(self)
-        compiled._resume_thread_id = thread_id
-        compiled._resume_checkpoint_id = checkpoint_id
-        return compiled
+    def get_graph(self) -> Dict[str, Any]:
+        """Get graph structure for visualization/debugging"""
+        return {
+            "nodes": list(self.nodes.keys()),
+            "edges": self.edges,
+            "entry_point": self._entry_point,
+            "config": self.config
+        }
 
 
-class CompiledGraph:
-    def __init__(self, graph: StateGraph):
+
+
+class CompiledGraph(Generic[State]):
+    """Compiled graph for execution - LangGraph style"""
+
+    def __init__(self, graph: StateGraph[State], checkpointer: Optional[Any] = None):
         self.graph = graph
+        self.checkpointer = checkpointer or graph.checkpointer
+
+        # Execution state
         self.execution_history: List[Dict[str, Any]] = []
-        self.max_execution_history = 1000  # Ring buffer limit
+        self.max_execution_history = 1000
+
+        # Resume functionality
         self._resume_thread_id: Optional[str] = None
         self._resume_checkpoint_id: Optional[str] = None
+
+        # Current execution context
+        self._current_node: Optional[str] = None
+        self._iteration: int = 0
+
+        # Execution metrics
+        self.execution_metrics = {
+            "total_executions": 0,
+            "success_rate": 0.0,
+            "average_execution_time": 0.0,
+            "routing_performance": {}
+        }
+
+    def _find_matching_route(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
+        """Find matching routing rule for the current node and state"""
+        if current_node not in self.graph.routing_rules:
+            return None
+
+        query = state.get("user_query", "").lower()
+
+        # Check routing rules in priority order
+        for rule in self.graph.routing_rules[current_node]:
+            if rule.matches(state, query):
+                return rule.target
+
+        return None
+
+    def get_execution_metrics(self) -> Dict[str, Any]:
+        """Get execution metrics"""
+        return self.execution_metrics.copy()
+
+    def _get_next_node(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
+        """Determine the next node to execute"""
+        query = state.get("user_query", "")
+        logger.info(f"Getting next node from '{current_node}' for query: '{query}'")
+
+        # Priority 1: LLM Router (if available)
+        if self.graph.llm_router:
+            try:
+                next_node = self.graph.llm_router(state, query)
+                if next_node and next_node != current_node and next_node in self.graph.nodes:
+                    logger.info(f"LLM Router selected: {next_node}")
+                    return next_node
+            except Exception as e:
+                logger.warning(f"LLM router failed: {e}")
+
+        # Priority 2: Intelligent router function
+        if self.graph.intelligent_router:
+            logger.info("Trying intelligent router...")
+            try:
+                next_node = self.graph.intelligent_router(state, query)
+                if next_node and next_node != current_node:
+                    logger.info(f"Intelligent router selected: {next_node}")
+                    return next_node
+            except Exception as e:
+                logger.warning(f"Intelligent router failed: {e}")
+
+        # Priority 3: Intelligent routing rules
+        logger.info("Trying routing rules...")
+        matching_route = self._find_matching_route(current_node, state)
+        if matching_route:
+            logger.info(f"Routing rule matched: {matching_route}")
+            return matching_route
+
+        # Priority 4: Fall back to regular edges
+        logger.info("Falling back to regular edges...")
+        if current_node in self.graph.edges:
+            logger.info(f"Found {len(self.graph.edges[current_node])} edges from {current_node}")
+            for edge_target, edge_condition in self.graph.edges[current_node]:
+                logger.info(f"Checking edge: target={edge_target}, condition={edge_condition}")
+                # Case A: Unconditional edge (edge_target must be a valid node or END)
+                if edge_condition is None and isinstance(edge_target, str) and (edge_target in self.graph.nodes or edge_target == END):
+                    logger.info(f"Using unconditional edge to: {edge_target}")
+                    return edge_target
+
+                # Case B: LangGraph-style conditional edges stored as (condition_func, path_map)
+                if callable(edge_target) and isinstance(edge_condition, dict):
+                    try:
+                        cond_key = edge_target(state)
+                        if isinstance(cond_key, str) and cond_key in edge_condition:
+                            selected = edge_condition[cond_key]
+                            logger.info(f"Conditional map selected: {selected} for key {cond_key}")
+                            return selected
+                    except Exception as e:
+                        logger.warning(f"Conditional map evaluation failed: {e}")
+
+                # Case C: Simple boolean condition (edge_target is destination)
+                if isinstance(edge_target, str) and (edge_target in self.graph.nodes or edge_target == END) and callable(edge_condition):
+                    try:
+                        if edge_condition(state):
+                            logger.info(f"Predicate condition to {edge_target} is true")
+                            return edge_target
+                    except Exception as e:
+                        logger.warning(f"Predicate condition failed: {e}")
+
+        logger.warning("No valid next node found")
+        return None
 
     async def invoke(self, initial_state: Optional[Dict[str, Any]] = None, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         config = config or {}
@@ -193,11 +617,11 @@ class CompiledGraph:
                 iteration = checkpoint.metadata.get("iteration", 0)
             else:
                 state = self._initialize_state(initial_state)
-                current_node = self.graph.entry_point
+                current_node = self.graph._entry_point
                 iteration = 0
         else:
             state = self._initialize_state(initial_state)
-            current_node = self.graph.entry_point
+            current_node = self.graph._entry_point
             iteration = 0
 
         max_iterations = 100
@@ -214,22 +638,14 @@ class CompiledGraph:
                     pass
                 # execute current node or parallel group
                 try:
-                    # If current node is a parallel group entry, execute the entire group concurrently
-                    if current_node in self.graph.node_to_group and current_node in self.graph.parallel_entry_nodes:
+                    # Check if current node is part of a parallel group
+                    if current_node in self.graph.node_to_group:
                         group_name = self.graph.node_to_group[current_node]
+                        logger.info(f"Executing parallel group: {group_name}")
                         await self._execute_parallel_group(group_name, state)
                     else:
                         result = await self._execute_node(current_node, state)
-                        if isinstance(result, Command):
-                            if result.update:
-                                self._update_state_with_reducers(state, result.update)
-                                self._maybe_cleanup_state(state)
-                            if result.goto:
-                                current_node = result.goto
-                                if current_node == "END":
-                                    break
-                                continue
-                        elif isinstance(result, dict):
+                        if isinstance(result, dict):
                             self._update_state_with_reducers(state, result)
                             self._maybe_cleanup_state(state)
                 except InterruptError as e:
@@ -241,12 +657,12 @@ class CompiledGraph:
                         pass
                     return {**state, "__interrupt__": [{"interrupt_id": e.interrupt_id, "value": e.interrupt_data, "node": current_node, "iteration": iteration}]}
 
-                # next
-                next_node = await self._get_next_node(current_node, state)
+                # next - use intelligent routing
+                next_node = self._get_next_node(current_node, state)
                 if next_node == current_node:
                     break
                 current_node = next_node
-                if current_node == "END" or current_node is None:
+                if current_node == END or current_node is None:
                     break
             if iteration >= max_iterations:
                 raise GraphExecutionError(f"Graph execution exceeded maximum iterations ({max_iterations})", node=current_node, iteration=iteration)
@@ -255,6 +671,109 @@ class CompiledGraph:
             raise
         except Exception as e:
             raise GraphExecutionError(f"Graph execution failed: {e}", node=current_node, iteration=iteration) from e
+
+
+    def _initialize_state(self, initial_state: State) -> State:
+        """Initialize state for execution"""
+        if initial_state is None:
+            # Create default state based on schema
+            if hasattr(self.graph.state_schema, '__annotations__'):
+                state = {}
+                for field_name, field_type in self.graph.state_schema.__annotations__.items():
+                    if hasattr(field_type, '__origin__') and field_type.__origin__ is list:
+                        state[field_name] = []
+                    elif hasattr(field_type, '__origin__') and field_type.__origin__ is dict:
+                        state[field_name] = {}
+                    else:
+                        state[field_name] = None
+                return state
+            else:
+                return {}
+        return initial_state
+
+    async def _execute_node(self, node_name: str, state: State, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a node and return its result"""
+        node = self.graph.nodes.get(node_name)
+        if not node:
+            raise GraphExecutionError(f"Node '{node_name}' not found")
+
+        try:
+            # Call the node with proper parameters
+            if hasattr(node, '__call__'):
+                if config is not None:
+                    result = await node(state, config)
+                else:
+                    result = await node(state)
+            else:
+                # Fallback for old-style nodes
+                result = await node(state)
+            return result if isinstance(result, dict) else {"result": result}
+        except Exception as e:
+            logger.error(f"Node {node_name} execution failed: {e}")
+            raise NodeExecutionError(f"Node '{node_name}' failed", node_name=node_name, original_error=e, state=state) from e
+
+    def _update_state(self, state: State, updates: Dict[str, Any]) -> None:
+        """Update state with node results"""
+        if not updates:
+            return
+
+        for key, value in updates.items():
+            if key not in state:
+                state[key] = value
+            elif isinstance(state[key], dict) and isinstance(value, dict):
+                # Deep merge for dicts
+                self._deep_merge(state[key], value)
+            elif isinstance(state[key], list) and isinstance(value, list):
+                # Append for lists
+                state[key].extend(value)
+            else:
+                # Replace for other types
+                state[key] = value
+
+    def _deep_merge(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Deep merge two dictionaries"""
+        for key, value in source.items():
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+                self._deep_merge(target[key], value)
+            else:
+                target[key] = value
+
+    def _get_next_node(self, current_node: str, state: State, node_result: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Determine the next node to execute"""
+        # Check edges from current node
+        if current_node in self.graph.edges:
+            for edge_target, edge_condition in self.graph.edges[current_node]:
+                # Case A: Unconditional edge
+                if edge_condition is None and isinstance(edge_target, str):
+                    return edge_target
+
+                # Case B: LangGraph-style conditional edges stored as (condition_func, path_map)
+                if callable(edge_target) and isinstance(edge_condition, dict):
+                    try:
+                        condition_key = edge_target(state)
+                        if isinstance(condition_key, str) and condition_key in edge_condition:
+                            selected = edge_condition[condition_key]
+                            return selected
+                    except Exception as e:
+                        logger.warning(f"Conditional map evaluation failed for {current_node}: {e}")
+
+                # Case C: Simple predicate condition with explicit target
+                if isinstance(edge_target, str) and callable(edge_condition):
+                    try:
+                        cond = edge_condition(state)
+                        if cond is True:
+                            return edge_target
+                    except Exception as e:
+                        logger.warning(f"Predicate condition failed for {current_node}->{edge_target}: {e}")
+
+        # Check for explicit next_node in result
+        if node_result and "next_node" in node_result:
+            next_node = node_result["next_node"]
+            if next_node in self.graph.nodes or next_node == END:
+                return next_node
+
+        # No next node found
+        return None
 
     def _maybe_cleanup_state(self, state: Dict[str, Any]) -> None:
         try:
@@ -450,7 +969,7 @@ class CompiledGraph:
     async def stream(self, initial_state: Optional[Dict[str, Any]] = None, config: Optional[Dict[str, Any]] = None, stream_mode: str = "values"):
         config = config or {}
         state = self._initialize_state(initial_state)
-        current_node = self.graph.entry_point
+        current_node = self.graph._entry_point
         iteration = 0
         max_iterations = 100
         while current_node and iteration < max_iterations:
@@ -499,89 +1018,7 @@ class CompiledGraph:
             state.update(initial_state)
         return state
 
-    async def _execute_node(self, node_name: str, state: Dict[str, Any]) -> Any:
-        node_action = self.graph.nodes[node_name]
-        start_time = datetime.now()
-        try:
-            # Create NodeContext for nodes that expect it
-            context = NodeContext(
-                node_name=node_name,
-                iteration=getattr(self, '_current_iteration', 0),
-                thread_id=getattr(self, '_current_thread_id', 'default'),
-                start_time=start_time
-            )
 
-            # Check if node function expects context parameter
-            sig = inspect.signature(node_action)
-            expects_context = len(sig.parameters) > 1
-
-            if asyncio.iscoroutinefunction(node_action):
-                if expects_context:
-                    result = await node_action(state, context)
-                else:
-                    result = await node_action(state)
-            else:
-                if expects_context:
-                    result = node_action(state, context)
-                else:
-                    result = node_action(state)
-
-            end_time = datetime.now()
-            context.execution_time = (end_time - start_time).total_seconds()
-            self._record_execution_metrics(node_name, start_time, end_time, True)
-
-            # Handle RouterResult - allow nodes to directly control routing
-            if isinstance(result, RouterResult):
-                # Convert RouterResult to Command with goto
-                return Command(
-                    update={"__router_metadata__": {
-                        "node": node_name,
-                        "next_node": result.next_node,
-                        "confidence": result.confidence,
-                        "reasoning": result.reasoning,
-                        "metadata": result.metadata,
-                        "alternative_paths": result.alternative_paths
-                    }},
-                    goto=result.next_node
-                )
-
-            return result
-        except InterruptError:
-            end_time = datetime.now()
-            self._record_execution_metrics(node_name, start_time, end_time, False, "InterruptError")
-            raise
-        except Exception as e:
-            end_time = datetime.now()
-            self._record_execution_metrics(node_name, start_time, end_time, False, str(e))
-            raise NodeExecutionError(f"Node '{node_name}' failed: {e}", node_name=node_name, original_error=e, state=state) from e
-
-    async def _get_next_node(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
-        if current_node not in self.graph.edges:
-            return None
-        edge = self.graph.edges[current_node]
-        if isinstance(edge, tuple):
-            condition_func, path_map = edge
-            try:
-                cond = await condition_func(state) if asyncio.iscoroutinefunction(condition_func) else condition_func(state)
-                if cond in path_map:
-                    return path_map[cond]
-                else:
-                    raise EdgeRoutingError(
-                        f"Condition result '{cond}' not found in path map for node '{current_node}'. Available paths: {list(path_map.keys())}",
-                        source_node=current_node,
-                        condition_result=cond,
-                        available_paths=list(path_map.keys()),
-                    )
-            except EdgeRoutingError:
-                raise
-            except Exception as e:
-                raise NodeExecutionError(f"Condition function failed: {e}", node_name=current_node, original_error=e, state=state) from e
-        elif callable(edge):
-            try:
-                return await edge(state) if asyncio.iscoroutinefunction(edge) else edge(state)
-            except Exception as e:
-                raise NodeExecutionError(f"Edge function failed: {e}", node_name=current_node, original_error=e, state=state) from e
-        return None
 
     def _update_state_with_reducers(self, state: Dict[str, Any], updates: Dict[str, Any]) -> None:
         for key, value in updates.items():
@@ -592,7 +1029,10 @@ class CompiledGraph:
             if isinstance(state[key], dict) and isinstance(value, dict):
                 state[key] = merge_dicts(state[key], value)
             elif isinstance(state[key], list) and isinstance(value, list):
-                state[key] = state[key] + value
+                # Cap list growth to avoid MemoryError
+                combined = state[key] + value
+                # keep only last 100 entries to bound memory
+                state[key] = combined[-100:]
             else:
                 state[key] = value
 
