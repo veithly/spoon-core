@@ -99,6 +99,12 @@ PRIVATE_KEY=your-wallet-private-key
 RPC_URL=https://mainnet.rpc
 CHAIN_ID=12345
 
+# Turnkey SDK Configuration
+TURNKEY_BASE_URL=https://api.turnkey.com
+TURNKEY_API_PUBLIC_KEY=your-turnkey-public-key
+TURNKEY_API_PRIVATE_KEY=your-turnkey-private-key-hex
+TURNKEY_ORG_ID=your-turnkey-organization-id
+
 # Tool-specific Keys
 TAVILY_API_KEY=your-tavily-api-key
 OKX_API_KEY=your-okx-api-key
@@ -260,6 +266,31 @@ response = await llm_manager.chat_with_tools(
     provider="openai"
 )
 ```
+
+### Turnkey SDK Usage
+
+For blockchain key management and secure transaction signing:
+
+```python
+from spoon_ai.turnkey import Turnkey
+
+# Initialize Turnkey client (requires TURNKEY_* env vars)
+client = Turnkey()
+
+# Sign an EVM transaction
+result = client.sign_evm_transaction(
+    sign_with="0x_your_wallet_address",
+    unsigned_tx="0x_unsigned_transaction_hex"
+)
+
+# Sign a message
+result = client.sign_message(
+    sign_with="0x_your_wallet_address", 
+    message="Hello Turnkey!"
+)
+```
+
+See `examples/turnkey/` for complete usage examples.
 
 ### Provider Configuration
 
