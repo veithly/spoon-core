@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.tools.mcp_tool import MCPTool
-from spoon_ai.config import ConfigManager
 from spoon_ai.llm.manager import LLMManager
 from spoon_ai.chat import ChatBot
 import logging

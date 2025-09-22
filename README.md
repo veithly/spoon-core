@@ -423,53 +423,6 @@ result = await compiled.invoke({"counter": 0, "completed": False})
 
 🎯 **[Comprehensive Demo](examples/llm_integrated_graph_demo.py)**
 
-## 🚀 Quick Start
-
-### 1. Start the CLI
-
-```bash
-python main.py
-```
-
-### 2. Load an Agent
-
-```bash
-# Load the default trading agent (includes web search + crypto tools)
-> load-agent trading_agent
-
-# Or load a specific agent
-> load-agent web_researcher
-```
-
-### 3. Start Chatting
-
-```bash
-# Simple chat
-> action chat "Hello, what can you help me with?"
-
-# Use tools automatically
-> action chat "Search for latest Bitcoin news"
-
-# Get crypto market data
-> action chat "Get BTC price and trading volume"
-```
-
-### 4. Explore Available Commands
-
-```bash
-# List all available commands
-> help
-
-# View current configuration
-> config
-
-# List available agents
-> list-agents
-
-# Check tool status
-> action list_mcp_tools
-```
-
 ## 🧩 Build Your Own Agent
 
 ### 1. Define Your Own Tool
