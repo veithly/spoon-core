@@ -72,6 +72,9 @@ dependencies = [ # Complete dependencies from requirements.txt for out-of-the-bo
     "botocore==1.35.99",
     "fastmcp>=2.12.0",
     "googleapis-common-protos",
+    "cryptography>=41.0.0",
+    "eth-utils>=2.0.0",
+    "rlp>=3.0.0",
 ]
 
 [project.urls]

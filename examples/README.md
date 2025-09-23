@@ -120,3 +120,37 @@ A comprehensive configuration example showing:
 ## Advanced Configuration
 
 For more advanced configurations, see the main documentation at `doc/agent_configuration.md`.
+
+---
+
+## Turnkey Examples (`examples/turnkey`)
+
+Turnkey integration demos for secure key management and signing via Turnkey API.
+
+- Run from project root, ensure Python path includes the repo root.
+- Copy env template and fill required values:
+  ```bash
+  cp examples/turnkey/env.example .env
+  ```
+
+### Scripts
+- `examples.turnkey.build_unsigned_eip1559_tx`: Build a minimal unsigned EIP-1559 tx and print `TURNKEY_UNSIGNED_TX_HEX`.
+  ```bash
+  python -m examples.turnkey.build_unsigned_eip1559_tx
+  ```
+- `examples.turnkey.turnkey_trading_use_case`: Guided demo for tx signing, broadcasting (optional), message signing, EIP-712, and audit.
+  ```bash
+  python -m examples.turnkey.turnkey_trading_use_case
+  ```
+- `examples.turnkey.multi_account_use_case`: Enumerate wallets/accounts, per-account tx signing, optional broadcast, per-account message signing, and audit.
+  ```bash
+  python -m examples.turnkey.multi_account_use_case
+  ```
+
+### Requirements
+- Uses repo-level `requirements.txt`. If broadcasting or tx building:
+  - `web3`, `eth-utils`, `rlp` are required (already pinned in repo requirements).
+- Ensure `.env` includes:
+  - `TURNKEY_BASE_URL`, `TURNKEY_API_PUBLIC_KEY`, `TURNKEY_API_PRIVATE_KEY`, `TURNKEY_ORG_ID`
+  - `TURNKEY_SIGN_WITH` (address or private key ID)
+  - Optional: `TURNKEY_UNSIGNED_TX_HEX`, `WEB3_RPC_URL`, and tx params.
