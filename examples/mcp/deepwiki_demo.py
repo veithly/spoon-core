@@ -7,13 +7,6 @@ It demonstrates how the agent uses MCP tools to process queries.
 """
 
 import asyncio
-import sys
-import os
-from pathlib import Path
-
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.tools.mcp_tool import MCPTool
 from spoon_ai.config import ConfigManager
