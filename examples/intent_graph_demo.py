@@ -24,12 +24,13 @@ from spoon_ai.graph import (
 )
 
 # Import PowerData tool for real data integration (simplified)
-from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool  # type: ignore
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
 powerdata_tool = CryptoPowerDataCEXTool()
 
 from spoon_ai.llm.manager import get_llm_manager
 from spoon_ai.schema import Message
 from spoon_ai.tools.mcp_tool import MCPTool
+from spoon_toolkits.crypto.evm import EvmSwapTool
 
 # Load environment variables
 load_dotenv()
@@ -354,6 +355,7 @@ class AdvancedComprehensiveState(TypedDict):
     user_name: str
     session_id: str
     symbol: str
+    trade_params: Annotated[Optional[Dict[str, Any]], None]  # Trading parameters extracted from query
 
     # Query analysis
     query_analysis: Annotated[Optional[QueryAnalysisState], None]
@@ -371,6 +373,9 @@ class AdvancedComprehensiveState(TypedDict):
     routing_decisions: Annotated[List[str], list]
     current_step: str
     final_output: str
+
+    # Trading signals
+    trade_signal: str  # "BUY" or "NO_BUY"
 
     # Performance metrics
     processing_time: float
@@ -400,23 +405,31 @@ async def analyze_query_intent_node(state: AdvancedComprehensiveState) -> Dict[s
     llm_manager = get_llm_manager()
 
     intent_prompt = f"""
-    Analyze this cryptocurrency-related query and classify it into one of these categories:
+    Analyze this cryptocurrency-related query and classify it into EXACTLY ONE category:
 
     Query: "{query}"
 
     Categories:
-    1. general_qa - General questions, introductions, basic information requests
-    2. short_term_trend - Questions about short-term price movements, immediate trends (minutes/hours)
-    3. macro_trend - Questions about long-term trends, market analysis, weekly/monthly outlook
-    4. deep_research - Complex research questions requiring in-depth analysis and multiple sources
+    1. general_qa - General questions about crypto concepts, how things work, basic info
+       Examples: "What is blockchain?", "How does DeFi work?"
 
-    Consider keywords and context:
-    - Short-term: "now", "today", "next hours", "15min", "30min", "1h", "immediate", "quick"
-    - Macro: "long-term", "trend", "analysis", "forecast", "weekly", "monthly", "macro", "outlook"
-    - Research: "research", "deep dive", "comprehensive", "analyze thoroughly", "investigate"
+    2. short_term_trend - Questions about immediate/short-term price movements and trends
+       Examples: "What's ETH doing now?", "Short-term BTC momentum", "Next hour trend"
 
-    Return ONLY the category name and confidence score (0.0-1.0) in format: category|confidence
-    Example: macro_trend|0.85
+    3. macro_trend - Questions about long-term trends, analysis, forecasts, weekly/monthly outlook
+       Examples: "Long-term trends for ETH", "Macro analysis of BTC", "Weekly/monthly outlook"
+
+    4. deep_research - Complex research requiring multiple sources and deep analysis
+       Examples: "Research DeFi protocols", "Analyze market developments", "Investigate new projects"
+
+    CLASSIFICATION RULES:
+    - If query mentions "long-term", "macro", "trend analysis", "forecast", "weekly", "monthly" → macro_trend
+    - If query mentions "short-term", "now", "today", "momentum", "next hours" → short_term_trend
+    - If query asks to "research", "analyze thoroughly", "investigate" → deep_research
+    - If query is general question about crypto concepts → general_qa
+
+    Return ONLY: category|confidence
+    Example: macro_trend|0.95
     """
 
     messages = [Message(role="user", content=intent_prompt)]
@@ -435,6 +448,9 @@ async def analyze_query_intent_node(state: AdvancedComprehensiveState) -> Dict[s
     valid_categories = ["general_qa", "short_term_trend", "macro_trend", "deep_research"]
     if category not in valid_categories:
         category = "general_qa"
+
+    # Debug logging
+    print(f"DEBUG: Query classification - Category: {category}, Confidence: {confidence}, Raw LLM response: '{result}'")
 
     return {
         "query_analysis": {
@@ -476,24 +492,66 @@ async def general_qa_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
 
 
 async def extract_symbol_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Extract cryptocurrency symbol from query using LLM"""
+    """Extract trading parameters from user query for analysis and potential execution"""
     query = state.get("user_query", "")
     llm_manager = get_llm_manager()
 
-    symbol_prompt = f"""
-    Extract the most relevant cryptocurrency symbol from this query.
-    Return ONLY the symbol (e.g., BTC, ETH, SOL). If unsure, return what you think is most likely.
+    # Extract symbol for analysis (default to ETH) and trading parameters
+    extraction_prompt = f"""
+    Analyze this crypto-related query and extract:
+
+    1. ANALYSIS_SYMBOL: The primary cryptocurrency to analyze for trend (e.g., BTC, ETH, SOL)
+
+    2. TRADE_PARAMS: If trading/buying/swapping is mentioned, extract in JSON format:
+       {{
+         "from_token": "token to sell (address like 0x... or symbol like USDC)",
+         "to_token": "token to buy (address like 0x... or symbol like ETH)",
+         "amount": "amount as string (e.g., '0.1', '100')"
+       }}
+
+    Look for phrases like:
+    - "swap X for Y"
+    - "buy X amount of Y"
+    - "trade X to Y"
+    - "if bullish, swap/buy..."
 
     Query: "{query}"
+
+    Return format:
+    ANALYSIS_SYMBOL: [SYMBOL]
+    TRADE_PARAMS: [JSON or "NONE"]
     """
 
-    messages = [Message(role="user", content=symbol_prompt)]
+    messages = [Message(role="user", content=extraction_prompt)]
     response = await llm_manager.chat(messages)
-    symbol = response.content.strip().upper()
+    result = response.content.strip()
+
+    # Parse results
+    analysis_symbol = "ETH"  # Default to ETH
+    trade_params = None
+
+    for line in result.split('\n'):
+        line = line.strip()
+        if line.startswith('ANALYSIS_SYMBOL:'):
+            symbol_part = line.replace('ANALYSIS_SYMBOL:', '').strip()
+            if symbol_part and len(symbol_part) <= 10:  # Reasonable symbol length
+                analysis_symbol = symbol_part.upper()
+        elif line.startswith('TRADE_PARAMS:'):
+            params_part = line.replace('TRADE_PARAMS:', '').strip()
+            if params_part != "NONE" and params_part.startswith('{'):
+                try:
+                    trade_params = json.loads(params_part)
+                except:
+                    trade_params = None
+
     return {
-        "symbol": symbol,
-        "current_step": f"symbol_extracted_{symbol}",
-        "execution_log": state.get("execution_log", []) + [f"Symbol extracted: {symbol}"]
+        "symbol": analysis_symbol,
+        "trade_params": trade_params,
+        "current_step": f"symbol_extracted_{analysis_symbol}",
+        "execution_log": state.get("execution_log", []) + [
+            f"Analysis symbol: {analysis_symbol}",
+            f"Trade params: {trade_params if trade_params else 'None'}"
+        ]
     }
 
 
@@ -560,13 +618,23 @@ async def analyze_short_term_trend_node(state: AdvancedComprehensiveState) -> Di
     User Query: {state.get("user_query", "")}
     Timeframe Data: {json.dumps(timeframe_data, indent=2)}
     Indicators: not used
+
+    IMPORTANT: After your analysis, also provide a simple BUY/NO_BUY recommendation based on bullish signals.
+    Format: End your response with "TRADE_SIGNAL: BUY" or "TRADE_SIGNAL: NO_BUY"
     """
 
     messages = [Message(role="user", content=analysis_prompt)]
     response = await llm_manager.chat(messages)
     ai_summary = response.content.strip()
 
-    symbol = state.get("symbol", "BTC")
+
+    trade_signal = "NO_BUY"
+    if "TRADE_SIGNAL: BUY" in ai_summary.upper():
+        trade_signal = "BUY"
+    elif "TRADE_SIGNAL: NO_BUY" in ai_summary.upper():
+        trade_signal = "NO_BUY"
+
+    symbol = state.get("symbol", "ETH")
 
     return {
         "short_term_trend": {
@@ -574,11 +642,70 @@ async def analyze_short_term_trend_node(state: AdvancedComprehensiveState) -> Di
             "symbol": symbol,
             "timeframe_data": timeframe_data,
             "indicators": {},
+            "trade_signal": trade_signal,
         },
         "final_output": ai_summary,
+        "trade_signal": trade_signal,
         "current_step": "short_term_analysis_completed",
-        "execution_log": state.get("execution_log", []) + ["Short-term trend analysis completed"]
+        "execution_log": state.get("execution_log", []) + [f"Short-term trend analysis completed - Trade signal: {trade_signal}"]
     }
+
+
+async def execute_trade_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
+    """Execute swap trade based on extracted parameters if bullish signal detected."""
+    try:
+        # Check trade signal - only execute if bullish trend detected
+        trade_signal = state.get("trade_signal", "NO_BUY")
+        if trade_signal != "BUY":
+            return {
+                "execution_log": state.get("execution_log", []) + [f"Trade skipped: no bullish signal (signal: {trade_signal})"],
+            }
+
+        # Get trade parameters from state (extracted from user query)
+        trade_params = state.get("trade_params")
+        if not trade_params:
+            return {
+                "execution_log": state.get("execution_log", []) + ["Trade skipped: no trade parameters found in query"],
+            }
+
+        # Extract trading parameters
+        from_token = trade_params.get("from_token")
+        to_token = trade_params.get("to_token")
+        amount = trade_params.get("amount")
+
+        if not all([from_token, to_token, amount]):
+            return {
+                "execution_log": state.get("execution_log", []) + ["Trade skipped: incomplete trade parameters"],
+            }
+
+        # Get RPC URL for trading
+        rpc_url = os.getenv("EVM_PROVIDER_URL") or os.getenv("RPC_URL")
+        if not rpc_url:
+            return {"execution_log": state.get("execution_log", []) + ["Trade skipped: missing EVM_PROVIDER_URL/RPC_URL"]}
+
+        # Execute swap using extracted parameters
+        swap_tool = EvmSwapTool(rpc_url=rpc_url)
+        res = await swap_tool.execute(
+            from_token=from_token,
+            to_token=to_token,
+            amount=amount,
+            signer_type=os.getenv("SIGNER_TYPE", "auto"),
+            # signer params are picked up automatically from env if not provided
+        )
+        if res.error:
+            return {
+                "trade_result": {"status": "failed", "error": res.error},
+                "execution_log": state.get("execution_log", []) + [f"Trade failed: {res.error}"]
+            }
+        return {
+            "trade_result": {"status": "success", "tx": res.output},
+            "execution_log": state.get("execution_log", []) + [f"Trade executed: {res.output.get('hash')}"]
+        }
+    except Exception as e:
+        return {
+            "trade_result": {"status": "failed", "error": str(e)},
+            "execution_log": state.get("execution_log", []) + [f"Trade exception: {str(e)}"]
+        }
 
 
 
@@ -844,6 +971,7 @@ def _build_advanced_graph() -> StateGraph:
     graph.add_node("fetch_30m_data", fetch_30m_data_node)
     graph.add_node("fetch_1h_data", fetch_1h_data_node)
     graph.add_node("analyze_short_term_trend", analyze_short_term_trend_node)
+    graph.add_node("execute_trade", execute_trade_node)
 
     # Add macro trend analysis nodes
     graph.add_node("fetch_4h_data", fetch_4h_data_node)
@@ -892,18 +1020,6 @@ def _build_advanced_graph() -> StateGraph:
     # Add fallback edge to ensure graph can complete
     graph.add_edge("analyze_query_intent", "general_qa")
 
-    # Ensure parallel execution by connecting extract_symbol to all relevant nodes
-    # Short-term trend: trigger all data fetching nodes
-    graph.add_edge("extract_symbol", "fetch_15m_data")
-    graph.add_edge("extract_symbol", "fetch_30m_data")
-    graph.add_edge("extract_symbol", "fetch_1h_data")
-
-    # Macro trend: trigger all data fetching and search nodes
-    graph.add_edge("extract_symbol", "fetch_4h_data")
-    graph.add_edge("extract_symbol", "fetch_daily_data")
-    graph.add_edge("extract_symbol", "fetch_weekly_data")
-    graph.add_edge("extract_symbol", "search_crypto_news")
-
     # Create parallel execution groups
     # Short-term trend parallel group
     graph.add_parallel_group(
@@ -924,11 +1040,57 @@ def _build_advanced_graph() -> StateGraph:
     graph.add_node("update_memory", update_memory_node)
     graph.add_edge("general_qa", "update_memory")
 
+    # Route based on query type - use different entry points for different analysis types
+    def route_to_analysis_type(state):
+        """Route to appropriate analysis type based on query classification"""
+        query_analysis = state.get("query_analysis", {})
+        query_type = query_analysis.get("query_type", "short_term_trend")
+
+        if query_type == "macro_trend":
+            return "macro_analysis_entry"
+        else:  # short_term_trend or default
+            return "short_term_analysis_entry"
+
+    # Create entry point nodes for different analysis types
+    async def short_term_analysis_entry_node(state):
+        """Entry point for short-term analysis - triggers parallel data fetching"""
+        return {"analysis_type": "short_term"}
+
+    async def macro_analysis_entry_node(state):
+        """Entry point for macro analysis - triggers parallel data fetching"""
+        return {"analysis_type": "macro"}
+
+    graph.add_node("short_term_analysis_entry", short_term_analysis_entry_node)
+    graph.add_node("macro_analysis_entry", macro_analysis_entry_node)
+
+    # Conditional routing from extract_symbol to analysis type entry
+    graph.add_conditional_edges(
+        "extract_symbol",
+        route_to_analysis_type,
+        {
+            "short_term_analysis_entry": "short_term_analysis_entry",
+            "macro_analysis_entry": "macro_analysis_entry",
+        }
+    )
+
+    # Connect analysis entry points to their respective data fetching nodes
+    # Short-term analysis triggers parallel data fetching
+    graph.add_edge("short_term_analysis_entry", "fetch_15m_data")
+    graph.add_edge("short_term_analysis_entry", "fetch_30m_data")
+    graph.add_edge("short_term_analysis_entry", "fetch_1h_data")
+
+    # Macro analysis triggers parallel data fetching
+    graph.add_edge("macro_analysis_entry", "fetch_4h_data")
+    graph.add_edge("macro_analysis_entry", "fetch_daily_data")
+    graph.add_edge("macro_analysis_entry", "fetch_weekly_data")
+    graph.add_edge("macro_analysis_entry", "search_crypto_news")
+
     # Short-term trend path entry and joins
     graph.add_edge("fetch_15m_data", "analyze_short_term_trend")
     graph.add_edge("fetch_30m_data", "analyze_short_term_trend")
     graph.add_edge("fetch_1h_data", "analyze_short_term_trend")
-    graph.add_edge("analyze_short_term_trend", "update_memory")
+    graph.add_edge("analyze_short_term_trend", "execute_trade")
+    graph.add_edge("execute_trade", "update_memory")
 
     # Macro trend joins
     graph.add_edge("fetch_4h_data", "analyze_macro_trend")
@@ -943,21 +1105,6 @@ def _build_advanced_graph() -> StateGraph:
 
     # Final memory update to END
     graph.add_edge("update_memory", END)
-
-    # Conditional split after symbol extraction
-    def _route_after_symbol(state):
-        qa = state.get("query_analysis", {})
-        qt = qa.get("query_type", "short_term_trend")
-        return qt if qt in ("short_term_trend", "macro_trend") else "short_term_trend"
-
-    graph.add_conditional_edges(
-        "extract_symbol",
-        _route_after_symbol,
-        {
-            "short_term_trend": "fetch_15m_data",
-            "macro_trend": "fetch_4h_data",
-        },
-    )
 
     return graph
 
@@ -1095,11 +1242,11 @@ async def main():
         # General Q&A
         ("How does blockchain work?", "Bob"),
 
-        # Short-term trend analysis
-        ("Analyze SOL short-term momentum", "Diana"),
+        # Short-term trend analysis with potential trade
+        ("Analyze ETH short-term trend and if bullish, swap 0.1 USDC for ETH on Base", "Diana"),
 
         # Macro trend analysis
-        ("What are the long-term trends for Ethereum?", "Eve"),
+        ("What are the long-term trends for NEO?", "Eve"),
 
         # Deep research
         ("Research the development of DeFi protocols in the second quarter of 2025, identify any new DeFi projects that have launched, and evaluate their performance.", "Henry"),

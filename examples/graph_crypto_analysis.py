@@ -33,6 +33,7 @@ from spoon_ai.graph import (
     union_sets,
     validate_range,
     validate_enum,
+    END,
 )
 import operator
 
@@ -269,79 +270,43 @@ class LLMCryptoAnalyzer:
     """LLM-driven cryptocurrency analyzer"""
 
     def __init__(self):
-        """Initialize the analyzer"""
-        logger.info("Initializing LLM-driven cryptocurrency analyzer")
-
-        # Initialize LLM manager
         self.llm_manager = get_llm_manager()
-
-        # Initialize tools
         self.crypto_tools = get_crypto_tools()
         self.tool_manager = ToolManager(self.crypto_tools)
 
-        # Initialize Tavily search MCP tool with better error handling
-        self.tavily_search_tool = None
-        try:
-            tavily_key = os.getenv("TAVILY_API_KEY", "")
-            if tavily_key and "your-tavily-api-key-here" not in tavily_key:
-                # Test if npx is available
-                import subprocess
-                try:
-                    result = subprocess.run(["npx", "--version"], capture_output=True, text=True, timeout=5)
-                    if result.returncode == 0:
-                        self.tavily_search_tool = MCPTool(
-                            name="tavily-search",
-                            description="Performs a web search using the Tavily API for cryptocurrency news and market sentiment.",
-                            parameters={
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "Search query for cryptocurrency news and analysis"
-                                    },
-                                    "max_results": {
-                                        "type": "integer",
-                                        "description": "Maximum number of search results to return",
-                                        "default": 5
-                                    },
-                                    "search_depth": {
-                                        "type": "string",
-                                        "description": "Search depth: basic or advanced",
-                                        "default": "basic"
-                                    }
-                                },
-                                "required": ["query"]
-                            },
-                            mcp_config={
-                                "command": "npx",
-                                "args": ["--yes", "tavily-mcp"],
-                                "env": {"TAVILY_API_KEY": tavily_key},
-                                "timeout": 30,  # Increased timeout
-                                "max_retries": 2  # Add retry support
-                            }
-                        )
-                        logger.info("Tavily search MCP tool initialized successfully")
-                    else:
-                        logger.warning("npx not available, Tavily search tool disabled")
-                except (subprocess.TimeoutExpired, FileNotFoundError):
-                    logger.warning("npx not found or timeout, Tavily search tool disabled")
-            else:
-                logger.warning("TAVILY_API_KEY not set or is placeholder, Tavily search tool unavailable")
-
-        except Exception as e:
-            logger.warning(f"Tavily MCP tool initialization failed: {e}")
+        tavily_key = os.getenv("TAVILY_API_KEY", "")
+        if tavily_key:
+            try:
+                from spoon_ai.tools.mcp_tool import MCPTool
+                self.tavily_search_tool = MCPTool(
+                    name="tavily-search",
+                    description="Performs a web search using the Tavily API for cryptocurrency news and market sentiment.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query for cryptocurrency news and analysis"},
+                            "max_results": {"type": "integer", "description": "Maximum number of search results to return", "default": 5},
+                            "search_depth": {"type": "string", "description": "Search depth: basic or advanced", "default": "basic"}
+                        },
+                        "required": ["query"]
+                    },
+                    mcp_config={
+                        "command": "npx",
+                        "args": ["--yes", "tavily-mcp"],
+                        "env": {"TAVILY_API_KEY": tavily_key}
+                    }
+                )
+            except:
+                self.tavily_search_tool = None
+        else:
             self.tavily_search_tool = None
 
-        # Import crypto_powerdata CEX tool directly
+
         try:
             from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
             self.powerdata_cex_tool = CryptoPowerDataCEXTool()
-            logger.info("Successfully imported crypto_powerdata CEX tool")
-        except ImportError as e:
-            logger.error(f"Cannot import crypto_powerdata tool: {e}")
+        except:
             self.powerdata_cex_tool = None
-
-        logger.info(f"Initialization complete, LLM manager ready, PowerData CEX tool: {'found' if self.powerdata_cex_tool else 'not found'}, Tavily search: {'found' if self.tavily_search_tool else 'not found'}")
 
     def create_analysis_graph(self) -> StateGraph:
         """Create graph with true parallel branches for per-token analysis.
@@ -360,14 +325,23 @@ class LLMCryptoAnalyzer:
         # Create 10 parallel per-index analyzer nodes using the graph's native parallel group feature
         # Each node will dynamically pick a token from state based on its index
         analyzer_entry_node = None
+        token_nodes: List[str] = []
         for index in range(10):
             node_name = f"analyze_token_{index}"
             if analyzer_entry_node is None:
                 analyzer_entry_node = node_name
             graph.add_node(
-                name=node_name,
-                action=self._wrap_method(self.create_token_analyzer_by_index(index)),
-                parallel_group="token_analysis"
+                node_name,
+                self._wrap_method(self.create_token_analyzer_by_index(index)),
+            )
+            token_nodes.append(node_name)
+
+        # Register the parallel execution group for token analysis
+        if token_nodes:
+            graph.add_parallel_group(
+                "token_analysis",
+                token_nodes,
+                {"join_strategy": "all_complete", "error_strategy": "ignore_errors"},
             )
 
         # Final aggregation and ranking
@@ -376,14 +350,17 @@ class LLMCryptoAnalyzer:
         # Sequential preparation flow
         graph.add_edge("fetch_binance_data", "prepare_token_list")
 
-        # Connect to the entry node of the parallel branch; the graph engine will execute the whole branch
-        if analyzer_entry_node:
-            # Connect to the entry node of the parallel branch; the engine will execute the whole group
-            graph.add_edge("prepare_token_list", analyzer_entry_node)
-            graph.add_edge(analyzer_entry_node, "llm_final_aggregation")
+        # Connect prepare_token_list to each analyzer to execute in parallel
+        if token_nodes:
+            for n in token_nodes:
+                graph.add_edge("prepare_token_list", n)
+            # After any analyzer completes, allow flow to final aggregation
+            # Connect all analyzers to final aggregation; duplicates are harmless
+            for n in token_nodes:
+                graph.add_edge(n, "llm_final_aggregation")
 
         # Final aggregation
-        graph.add_edge("llm_final_aggregation", "END")
+        graph.add_edge("llm_final_aggregation", END)
 
         # Set entry point and monitoring
         graph.set_entry_point("fetch_binance_data")
@@ -408,186 +385,97 @@ class LLMCryptoAnalyzer:
             ctx = NodeContext(node_name=node_name, iteration=0, thread_id="example")
             result = await method(state, ctx)
             # Normalize return for engine: support NodeResult by mapping to Command/update dict
-            try:
-                from spoon_ai.graph.types import Command as _Command
-            except Exception:
-                _Command = None
             if isinstance(result, NodeResult):
                 if result.error:
                     raise RuntimeError(result.error)
-                if _Command and (result.updates or result.goto):
-                    return _Command(update=result.updates or {}, goto=result.goto)
+                # Always return plain updates dict for invoke() path
                 return result.updates or {}
             return result
         return wrapper
 
     async def _call_llm(self, messages: List[Message], provider: str = None) -> str:
-        """Call LLM and return response content"""
-        try:
-            response = await self.llm_manager.chat(messages, provider=provider)
-            return response.content
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            return f"LLM call failed: {str(e)}"
+        response = await self.llm_manager.chat(messages, provider=provider)
+        return response.content
 
     async def fetch_binance_market_data(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
-        """Step 1: Call Binance API to get real market data and select top 10 by volume (excluding stablecoins)."""
-        logger.info(f"[{context.node_name}] Calling real Binance API to get market data")
+        import aiohttp
 
-        try:
-            # Use direct HTTP request to call Binance API, avoiding tool parameter issues
-            import aiohttp
+        async with aiohttp.ClientSession() as session:
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return NodeResult(error=f"Binance API failed: {response.status}", confidence=0.0)
+                binance_data = await response.json()
 
-            async with aiohttp.ClientSession() as session:
-                # Get 24-hour price change statistics
-                url = "https://api.binance.com/api/v3/ticker/24hr"
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        binance_data = await response.json()
-                    else:
-                        return NodeResult(
-                            error=f"Binance API call failed, status code: {response.status}",
-                            confidence=0.0
-                        )
+        stablecoins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'USDPUSDT', 'FRAXUSDT', 'LUSDUSDT', 'SUSDUSDT', 'USTCUSDT', 'USDDUSDT', 'GUSDUSDT', 'PAXGUSDT', 'USTUSDT'}
 
-            # Define stablecoin list (to be filtered out)
-            stablecoins = {
-                'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT',
-                'USDPUSDT', 'FRAXUSDT', 'LUSDUSDT', 'SUSDUSDT', 'USTCUSDT',
-                'USDDUSDT', 'GUSDUSDT', 'PAXGUSDT', 'USTUSDT'
-            }
+        usdt_pairs = []
+        for item in binance_data:
+            if isinstance(item, dict) and item.get('symbol', '').endswith('USDT'):
+                symbol = item.get('symbol', '')
+                if symbol not in stablecoins and all(key in item for key in ['symbol', 'priceChangePercent', 'volume', 'lastPrice']):
+                    usdt_pairs.append({
+                        'symbol': symbol,
+                        'priceChangePercent': float(item['priceChangePercent']),
+                        'volume': float(item['volume']),
+                        'lastPrice': float(item['lastPrice']),
+                        'count': int(item.get('count', 0)),
+                        'quoteVolume': float(item.get('quoteVolume', 0))
+                    })
 
-            # Filter and sort data - keep only USDT pairs, exclude stablecoins
-            usdt_pairs = []
-            for item in binance_data:
-                if isinstance(item, dict) and item.get('symbol', '').endswith('USDT'):
-                    symbol = item.get('symbol', '')
+        top_pairs_by_volume = sorted(usdt_pairs, key=lambda x: x['quoteVolume'], reverse=True)[:10]
 
-                    # Skip stablecoin trading pairs
-                    if symbol in stablecoins:
-                        continue
-
-                    try:
-                        # Ensure data integrity
-                        if all(key in item for key in ['symbol', 'priceChangePercent', 'volume', 'lastPrice']):
-                            usdt_pairs.append({
-                                'symbol': symbol,
-                                'priceChangePercent': float(item['priceChangePercent']),
-                                'volume': float(item['volume']),
-                                'lastPrice': float(item['lastPrice']),
-                                'count': int(item.get('count', 0)),
-                                'quoteVolume': float(item.get('quoteVolume', 0))
-                            })
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Skipping invalid data item: {e}")
-                        continue
-
-            # Sort by trading volume, take top 10 (after excluding stablecoins)
-            top_pairs_by_volume = sorted(usdt_pairs, key=lambda x: x['quoteVolume'], reverse=True)[:10]
-
-            logger.info(f"After filtering stablecoins, selected top 10 tokens by volume: {[p['symbol'] for p in top_pairs_by_volume]}")
-
-            return NodeResult(
-                updates={
-                    "binance_market_data": {
-                        "top_pairs": top_pairs_by_volume,
-                        "total_pairs_available": len(usdt_pairs),
-                        "selected_pairs_count": len(top_pairs_by_volume),
-                        "timestamp": datetime.now().isoformat(),
-                        "source": "binance_api_real",
-                        "api_endpoint": "https://api.binance.com/api/v3/ticker/24hr",
-                        "stablecoins_filtered": True,
-                        "selection_criteria": "top_10_by_volume_excluding_stablecoins"
-                    },
-                    "execution_history": {
-                        "action": "fetch_binance_data",
-                        "pairs_fetched": len(top_pairs_by_volume),
-                        "api_used": "binance_official",
-                        "real_data": True,
-                        "stablecoins_filtered": True
-                    },
-                    "analysis_flags": {"binance_data_fetched"}
+        return NodeResult(
+            updates={
+                "binance_market_data": {
+                    "top_pairs": top_pairs_by_volume,
+                    "total_pairs_available": len(usdt_pairs),
+                    "selected_pairs_count": len(top_pairs_by_volume),
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "binance_api_real"
                 },
-                metadata={
-                    "api_source": "binance_official",
-                    "pairs_count": len(top_pairs_by_volume),
-                    "data_type": "24hr_ticker",
-                    "real_data": True,
-                    "stablecoins_excluded": len(stablecoins)
+                "execution_history": {
+                    "action": "fetch_binance_data",
+                    "pairs_fetched": len(top_pairs_by_volume),
+                    "real_data": True
                 },
-                logs=[f"Successfully fetched top 15 tokens by volume from Binance API (excluded {len(stablecoins)} stablecoins)"],
-                confidence=0.95,
-                reasoning="Direct call to Binance official API to get real market data, excluding stablecoin trading pairs"
-            )
-
-        except Exception as e:
-            logger.error(f"Binance API call failed: {e}")
-            return NodeResult(
-                error=f"Binance API call failed: {str(e)}",
-                confidence=0.0
-            )
+                "analysis_flags": {"binance_data_fetched"}
+            },
+            confidence=0.95
+        )
 
     async def prepare_token_list(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
-        """Step 2: Prepare top-10 token list by volume (stablecoins excluded)."""
-        logger.info(f"[{context.node_name}] Preparing top 10 token list by volume")
+        binance_data = state.get("binance_market_data", {})
+        top_pairs = binance_data.get("top_pairs", [])
 
-        try:
-            # Get real Binance data
-            binance_data = state.get("binance_market_data", {})
-            top_pairs = binance_data.get("top_pairs", [])
+        if not top_pairs:
+            return NodeResult(error="No Binance market data available", confidence=0.0)
 
-            if not top_pairs:
-                return NodeResult(
-                    error="No Binance market data available",
-                    confidence=0.0
-                )
+        selected_tokens = [pair["symbol"].replace("USDT", "") for pair in top_pairs]
+        token_details = {}
+        for pair in top_pairs:
+            token = pair["symbol"].replace("USDT", "")
+            token_details[token] = {
+                "symbol": pair["symbol"],
+                "price_change_24h": pair["priceChangePercent"],
+                "volume_usdt": pair["quoteVolume"],
+                "last_price": pair["lastPrice"],
+                "trade_count": pair.get("count", 0),
+                "rank_by_volume": top_pairs.index(pair) + 1
+            }
 
-            # Extract token symbols (remove USDT suffix)
-            selected_tokens = [pair["symbol"].replace("USDT", "") for pair in top_pairs]
-
-            # Build detailed token information
-            token_details = {}
-            for pair in top_pairs:
-                token = pair["symbol"].replace("USDT", "")
-                token_details[token] = {
-                    "symbol": pair["symbol"],
-                    "price_change_24h": pair["priceChangePercent"],
-                    "volume_usdt": pair["quoteVolume"],
-                    "last_price": pair["lastPrice"],
-                    "trade_count": pair.get("count", 0),
-                    "rank_by_volume": top_pairs.index(pair) + 1
-                }
-
-            logger.info(f"Prepared top 10 tokens for analysis: {selected_tokens}")
-
-            return NodeResult(
-                updates={
-                    "selected_tokens": selected_tokens,
-                    "token_details": token_details,
-                    "selection_method": "top_15_by_volume_excluding_stablecoins",
-                    "execution_history": {
-                        "action": "prepare_token_list",
-                        "tokens_count": len(selected_tokens),
-                        "selection_criteria": "top_10_volume_no_stablecoins"
-                    },
-                    "analysis_flags": {"tokens_prepared"}
+        return NodeResult(
+            updates={
+                "selected_tokens": selected_tokens,
+                "token_details": token_details,
+                "execution_history": {
+                    "action": "prepare_token_list",
+                    "tokens_count": len(selected_tokens)
                 },
-                metadata={
-                    "tokens_count": len(selected_tokens),
-                    "selection_type": "volume_based",
-                    "stablecoins_excluded": True
-                },
-                logs=[f"Prepared {len(selected_tokens)} tokens for analysis (stablecoins excluded)"],
-                confidence=1.0,
-                reasoning="Selected top 15 tokens based on volume ranking, stablecoins excluded"
-            )
-
-        except Exception as e:
-            logger.error(f"Token list preparation failed: {e}")
-            return NodeResult(
-                error=f"Token list preparation failed: {str(e)}",
-                confidence=0.0
-            )
+                "analysis_flags": {"tokens_prepared"}
+            },
+            confidence=1.0
+        )
 
     def create_token_analyzer_by_index(self, token_index: int):
         """Create a per-index analyzer that selects the token dynamically from state."""
@@ -652,33 +540,18 @@ class LLMCryptoAnalyzer:
                             "error": None
                         }
 
-                    except Exception as e:
-                        logger.error(f"Failed to fetch kline for {token}: {e}")
-                        return {"error": str(e), "data": None}
+                    except Exception:
+                        return {"error": "kline fetch failed", "data": None}
 
                 async def fetch_news_data():
-                    """Fetch latest news via Tavily MCP for sentiment/context."""
-                    try:
-                        if not self.tavily_search_tool:
-                            return {"error": "Tavily tool not available", "data": None}
-
-                        search_query = f"{token} cryptocurrency news price analysis market trends"
+                    if self.tavily_search_tool:
                         result = await self.tavily_search_tool.execute(
-                            query=search_query,
+                            query=f"{token} cryptocurrency news price analysis market trends",
                             max_results=3,
                             search_depth="basic"
                         )
-
-                        if hasattr(result, 'error') and result.error:
-                            return {"error": result.error, "data": None}
-                        elif hasattr(result, 'output'):
-                            return {"data": result.output, "error": None}
-                        else:
-                            return {"data": str(result), "error": None}
-
-                    except Exception as e:
-                        logger.error(f"Failed to fetch news for {token}: {e}")
-                        return {"error": str(e), "data": None}
+                        return {"data": str(result), "error": None}
+                    return {"error": "no tavily mcp tool", "data": None}
 
                 # Run both coroutines concurrently
                 kline_task = fetch_kline_data()
@@ -740,15 +613,8 @@ Output in English, concise, bullet style."""
                     Message(role="user", content=news_prompt)
                 ]
 
-                try:
-                    ta_analysis = await self._call_llm(ta_messages)
-                except Exception as e:
-                    ta_analysis = f"TA LLM analysis failed: {str(e)}"
-
-                try:
-                    news_analysis = await self._call_llm(news_messages)
-                except Exception as e:
-                    news_analysis = f"News LLM analysis failed: {str(e)}"
+                ta_analysis = await self._call_llm(ta_messages)
+                news_analysis = await self._call_llm(news_messages)
 
                 end_time = datetime.now()
                 analysis_time = (end_time - start_time).total_seconds()
@@ -767,7 +633,6 @@ Output in English, concise, bullet style."""
                     "status": "completed"
                 }
 
-                logger.info(f"Finished {token} analysis in {analysis_time:.2f}s")
 
                 return NodeResult(
                     updates={
@@ -803,35 +668,31 @@ Output in English, concise, bullet style."""
         return token_analyzer
 
     async def llm_final_aggregation(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
-        """Aggregate all per-token recommendations and rank 3-5 best opportunities."""
-        logger.info(f"[{context.node_name}] Aggregating all token analyses and ranking opportunities")
+        # Collect all token analyses dynamically from state
+        token_analyses = []
+        for key, value in state.items():
+            if isinstance(key, str) and key.startswith("token_analysis_") and isinstance(value, dict):
+                token_analyses.append(value)
 
-        try:
-            # Collect all token analyses dynamically from state
-            token_analyses = []
-            for key, value in state.items():
-                if isinstance(key, str) and key.startswith("token_analysis_") and isinstance(value, dict):
-                    token_analyses.append(value)
+        if not token_analyses:
+            return NodeResult(
+                error="No token analyses available for aggregation",
+                confidence=0.0
+            )
 
-            if not token_analyses:
-                return NodeResult(
-                    error="No token analyses available for aggregation",
-                    confidence=0.0
-                )
+        # Compute parallel execution stats
+        total_time = max([analysis.get('analysis_time', 0) for analysis in token_analyses])
+        avg_time = sum([analysis.get('analysis_time', 0) for analysis in token_analyses]) / len(token_analyses)
+        parallel_stats = {
+            "total_tokens": len(token_analyses),
+            "successful_count": len([a for a in token_analyses if a.get('status') == 'completed']),
+            "total_execution_time": total_time,
+            "average_time_per_token": avg_time,
+            "parallel_efficiency": "Graph-level true parallel execution"
+        }
 
-            # Compute parallel execution stats
-            total_time = max([analysis.get('analysis_time', 0) for analysis in token_analyses])
-            avg_time = sum([analysis.get('analysis_time', 0) for analysis in token_analyses]) / len(token_analyses)
-            parallel_stats = {
-                "total_tokens": len(token_analyses),
-                "successful_count": len([a for a in token_analyses if a.get('status') == 'completed']),
-                "total_execution_time": total_time,
-                "average_time_per_token": avg_time,
-                "parallel_efficiency": "Graph-level true parallel execution"
-            }
-
-            # Build final aggregation prompt
-            aggregation_prompt = f"""Based on the following {len(token_analyses)} token analyses, produce a final summary:
+        # Build final aggregation prompt
+        aggregation_prompt = f"""Based on the following {len(token_analyses)} token analyses, produce a final summary:
 
 ## Execution Stats:
 - Tokens analyzed: {parallel_stats.get('total_tokens', 0)}
@@ -842,16 +703,16 @@ Output in English, concise, bullet style."""
 ## Per-Token Analyses:
 """
 
-            # Append each token analysis details to the prompt
-            for i, analysis in enumerate(token_analyses, 1):
-                token = analysis.get('token', 'Unknown')
-                price = analysis.get('current_price', 0)
-                change = analysis.get('price_change_24h', 0)
-                llm_ta = analysis.get('llm_ta', 'No TA analysis')
-                llm_news = analysis.get('llm_news', 'No news analysis')
-                analysis_time = analysis.get('analysis_time', 0)
+        # Append each token analysis details to the prompt
+        for i, analysis in enumerate(token_analyses, 1):
+            token = analysis.get('token', 'Unknown')
+            price = analysis.get('current_price', 0)
+            change = analysis.get('price_change_24h', 0)
+            llm_ta = analysis.get('llm_ta', 'No TA analysis')
+            llm_news = analysis.get('llm_news', 'No news analysis')
+            analysis_time = analysis.get('analysis_time', 0)
 
-                aggregation_prompt += f"""
+            aggregation_prompt += f"""
 ### {i}. {token}
 - Current Price: ${price}
 - 24h Change: {change:+.2f}%
@@ -866,7 +727,7 @@ Output in English, concise, bullet style."""
 ---
 """
 
-            aggregation_prompt += """
+        aggregation_prompt += """
 ## Your Tasks:
 1) Rank the top 3-5 trading opportunities by risk-adjusted potential
    - For each: token, current price, opportunity score, key reasons
@@ -878,201 +739,78 @@ Output in English, concise, bullet style."""
 Keep the output in English, concise and directly actionable.
 """
 
-            messages = [
-                Message(role="system", content=(
-                    "You are a senior crypto investment advisor. Combine all token analyses to identify the best opportunities, "
-                    "rank them by risk-adjusted potential, and provide clear, actionable plans along with risk management."
-                )),
-                Message(role="user", content=aggregation_prompt)
-            ]
+        messages = [
+            Message(role="system", content=(
+                "You are a senior crypto investment advisor. Combine all token analyses to identify the best opportunities, "
+                "rank them by risk-adjusted potential, and provide clear, actionable plans along with risk management."
+            )),
+            Message(role="user", content=aggregation_prompt)
+        ]
 
-            # Call LLM for final aggregation
-            try:
-                final_recommendation = await self._call_llm(messages)
-            except Exception as e:
-                final_recommendation = f"Final aggregation analysis failed: {str(e)}"
+        # Call LLM for final aggregation
+        final_recommendation = await self._call_llm(messages)
 
-            # Compute overall confidence
-            success_rate = parallel_stats.get('successful_count', 0) / max(1, parallel_stats.get('total_tokens', 1))
-            final_confidence = min(0.95, 0.6 + success_rate * 0.3)
+        # Compute overall confidence
+        success_rate = parallel_stats.get('successful_count', 0) / max(1, parallel_stats.get('total_tokens', 1))
+        final_confidence = min(0.95, 0.6 + success_rate * 0.3)
 
-            return NodeResult(
-                updates={
-                    "final_recommendation": final_recommendation,
-                    "trading_advice": final_recommendation,  # Compatible with original display logic
-                    "aggregation_stats": {
-                        "tokens_analyzed": len(token_analyses),
-                        "successful_analyses": parallel_stats.get('successful_count', 0),
-                        "total_execution_time": parallel_stats.get('total_execution_time', 0),
-                        "average_analysis_time": parallel_stats.get('average_time_per_token', 0),
-                        "parallel_efficiency": "True parallel execution per token analysis"
-                    },
-                    "confidence_score": final_confidence,
-                    "risk_level": "MEDIUM",  # Can be dynamically adjusted based on analysis results
-                    "execution_history": {
-                        "action": "llm_final_aggregation",
-                        "tokens_processed": len(token_analyses),
-                        "aggregation_method": "ranking_by_opportunity",
-                        "llm_used": True
-                    },
-                    "analysis_flags": {"final_aggregation_completed"}
+        return NodeResult(
+            updates={
+                "final_recommendation": final_recommendation,
+                "trading_advice": final_recommendation,
+                "aggregation_stats": {
+                    "tokens_analyzed": len(token_analyses),
+                    "successful_analyses": parallel_stats.get('successful_count', 0),
+                    "total_execution_time": parallel_stats.get('total_execution_time', 0),
+                    "average_analysis_time": parallel_stats.get('average_time_per_token', 0)
                 },
-                metadata={
-                    "aggregation_type": "opportunity_ranking",
-                    "tokens_included": [analysis.get('token') for analysis in token_analyses],
-                    "recommendation_length": len(final_recommendation),
-                    "success_rate": success_rate,
-                    "execution_efficiency": "parallel_per_token_analysis"
+                "confidence_score": final_confidence,
+                "risk_level": "MEDIUM",
+                "execution_history": {
+                    "action": "llm_final_aggregation",
+                    "tokens_processed": len(token_analyses)
                 },
-                logs=[f"Aggregated {len(token_analyses)} token analyses and ranked opportunities"],
-                confidence=final_confidence,
-                reasoning=f"Final aggregation over {len(token_analyses)} tokens with ranking"
-            )
-
-        except Exception as e:
-            logger.error(f"Final aggregation analysis failed: {e}")
-            return NodeResult(
-                error=f"Final aggregation analysis failed: {str(e)}",
-                confidence=0.0
-            )
+                "analysis_flags": {"final_aggregation_completed"}
+            },
+            confidence=final_confidence
+        )
 
 
 async def run_llm_driven_analysis():
-    """Run LLM-driven real cryptocurrency analysis"""
-    logger.info("🚀 Starting LLM-driven real cryptocurrency analysis system")
+    analyzer = LLMCryptoAnalyzer()
+    graph = analyzer.create_analysis_graph()
+    compiled = graph.compile()
 
-    try:
-        # Create analyzer
-        analyzer = LLMCryptoAnalyzer()
+    initial_state = {
+        "query": "LLM-driven cryptocurrency analysis based on real Binance API data",
+        "binance_market_data": {},
+        "selected_tokens": [],
+        "token_details": {},
+        "market_data": {},
+        "news_data": {},
+        "comprehensive_analysis": {},
+        "technical_analysis": {},
+        "execution_history": [],
+        "analysis_flags": set(),
+        "final_recommendation": "",
+        "confidence_score": 0.0,
+        "risk_level": "MEDIUM"
+    }
 
-        # Create analysis graph
-        graph = analyzer.create_analysis_graph()
+    start_time = datetime.now()
+    result = await compiled.invoke(
+        initial_state,
+        config={"configurable": {"thread_id": "llm_crypto_analysis"}}
+    )
 
-        # Compile graph
-        compiled = graph.compile()
+    end_time = datetime.now()
+    execution_time = (end_time - start_time).total_seconds()
 
-        # Initial state
-        initial_state = {
-            "query": "LLM-driven cryptocurrency analysis based on real Binance API data",
-            "binance_market_data": {},
-            "selected_tokens": [],
-            "token_details": {},
-            "market_data": {},
-            "news_data": {},
-            "comprehensive_analysis": {},
-            "technical_analysis": {},
-            "execution_history": [],
-            "analysis_flags": set(),
-            "final_recommendation": "",
-            "confidence_score": 0.0,
-            "risk_level": "MEDIUM"
-        }
+    trading_advice = result.get('trading_advice', '')
+    if trading_advice:
+        print(trading_advice)
 
-        logger.info("📊 Starting LLM-driven real data analysis workflow...")
-        start_time = datetime.now()
-
-        # Execute analysis
-        result = await compiled.invoke(
-            initial_state,
-            config={"configurable": {"thread_id": "llm_crypto_analysis"}}
-        )
-
-        end_time = datetime.now()
-        execution_time = (end_time - start_time).total_seconds()
-
-        # Display results
-        print("\n" + "="*80)
-        print("🔍 LLM-Driven Real Cryptocurrency Analysis Results")
-        print("="*80)
-
-        print(f"\n⏱️ Total Execution Time: {execution_time:.2f} seconds")
-        print(f"🔧 Data Sources: Binance Official API + PowerData + LLM Analysis")
-
-        # Display Binance data overview
-        binance_data = result.get('binance_market_data', {})
-        if binance_data:
-            print(f"\n📊 Binance Real Data:")
-            print(f"  • Total Available Trading Pairs: {binance_data.get('total_pairs_available', 0)}")
-            print(f"  • Selected Active Pairs: {binance_data.get('selected_pairs_count', 0)}")
-            print(f"  • Data Collection Time: {binance_data.get('timestamp', 'N/A')[:19]}")
-
-            top_pairs = binance_data.get('top_pairs', [])[:5]
-            if top_pairs:
-                print(f"  • Top 5 Most Active Trading Pairs:")
-                for pair in top_pairs:
-                    print(f"    - {pair['symbol']}: {pair['priceChangePercent']:+.2f}% (Volume: {pair['quoteVolume']:,.0f} USDT)")
-
-        # Show PowerData analysis results (simplified)
-        market_data = result.get('market_data', {})
-        if market_data:
-            print(f"\n📈 PowerData Technical Analysis:")
-            successful_count = sum(1 for data in market_data.values() if data.get('status') == 'success')
-            print(f"  • Successfully analyzed {successful_count}/{len(market_data)} tokens")
-
-        # Show news analysis (simplified)
-        news_data = result.get('news_data', {})
-        if news_data:
-            print(f"\n📰 News Analysis:")
-            analysis_type = news_data.get('analysis_type', 'unknown')
-            if analysis_type == 'llm_generated':
-                news_analysis = news_data.get('data', {})
-                market_analysis = news_analysis.get('market_news_analysis', {})
-                if market_analysis:
-                    sentiment = market_analysis.get('overall_sentiment', 'neutral').upper()
-                    print(f"  • Overall Sentiment: {sentiment}")
-            else:
-                print(f"  • News Search Status: {news_data.get('news_search_status', 'unknown')}")
-
-        # Show LLM comprehensive analysis (simplified)
-        trend_analysis = result.get('comprehensive_analysis', {})
-        if trend_analysis:
-            print(f"\n🤖 LLM Comprehensive Analysis:")
-            analysis_result = trend_analysis.get('analysis_result', {})
-            comprehensive = analysis_result.get('comprehensive_analysis', {})
-
-            if comprehensive:
-                overall_trend = comprehensive.get('overall_market_trend', 'N/A')
-                market_sentiment = comprehensive.get('market_sentiment', 'N/A')
-                risk_level = comprehensive.get('risk_level', 'N/A')
-                print(f"  • Overall Trend: {overall_trend.upper()}")
-                print(f"  • Market Sentiment: {market_sentiment.upper()}")
-                print(f"  • Risk Level: {risk_level.upper()}")
-
-                # Show top opportunities
-                top_opportunities = comprehensive.get('top_opportunities', [])
-                if top_opportunities:
-                    print(f"  • Top Opportunities: {', '.join(top_opportunities[:3])}")
-
-        # Show direct LLM trading advice
-        trading_advice = result.get('trading_advice', '')
-        confidence_score = result.get('confidence_score', 0)
-        risk_level = result.get('risk_level', 'N/A')
-
-        print(f"\n🏆 LLM Trading Recommendations:")
-        print(f"  • Overall Confidence: {confidence_score:.1%}")
-        print(f"  • Risk Level: {risk_level}")
-        print("="*80)
-
-        if trading_advice and trading_advice.strip():
-            print(f"\n📈 Professional Trading Advice:")
-            print("="*80)
-            # Display the raw LLM trading advice with proper formatting
-            print(trading_advice)
-            print("="*80)
-        else:
-            print("   ❌ Unable to generate trading recommendations")
-
-        return result
-
-    except Exception as e:
-        logger.error(f"❌ LLM-driven analysis failed: {e}")
-        print(f"\n💥 Error encountered during analysis: {e}")
-        print("Possible causes:")
-        print("  • Binance API access issues")
-        print("  • PowerData tool configuration issues")
-        print("  • LLM service unavailable")
-        print("  • Network connection issues")
-        raise
+    return result
 
 
 if __name__ == "__main__":
