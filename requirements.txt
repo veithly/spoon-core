@@ -57,6 +57,7 @@ multidict>=6.1.0
     # via
     #   aiohttp
     #   yarl
+neo-mamba>=3.0.1
 openai>=1.70.0
 orjson>=3.10.15
     # via langsmith
