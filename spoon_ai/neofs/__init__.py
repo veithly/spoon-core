@@ -19,7 +19,12 @@ from .models import (
     TokenResponse,
     UploadAddress,
 )
-from .utils import SignatureComponents, generate_simple_signature_params, sign_with_salt
+from .utils import (
+    SignatureComponents,
+    generate_simple_signature_params,
+    sign_bearer_token,
+    sign_with_salt,
+)
 
 __all__ = [
     "NeoFSClient",
@@ -42,6 +47,7 @@ __all__ = [
     "TokenResponse",
     "UploadAddress",
     "SignatureComponents",
+    "sign_bearer_token",
     "generate_simple_signature_params",
     "sign_with_salt",
 ]

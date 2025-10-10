@@ -1,12 +1,10 @@
-"""Unit tests for NeoFS signing utilities."""
-
 import os
 
 import pytest
 
 from spoon_ai.neofs.utils import (
-    _build_serialized_message,
     _encode_varint,
+    _build_serialized_message,
     generate_simple_signature_params,
     sign_with_salt,
 )
@@ -25,30 +23,27 @@ from spoon_ai.neofs.utils import (
         (0x100000000, b"\xFF\x00\x00\x00\x00\x01\x00\x00\x00"),
     ],
 )
-def test_encode_varint(value: int, expected: bytes) -> None:
+def test_encode_varint(value, expected):
     assert _encode_varint(value) == expected
 
 
-def test_encode_varint_negative() -> None:
+def test_encode_varint_negative():
     with pytest.raises(ValueError):
         _encode_varint(-1)
 
 
-def test_build_serialized_message() -> None:
+def test_build_serialized_message():
     salt = bytes.fromhex("2b62f24c77ec30bac716b116651b9d23")
     payload = b"hello"
     message = _build_serialized_message((salt, payload))
     assert (
         message.hex()
-        == "010001f0"
-        "15"
-        "2b62f24c77ec30bac716b116651b9d2368656c6c6f"
-        "0000"
+        == "010001f0" "15" "2b62f24c77ec30bac716b116651b9d2368656c6c6f" "0000"
     )
 
 
 @pytest.mark.skipif(not os.getenv("NEOFS_PRIVATE_KEY_WIF"), reason="requires private key")
-def test_sign_with_salt_matches_notebook() -> None:
+def test_sign_with_salt_matches_notebook():
     private_key_wif = os.getenv("NEOFS_PRIVATE_KEY_WIF")
     salt = bytes.fromhex("2b62f24c77ec30bac716b116651b9d23")
     result = sign_with_salt(private_key_wif, b"hello", salt=salt)
@@ -58,7 +53,7 @@ def test_sign_with_salt_matches_notebook() -> None:
 
 
 @pytest.mark.skipif(not os.getenv("NEOFS_PRIVATE_KEY_WIF"), reason="requires private key")
-def test_generate_simple_signature_params_structure() -> None:
+def test_generate_simple_signature_params_structure():
     private_key_wif = os.getenv("NEOFS_PRIVATE_KEY_WIF")
     params = generate_simple_signature_params(private_key_wif)
     assert params["signatureScheme"] == "ECDSA_SHA256"

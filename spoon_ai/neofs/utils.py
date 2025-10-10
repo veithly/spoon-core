@@ -1,8 +1,11 @@
-"""Utilities for signing and encoding NeoFS REST payloads."""
+import base64
+import binascii
+import hashlib
 import os
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from neo3.core import cryptography
 from neo3.wallet.account import Account
 
 
@@ -65,3 +68,23 @@ def generate_simple_signature_params(private_key_wif: Optional[str] = None, payl
         "signatureKeyParam": components.public_key,
         "signatureScheme": "ECDSA_SHA256",
     }
+
+
+def sign_bearer_token(bearer_token: str, private_key_wif: str, *, wallet_connect: bool = False) -> tuple[str, str]:
+    """Produce REST gateway compatible bearer signature."""
+    account = Account.from_wif(private_key_wif)
+    public_key = account.public_key.to_array().hex()
+
+    if wallet_connect:
+        decoded = base64.standard_b64decode(bearer_token)
+        normalized_token = base64.standard_b64encode(decoded)
+        salt = os.urandom(16)
+        salt_hex_bytes = binascii.hexlify(salt)
+        payload = _build_serialized_message((salt_hex_bytes, normalized_token))
+        signature = cryptography.sign(payload, account.private_key, hash_func=hashlib.sha256)
+        signature_hex = binascii.hexlify(signature).decode("utf-8")
+        return f"{signature_hex}{salt_hex_bytes.decode('utf-8')}", public_key
+
+    payload = base64.standard_b64decode(bearer_token)
+    signature = cryptography.sign(payload, account.private_key, hash_func=hashlib.sha512)
+    return f"04{signature.hex()}", public_key

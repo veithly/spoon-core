@@ -1,4 +1,3 @@
-"""NeoFS REST client integration for Spoon Core."""
 import os
 import json
 import httpx
@@ -8,7 +7,7 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 
-from spoon_ai.neofs.models import (
+from .models import (
     Bearer,
     TokenResponse,
     BinaryBearer,
@@ -24,7 +23,7 @@ from spoon_ai.neofs.models import (
     UploadAddress,
     ErrorResponse
 )
-from spoon_ai.neofs.utils import generate_simple_signature_params, sign_with_salt
+from .utils import generate_simple_signature_params, sign_bearer_token, sign_with_salt
 
 
 class NeoFSClient:
@@ -33,11 +32,19 @@ class NeoFSClient:
         self.base_url = base_url or os.getenv("NEOFS_BASE_URL")
         self.owner_address = owner_address or os.getenv("NEOFS_OWNER_ADDRESS")
         self.private_key_wif = private_key_wif or os.getenv("NEOFS_PRIVATE_KEY_WIF")
+        timeout_env = os.getenv("NEOFS_HTTP_TIMEOUT")
+        try:
+            timeout_value = float(timeout_env) if timeout_env else 30.0
+        except (TypeError, ValueError):
+            timeout_value = 30.0
 
         if not all([self.base_url, self.owner_address, self.private_key_wif]):
             raise ValueError("Missing configuration. Provide base_url, owner_address, and private_key_wif or set environment variables.")
 
-        self.http_client = httpx.Client(base_url=self.base_url)
+        self.http_client = httpx.Client(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(connect=timeout_value, read=timeout_value, write=timeout_value, pool=None),
+        )
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
@@ -76,21 +83,20 @@ class NeoFSClient:
         container_info: ContainerPostInfo,
         bearer_token: str,
         name_scope_global: bool = True,
+        *,
+        wallet_connect: bool = False,
     ) -> ContainerInfo:
-        # TODO: current signing (headers + query params) still returns 400 invalid signature on testnet
-        # once gateway requirements confirmed, remove skip in tests and re-enable integration coverage
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=wallet_connect)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         params = {
             'name-scope-global': str(name_scope_global).lower(),
-            **generate_simple_signature_params(components=signature_components),
         }
+        if wallet_connect:
+            params['walletConnect'] = 'true'
         response = self._request('POST', '/v1/containers', headers=headers, params=params, json=container_info.model_dump(by_alias=True))
         
         # The response gives a containerId, but to return a full ContainerInfo, we must fetch it.
@@ -104,9 +110,19 @@ class NeoFSClient:
         response = self._request('GET', f'/v1/containers/{container_id}')
         return ContainerInfo(**response.json())
 
-    def delete_container(self, container_id: str) -> SuccessResponse:
-        params = generate_simple_signature_params(self.private_key_wif)
-        response = self._request('DELETE', f'/v1/containers/{container_id}', params=params)
+    def delete_container(self, container_id: str, *, bearer_token: str | None = None, wallet_connect: bool = False) -> SuccessResponse:
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=wallet_connect)
+            headers = {
+                'Authorization': f'Bearer {bearer_token}',
+                'X-Bearer-Signature': signature_value,
+                'X-Bearer-Signature-Key': signature_key,
+            }
+            params = {'walletConnect': 'true'} if wallet_connect else None
+            response = self._request('DELETE', f'/v1/containers/{container_id}', headers=headers, params=params)
+        else:
+            params = generate_simple_signature_params(self.private_key_wif)
+            response = self._request('DELETE', f'/v1/containers/{container_id}', params=params)
         return SuccessResponse(**response.json())
 
     def get_container_eacl(self, container_id: str) -> Eacl:
@@ -141,15 +157,12 @@ class NeoFSClient:
         expiration_timestamp: Optional[int] = None,
         timeout: Optional[float] = 180,
     ) -> UploadAddress:
-        # TODO: same signing concern as create_container; request currently rejected by gateway
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
             'Content-Type': 'application/octet-stream',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         if attributes:
             headers['X-Attributes'] = json.dumps(attributes)
@@ -160,7 +173,7 @@ class NeoFSClient:
         if expiration_timestamp is not None:
             headers['X-Neofs-Expiration-Timestamp'] = str(expiration_timestamp)
             
-        params = generate_simple_signature_params(components=signature_components)
+        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(headers['X-Bearer-Signature'].encode(),))
 
         request_kwargs = {'headers': headers, 'content': content, 'params': params}
         if timeout is not None:
@@ -178,17 +191,15 @@ class NeoFSClient:
         download: bool | None = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         if range_header:
             headers['Range'] = range_header
-        params = generate_simple_signature_params(components=signature_components)
+        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         if download is not None:
             params['download'] = str(download).lower()
         return self._request('GET', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params)
@@ -201,17 +212,15 @@ class NeoFSClient:
         *,
         range_header: str | None = None,
     ) -> httpx.Response:
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         if range_header:
             headers['Range'] = range_header
-        params = generate_simple_signature_params(components=signature_components)
+        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         return self._request('HEAD', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params)
 
     def download_object_by_attribute(
@@ -224,19 +233,17 @@ class NeoFSClient:
         download: bool | None = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         if range_header:
             headers['Range'] = range_header
         encoded_key = quote(attr_key, safe="")
         encoded_val = quote(attr_val, safe="")
-        params = generate_simple_signature_params(components=signature_components)
+        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         if download is not None:
             params['download'] = str(download).lower()
         return self._request('GET', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params)
@@ -250,19 +257,17 @@ class NeoFSClient:
         *,
         range_header: str | None = None,
     ) -> httpx.Response:
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
         headers = {
             'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
+            'X-Bearer-Signature': signature_value,
+            'X-Bearer-Signature-Key': signature_key,
         }
         if range_header:
             headers['Range'] = range_header
         encoded_key = quote(attr_key, safe="")
         encoded_val = quote(attr_val, safe="")
-        params = generate_simple_signature_params(components=signature_components)
+        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         return self._request('HEAD', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params)
     
     def delete_object(self, container_id: str, object_id: str) -> SuccessResponse:
@@ -319,3 +324,4 @@ class NeoFSAPIException(NeoFSException):
         self.error = error
         self.request = request
         super().__init__(f"API Error {error.code} ({error.type}): {error.message}")
+        
