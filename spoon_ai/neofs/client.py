@@ -68,7 +68,7 @@ class NeoFSClient:
             'X-Bearer-Lifetime': str(lifetime),
             'X-Bearer-For-All-Users': str(for_all_users).lower()
         }
-        content = [t.dict(by_alias=True, exclude_none=True) for t in tokens]
+        content = [t.model_dump(by_alias=True, exclude_none=True) for t in tokens]
         response = self._request('POST', '/v1/auth', headers=headers, json=content)
         return [TokenResponse(**item) for item in response.json()]
 
@@ -84,7 +84,7 @@ class NeoFSClient:
         bearer_token: str,
         name_scope_global: bool = True,
         *,
-        wallet_connect: bool = False,
+        wallet_connect: bool = True,  # Changed to True (required for container operations)
     ) -> ContainerInfo:
         signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=wallet_connect)
         headers = {
@@ -110,7 +110,7 @@ class NeoFSClient:
         response = self._request('GET', f'/v1/containers/{container_id}')
         return ContainerInfo(**response.json())
 
-    def delete_container(self, container_id: str, *, bearer_token: str | None = None, wallet_connect: bool = False) -> SuccessResponse:
+    def delete_container(self, container_id: str, *, bearer_token: str | None = None, wallet_connect: bool = True) -> SuccessResponse:
         if bearer_token:
             signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=wallet_connect)
             headers = {
@@ -129,9 +129,38 @@ class NeoFSClient:
         response = self._request('GET', f'/v1/containers/{container_id}/eacl')
         return Eacl(**response.json())
 
-    def set_container_eacl(self, container_id: str, eacl: Eacl) -> SuccessResponse:
-        params = generate_simple_signature_params(self.private_key_wif)
-        response = self._request('PUT', f'/v1/containers/{container_id}/eacl', params=params, json=eacl.model_dump(by_alias=True, exclude={'containerId'}))
+    def set_container_eacl(self, container_id: str, eacl: Eacl, *, bearer_token: Optional[str] = None, wallet_connect: bool = True) -> SuccessResponse:
+        """
+        Set container eACL.
+        
+        Args:
+            container_id: Container ID
+            eacl: eACL object
+            bearer_token: Optional Bearer Token (recommended for eACL operations)
+            wallet_connect: Whether to use wallet_connect mode (default True)
+        """
+        if bearer_token:
+            # Sign with Bearer Token
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=wallet_connect)
+            headers = {
+                'Authorization': f'Bearer {bearer_token}',
+                'X-Bearer-Signature': signature_value,
+                'X-Bearer-Signature-Key': signature_key,
+            }
+            params = {'walletConnect': 'true'} if wallet_connect else None
+        else:
+            # Sign directly with private key
+            signature_components = generate_simple_signature_params(self.private_key_wif)
+            headers = {
+                'X-Bearer-Signature': signature_components['signatureParam'],
+                'X-Bearer-Signature-Key': signature_components['signatureKeyParam'],
+            }
+            params = signature_components
+        
+        response = self._request('PUT', f'/v1/containers/{container_id}/eacl', 
+                                headers=headers,
+                                params=params, 
+                                json=eacl.model_dump(by_alias=True, exclude={'containerId'}))
         return SuccessResponse(**response.json())
 
     # 3. List Containers
@@ -148,22 +177,43 @@ class NeoFSClient:
     def upload_object(
         self,
         container_id: str,
-        bearer_token: str,
         content: bytes,
         *,
+        bearer_token: Optional[str] = None,
         attributes: Optional[dict] = None,
         expiration_rfc3339: Optional[str] = None,
         expiration_duration: Optional[str] = None,
         expiration_timestamp: Optional[int] = None,
         timeout: Optional[float] = 180,
+        use_simple_bearer: bool = True,  # New: Use simple Bearer Token method (official method)
     ) -> UploadAddress:
-        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+        """
+        Upload object to NeoFS.
+        
+        For PUBLIC containers, bearer_token is optional.
+        For PRIVATE containers, bearer_token is required.
+        
+        Args:
+            use_simple_bearer: If True, only pass Authorization header (like official tests).
+                               If False, use full signature headers.
+        """
         headers = {
-            'Authorization': f'Bearer {bearer_token}',
             'Content-Type': 'application/octet-stream',
-            'X-Bearer-Signature': signature_value,
-            'X-Bearer-Signature-Key': signature_key,
         }
+        
+        # Add authentication headers if Bearer Token is provided
+        if bearer_token:
+            if use_simple_bearer:
+                # Official method: only pass Authorization header
+                headers['Authorization'] = f'Bearer {bearer_token}'
+            else:
+                # Original method: pass full signature headers
+                signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+                headers['Authorization'] = f'Bearer {bearer_token}'
+                headers['X-Bearer-Signature'] = signature_value
+                headers['X-Bearer-Signature-Key'] = signature_key
+        
+        # Add optional attributes
         if attributes:
             headers['X-Attributes'] = json.dumps(attributes)
         if expiration_rfc3339:
@@ -172,12 +222,17 @@ class NeoFSClient:
             headers['X-Neofs-Expiration-Duration'] = expiration_duration
         if expiration_timestamp is not None:
             headers['X-Neofs-Expiration-Timestamp'] = str(expiration_timestamp)
-            
-        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(headers['X-Bearer-Signature'].encode(),))
-
-        request_kwargs = {'headers': headers, 'content': content, 'params': params}
+        
+        request_kwargs = {'headers': headers, 'content': content}
+        
+        # Add signature params if using full signature method
+        if bearer_token and not use_simple_bearer:
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(headers['X-Bearer-Signature'].encode(),))
+            request_kwargs['params'] = params
+        
         if timeout is not None:
             request_kwargs['timeout'] = timeout
+        
         response = self._request('POST', f'/v1/objects/{container_id}', **request_kwargs)
         return UploadAddress(**response.json())
 
@@ -186,89 +241,109 @@ class NeoFSClient:
         self,
         container_id: str,
         object_id: str,
-        bearer_token: str,
         *,
+        bearer_token: Optional[str] = None,
         download: bool | None = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
-        headers = {
-            'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Signature': signature_value,
-            'X-Bearer-Signature-Key': signature_key,
-        }
+        """Download object by ID. Bearer token is optional for public containers."""
+        headers = {}
+        params = {}
+        
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Signature'] = signature_value
+            headers['X-Bearer-Signature-Key'] = signature_key
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
+        
         if range_header:
             headers['Range'] = range_header
-        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         if download is not None:
             params['download'] = str(download).lower()
-        return self._request('GET', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params)
+        
+        return self._request('GET', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params if params else None)
 
     def get_object_header_by_id(
         self,
         container_id: str,
         object_id: str,
-        bearer_token: str,
         *,
+        bearer_token: Optional[str] = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
-        headers = {
-            'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Signature': signature_value,
-            'X-Bearer-Signature-Key': signature_key,
-        }
+        """Get object header by ID. Bearer token is optional for public containers."""
+        headers = {}
+        params = {}
+        
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Signature'] = signature_value
+            headers['X-Bearer-Signature-Key'] = signature_key
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
+        
         if range_header:
             headers['Range'] = range_header
-        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
-        return self._request('HEAD', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params)
+        
+        return self._request('HEAD', f'/v1/objects/{container_id}/by_id/{object_id}', headers=headers, params=params if params else None)
 
     def download_object_by_attribute(
         self,
         container_id: str,
         attr_key: str,
         attr_val: str,
-        bearer_token: str,
         *,
+        bearer_token: Optional[str] = None,
         download: bool | None = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
-        headers = {
-            'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Signature': signature_value,
-            'X-Bearer-Signature-Key': signature_key,
-        }
+        """Download object by attribute. Bearer token is optional for public containers."""
+        headers = {}
+        params = {}
+        
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Signature'] = signature_value
+            headers['X-Bearer-Signature-Key'] = signature_key
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
+        
         if range_header:
             headers['Range'] = range_header
-        encoded_key = quote(attr_key, safe="")
-        encoded_val = quote(attr_val, safe="")
-        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
         if download is not None:
             params['download'] = str(download).lower()
-        return self._request('GET', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params)
+        
+        encoded_key = quote(attr_key, safe="")
+        encoded_val = quote(attr_val, safe="")
+        return self._request('GET', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params if params else None)
         
     def get_object_header_by_attribute(
         self,
         container_id: str,
         attr_key: str,
         attr_val: str,
-        bearer_token: str,
         *,
+        bearer_token: Optional[str] = None,
         range_header: str | None = None,
     ) -> httpx.Response:
-        signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
-        headers = {
-            'Authorization': f'Bearer {bearer_token}',
-            'X-Bearer-Signature': signature_value,
-            'X-Bearer-Signature-Key': signature_key,
-        }
+        """Get object header by attribute. Bearer token is optional for public containers."""
+        headers = {}
+        params = {}
+        
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Signature'] = signature_value
+            headers['X-Bearer-Signature-Key'] = signature_key
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
+        
         if range_header:
             headers['Range'] = range_header
+        
         encoded_key = quote(attr_key, safe="")
         encoded_val = quote(attr_val, safe="")
-        params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
-        return self._request('HEAD', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params)
+        return self._request('HEAD', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params if params else None)
     
     def delete_object(self, container_id: str, object_id: str) -> SuccessResponse:
         params = generate_simple_signature_params(self.private_key_wif)
@@ -279,26 +354,30 @@ class NeoFSClient:
     def search_objects(
         self,
         container_id: str,
-        bearer_token: str,
         search_request: SearchRequest,
         *,
+        bearer_token: Optional[str] = None,
         cursor: str = "",
         limit: int = 100,
     ) -> ObjectListV2:
-        payload_to_sign = base64.b64decode(bearer_token)
-        signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+        """Search objects. Bearer token is optional for public containers."""
         headers = {
-            'Authorization': f'Bearer {bearer_token}',
             'Content-Type': 'application/json',
-            'X-Bearer-Owner-Id': self.owner_address,
-            'X-Bearer-Signature': signature_components.signature_header(),
-            'X-Bearer-Signature-Key': signature_components.public_key,
         }
         params = {
             'cursor': cursor,
             'limit': limit,
-            **generate_simple_signature_params(components=signature_components),
         }
+        
+        if bearer_token:
+            payload_to_sign = base64.b64decode(bearer_token)
+            signature_components = sign_with_salt(self.private_key_wif, payload_to_sign)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Owner-Id'] = self.owner_address
+            headers['X-Bearer-Signature'] = signature_components.signature_header()
+            headers['X-Bearer-Signature-Key'] = signature_components.public_key
+            params.update(generate_simple_signature_params(components=signature_components))
+        
         response = self._request('POST', f'/v2/objects/{container_id}/search', headers=headers, params=params, json=search_request.model_dump(by_alias=True))
         return ObjectListV2(**response.json())
 
