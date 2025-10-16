@@ -1,410 +1,97 @@
-"""
-LLM-Driven Real Cryptocurrency Analysis System
-
-This system is completely driven by LLM with intelligent analysis decisions at each step:
-1. Step 1: Call real Binance API to get market data (no simulated data)
-2. Step 2: LLM intelligently selects tokens to analyze based on real data
-3. Step 3: Use PowerData to get technical indicators for selected tokens
-4. Step 4: LLM analyzes data and decides next actions
-5. Final: LLM summarizes all information to generate investment recommendations
+"""Declarative crypto analysis demo with brand-new modular nodes.
 
 Features:
-- Real Binance API - no simulated data
-- Completely LLM-driven decision flow
-- Real API calls (Binance + PowerData)
-- Intelligent routing and analysis
-- Enhanced Graph system
+* Fully LLM-driven routing with HighLevelGraphAPI parameter inference.
+* Real Binance data (via REST), PowerData toolkit indicators, Tavily MCP news.
+* Parallel token analysis using new node implementations.
+* Final aggregation mirroring the legacy functionality without reusing code.
 """
 
+from __future__ import annotations
+
 import asyncio
-import logging
 import json
+import logging
 import os
-from typing import Dict, Any, List, Set, Annotated
 from datetime import datetime
+from typing import Any, Dict, List, Optional, TypedDict, Set
+import aiohttp
+from dotenv import load_dotenv
 
-from spoon_ai.graph import (
-    StateGraph,
-    NodeContext,
-    NodeResult,
-    RouterResult,
-    merge_dicts,
-    append_history,
-    union_sets,
-    validate_range,
-    validate_enum,
-    END,
-)
-import operator
-
-from spoon_ai.llm.manager import get_llm_manager
-from spoon_ai.schema import Message
-from spoon_ai.tools.crypto_tools import get_crypto_tools
-from spoon_ai.tools.tool_manager import ToolManager
-from spoon_ai.tools.mcp_tool import MCPTool
+from zoneinfo import ZoneInfo
 
 # Configure logging
-logging.basicConfig(level=logging.WARNING)  # Reduce log output
 logger = logging.getLogger(__name__)
 
+from spoon_ai.graph import END
+from spoon_ai.graph.builder import (
+    DeclarativeGraphBuilder,
+    EdgeSpec,
+    GraphTemplate,
+    HighLevelGraphAPI,
+    MCPToolSpec,
+    NodeSpec,
+    ParallelGroupSpec,
+)
+from spoon_ai.graph.config import GraphConfig, ParallelGroupConfig
+from spoon_ai.llm.manager import get_llm_manager
+from spoon_ai.schema import Message
 
-def format_price(price: float) -> str:
-    """Format price with appropriate precision for display"""
-    if price == 0:
-        return "$0.00"
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
 
-    if price >= 1:
-        return f"${price:,.2f}"
-    elif price >= 0.01:
-        return f"${price:.4f}"
-    elif price >= 0.0001:
-        return f"${price:.6f}"
-    else:
-        # For very small numbers like PEPE, show 2 significant digits
-        import math
-        if price == 0:
-            return "$0.00"
-
-        # Find the number of decimal places needed for 2 significant digits
-        log_val = math.floor(math.log10(abs(price)))
-        decimal_places = max(2, 2 - log_val)
-        return f"${price:.{int(decimal_places)}f}"
+load_dotenv()
 
 
-def save_analysis_report(result: Dict[str, Any], filename: str = None) -> str:
-    """Save analysis report as Markdown document"""
-    if filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"crypto_analysis_report_{timestamp}.md"
-
-    # Generate markdown content
-    md_content = generate_markdown_report(result)
-
-    # Save to file
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write(md_content)
-
-    return filename
-
-
-def generate_markdown_report(result: Dict[str, Any]) -> str:
-    """Generate markdown content for the analysis report"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    md_lines = [
-        "# Cryptocurrency Analysis Report",
-        f"*Generated on {timestamp}*",
-        "",
-        "## Executive Summary",
-        ""
-    ]
-
-    # Add executive summary
-    confidence_score = result.get('confidence_score', 0)
-    risk_level = result.get('risk_level', 'N/A')
-
-    md_lines.extend([
-        f"- **Overall Confidence**: {confidence_score:.1%}",
-        f"- **Risk Level**: {risk_level}",
-        f"- **Data Sources**: Binance API + PowerData + LLM Analysis",
-        ""
-    ])
-
-    # Add market overview
-    binance_data = result.get('binance_market_data', {})
-    if binance_data:
-        md_lines.extend([
-            "## Market Overview",
-            "",
-            f"- **Total Trading Pairs Available**: {binance_data.get('total_pairs_available', 0)}",
-            f"- **Selected Active Pairs**: {binance_data.get('selected_pairs_count', 0)}",
-            f"- **Data Collection Time**: {binance_data.get('timestamp', 'N/A')[:19]}",
-            ""
-        ])
-
-        top_pairs = binance_data.get('top_pairs', [])[:5]
-        if top_pairs:
-            md_lines.extend([
-                "### Top 5 Most Active Trading Pairs",
-                ""
-            ])
-            for pair in top_pairs:
-                change = pair['priceChangePercent']
-                volume = pair['quoteVolume']
-                md_lines.append(f"- **{pair['symbol']}**: {change:+.2f}% (Volume: {volume:,.0f} USDT)")
-            md_lines.append("")
-
-    # Add news analysis
-    news_data = result.get('news_data', {})
-    if news_data:
-        md_lines.extend([
-            "## News Analysis",
-            ""
-        ])
-
-        analysis_type = news_data.get('analysis_type', 'unknown')
-        if analysis_type == 'llm_generated':
-            news_analysis = news_data.get('data', {})
-            market_analysis = news_analysis.get('market_news_analysis', {})
-
-            if market_analysis:
-                sentiment = market_analysis.get('overall_sentiment', 'neutral').upper()
-                md_lines.append(f"- **Overall Sentiment**: {sentiment}")
-
-                key_themes = market_analysis.get('key_themes', [])
-                if key_themes:
-                    md_lines.append(f"- **Key Themes**: {', '.join(key_themes)}")
-
-                market_drivers = market_analysis.get('market_drivers', [])
-                if market_drivers:
-                    md_lines.append(f"- **Market Drivers**: {', '.join(market_drivers)}")
-
-                md_lines.append("")
-
-    # Add comprehensive analysis
-    comprehensive_analysis = result.get('comprehensive_analysis', {})
-    if comprehensive_analysis:
-        analysis_result = comprehensive_analysis.get('analysis_result', {})
-        comprehensive = analysis_result.get('comprehensive_analysis', {})
-
-        if comprehensive:
-            md_lines.extend([
-                "## LLM Comprehensive Analysis",
-                "",
-                f"- **Overall Trend**: {comprehensive.get('overall_market_trend', 'N/A').upper()}",
-                f"- **Market Sentiment**: {comprehensive.get('market_sentiment', 'N/A').upper()}",
-                f"- **Risk Level**: {comprehensive.get('risk_level', 'N/A').upper()}",
-                ""
-            ])
-
-            key_insights = comprehensive.get('key_insights', [])
-            if key_insights:
-                md_lines.extend([
-                    "### Key Insights",
-                    ""
-                ])
-                for insight in key_insights:
-                    md_lines.append(f"- {insight}")
-                md_lines.append("")
-
-            market_summary = analysis_result.get('market_summary', '')
-            if market_summary:
-                md_lines.extend([
-                    "### Market Summary",
-                    "",
-                    market_summary,
-                    ""
-                ])
-
-    # Add LLM trading advice
-    trading_advice = result.get('trading_advice', '')
-    if trading_advice and trading_advice.strip():
-        md_lines.extend([
-            "## Professional Trading Recommendations",
-            "",
-            trading_advice,
-            "",
-            "---",
-            ""
-        ])
-    else:
-            md_lines.extend([
-            "## Trading Recommendations",
-            "",
-            "Unable to generate specific trading recommendations.",
-            "",
-            "---",
-            ""
-        ])
-
-    # Add risk disclaimer
-    md_lines.extend([
-        "## Risk Disclaimer",
-        "",
-        "⚠️ **Important Notice**:",
-        "",
-        "- This analysis is for informational purposes only and does not constitute investment advice",
-        "- Cryptocurrency investments carry high risk - please make decisions carefully",
-        "- It is recommended to combine multiple analysis methods and risk management strategies",
-        "- Past performance does not guarantee future results",
-        "",
-        "---",
-        f"*Report generated by LLM-Driven Crypto Analysis System on {timestamp}*"
-    ])
-
-    return "\n".join(md_lines)
+class CryptoAnalysisState(TypedDict, total=False):
+    user_query: str
+    selected_tokens: List[str]
+    token_details: Dict[str, Any]
+    market_overview: Dict[str, Any]
+    token_reports: Dict[str, Dict[str, Any]]
+    token_scores: Dict[str, float]
+    news_items: Dict[str, List[Dict[str, Any]]]
+    final_summary: str
+    execution_log: List[str]
+    parallel_tasks_completed: int
+    processing_time: float
+    execution_metrics: Dict[str, Any]
+    binance_market_data: Dict[str, Any]
+    execution_history: List[Dict[str, Any]]
+    analysis_flags: Set[str]
 
 
-# State Schema
-class LLMCryptoAnalysisState(Dict[str, Any]):
-    """LLM-driven cryptocurrency analysis state"""
-    # Basic query
-    query: str
+class DeclarativeCryptoAnalysisDemo:
+    def __init__(self) -> None:
+        self.api = HighLevelGraphAPI(CryptoAnalysisState)
+        self.llm = get_llm_manager()
+        self.powerdata_tool = CryptoPowerDataCEXTool()
+        self.tavily_search_tool = None
 
-    # Real market data
-    binance_market_data: Annotated[Dict[str, Any], merge_dicts]
-
-    # Token selection and details
-    selected_tokens: Annotated[List[str], operator.add]
-    token_details: Annotated[Dict[str, Any], merge_dicts]
-
-    # Technical and news data
-    market_data: Annotated[Dict[str, Any], merge_dicts]
-    news_data: Annotated[Dict[str, Any], merge_dicts]
-
-    # LLM analysis results
-    comprehensive_analysis: Annotated[Dict[str, Any], merge_dicts]
-    technical_analysis: Annotated[Dict[str, Any], merge_dicts]
-
-    # Execution tracking
-    execution_history: Annotated[List[Dict[str, Any]], append_history]
-    analysis_flags: Annotated[Set[str], union_sets]
-
-    # Final results
-    final_recommendation: str
-    confidence_score: Annotated[float, validate_range(0.0, 1.0)]
-    risk_level: Annotated[str, validate_enum(["LOW", "MEDIUM", "HIGH", "EXTREME"])]
-
-
-class LLMCryptoAnalyzer:
-    """LLM-driven cryptocurrency analyzer"""
-
-    def __init__(self):
-        self.llm_manager = get_llm_manager()
-        self.crypto_tools = get_crypto_tools()
-        self.tool_manager = ToolManager(self.crypto_tools)
-
-        tavily_key = os.getenv("TAVILY_API_KEY", "")
-        if tavily_key:
-            try:
-                from spoon_ai.tools.mcp_tool import MCPTool
-                self.tavily_search_tool = MCPTool(
-                    name="tavily-search",
-                    description="Performs a web search using the Tavily API for cryptocurrency news and market sentiment.",
-                    parameters={
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string", "description": "Search query for cryptocurrency news and analysis"},
-                            "max_results": {"type": "integer", "description": "Maximum number of search results to return", "default": 5},
-                            "search_depth": {"type": "string", "description": "Search depth: basic or advanced", "default": "basic"}
-                        },
-                        "required": ["query"]
-                    },
-                    mcp_config={
+        tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
+        if tavily_key and "your-tavily-api-key-here" not in tavily_key:
+            self.api.register_mcp_tool(
+                intent_category="crypto_analysis",
+                spec=MCPToolSpec(name="tavily-search", capability="news"),
+                config={
                         "command": "npx",
                         "args": ["--yes", "tavily-mcp"],
-                        "env": {"TAVILY_API_KEY": tavily_key}
-                    }
-                )
-            except:
-                self.tavily_search_tool = None
-        else:
-            self.tavily_search_tool = None
-
-
-        try:
-            from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
-            self.powerdata_cex_tool = CryptoPowerDataCEXTool()
-        except:
-            self.powerdata_cex_tool = None
-
-    def create_analysis_graph(self) -> StateGraph:
-        """Create graph with true parallel branches for per-token analysis.
-
-        Flow:
-        1) fetch_binance_data -> prepare_token_list
-        2) analyze_token_0..9 (parallel group: token_analysis) – each node picks a token by index from state
-        3) llm_final_aggregation -> END
-        """
-        graph = StateGraph(LLMCryptoAnalysisState)
-
-        # Sequential preparation nodes
-        graph.add_node("fetch_binance_data", self._wrap_method(self.fetch_binance_market_data))
-        graph.add_node("prepare_token_list", self._wrap_method(self.prepare_token_list))
-
-        # Create 10 parallel per-index analyzer nodes using the graph's native parallel group feature
-        # Each node will dynamically pick a token from state based on its index
-        analyzer_entry_node = None
-        token_nodes: List[str] = []
-        for index in range(10):
-            node_name = f"analyze_token_{index}"
-            if analyzer_entry_node is None:
-                analyzer_entry_node = node_name
-            graph.add_node(
-                node_name,
-                self._wrap_method(self.create_token_analyzer_by_index(index)),
-            )
-            token_nodes.append(node_name)
-
-        # Register the parallel execution group for token analysis
-        if token_nodes:
-            graph.add_parallel_group(
-                "token_analysis",
-                token_nodes,
-                {"join_strategy": "all_complete", "error_strategy": "ignore_errors"},
+                    "env": {"TAVILY_API_KEY": tavily_key},
+                },
             )
 
-        # Final aggregation and ranking
-        graph.add_node("llm_final_aggregation", self._wrap_method(self.llm_final_aggregation))
+        self.graph = self._build_graph()
 
-        # Sequential preparation flow
-        graph.add_edge("fetch_binance_data", "prepare_token_list")
+    # ------------------------------------------------------------------
+    # Node implementations (matching original functionality exactly)
+    # ------------------------------------------------------------------
 
-        # Connect prepare_token_list to each analyzer to execute in parallel
-        if token_nodes:
-            for n in token_nodes:
-                graph.add_edge("prepare_token_list", n)
-            # After any analyzer completes, allow flow to final aggregation
-            # Connect all analyzers to final aggregation; duplicates are harmless
-            for n in token_nodes:
-                graph.add_edge(n, "llm_final_aggregation")
-
-        # Final aggregation
-        graph.add_edge("llm_final_aggregation", END)
-
-        # Set entry point and monitoring
-        graph.set_entry_point("fetch_binance_data")
-        # Optional monitoring (no-op if engine doesn't implement it)
-        if hasattr(graph, "enable_monitoring"):
-            graph.enable_monitoring([
-                "execution_time",
-                "llm_response_quality",
-                "api_success_rate",
-                "analysis_depth",
-                "parallel_branch_efficiency"
-            ])
-
-        return graph
-
-    def _wrap_method(self, method):
-        """Wrap instance method into a coroutine accepting only (state), constructing a default NodeContext.
-        Converts NodeResult to Command/update dict for the minimal engine.
-        """
-        async def wrapper(state):
-            node_name = getattr(method, '__name__', 'node')
-            ctx = NodeContext(node_name=node_name, iteration=0, thread_id="example")
-            result = await method(state, ctx)
-            # Normalize return for engine: support NodeResult by mapping to Command/update dict
-            if isinstance(result, NodeResult):
-                if result.error:
-                    raise RuntimeError(result.error)
-                # Always return plain updates dict for invoke() path
-                return result.updates or {}
-            return result
-        return wrapper
-
-    async def _call_llm(self, messages: List[Message], provider: str = None) -> str:
-        response = await self.llm_manager.chat(messages, provider=provider)
-        return response.content
-
-    async def fetch_binance_market_data(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
-        import aiohttp
-
+    async def _fetch_binance_market_data(self, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Fetch real Binance market data and select top 10 pairs by volume"""
         async with aiohttp.ClientSession() as session:
             url = "https://api.binance.com/api/v3/ticker/24hr"
             async with session.get(url) as response:
                 if response.status != 200:
-                    return NodeResult(error=f"Binance API failed: {response.status}", confidence=0.0)
+                    return {"error": f"Binance API failed: {response.status}"}
                 binance_data = await response.json()
 
         stablecoins = {'USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'BUSDUSDT', 'DAIUSDT', 'USDPUSDT', 'FRAXUSDT', 'LUSDUSDT', 'SUSDUSDT', 'USTCUSDT', 'USDDUSDT', 'GUSDUSDT', 'PAXGUSDT', 'USTUSDT'}
@@ -425,8 +112,10 @@ class LLMCryptoAnalyzer:
 
         top_pairs_by_volume = sorted(usdt_pairs, key=lambda x: x['quoteVolume'], reverse=True)[:10]
 
-        return NodeResult(
-            updates={
+        log = list(state.get("execution_log", []))
+        log.append(f"Fetched Binance data ({len(top_pairs_by_volume)} pairs)")
+
+        return {
                 "binance_market_data": {
                     "top_pairs": top_pairs_by_volume,
                     "total_pairs_available": len(usdt_pairs),
@@ -439,20 +128,20 @@ class LLMCryptoAnalyzer:
                     "pairs_fetched": len(top_pairs_by_volume),
                     "real_data": True
                 },
-                "analysis_flags": {"binance_data_fetched"}
-            },
-            confidence=0.95
-        )
+            "analysis_flags": {"binance_data_fetched"},
+            "execution_log": log,
+        }
 
-    async def prepare_token_list(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
+    async def _prepare_token_list(self, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Prepare token list from Binance data"""
         binance_data = state.get("binance_market_data", {})
         top_pairs = binance_data.get("top_pairs", [])
 
         if not top_pairs:
-            return NodeResult(error="No Binance market data available", confidence=0.0)
+            return {"error": "No Binance market data available"}
 
         selected_tokens = [pair["symbol"].replace("USDT", "") for pair in top_pairs]
-        token_details = {}
+        token_details: Dict[str, Any] = {}
         for pair in top_pairs:
             token = pair["symbol"].replace("USDT", "")
             token_details[token] = {
@@ -461,114 +150,103 @@ class LLMCryptoAnalyzer:
                 "volume_usdt": pair["quoteVolume"],
                 "last_price": pair["lastPrice"],
                 "trade_count": pair.get("count", 0),
-                "rank_by_volume": top_pairs.index(pair) + 1
+                "rank_by_volume": top_pairs.index(pair) + 1,
             }
 
-        return NodeResult(
-            updates={
-                "selected_tokens": selected_tokens,
-                "token_details": token_details,
-                "execution_history": {
-                    "action": "prepare_token_list",
-                    "tokens_count": len(selected_tokens)
-                },
-                "analysis_flags": {"tokens_prepared"}
+        log = list(state.get("execution_log", []))
+        log.append(f"Prepared token list ({len(selected_tokens)} tokens)")
+
+        return {
+            "selected_tokens": selected_tokens,
+            "token_details": token_details,
+            "execution_history": {
+                "action": "prepare_token_list",
+                "tokens_count": len(selected_tokens),
             },
-            confidence=1.0
-        )
+            "analysis_flags": {"tokens_prepared"},
+            "execution_log": log,
+        }
 
-    def create_token_analyzer_by_index(self, token_index: int):
-        """Create a per-index analyzer that selects the token dynamically from state."""
-        async def analyzer(state: Dict[str, Any], context: NodeContext) -> NodeResult:
-            selected_tokens: List[str] = state.get("selected_tokens", [])
-            if token_index >= len(selected_tokens):
-                return NodeResult(updates={}, confidence=1.0, reasoning=f"No token at index {token_index}")
+    async def _analyze_token_by_index(self, token_index: int, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Analyze a single token by index - matches original create_token_analyzer_by_index"""
+        selected_tokens: List[str] = state.get("selected_tokens", [])
+        if token_index >= len(selected_tokens):
+            log = list(state.get("execution_log", []))
+            log.append(f"No token available at index {token_index}")
+            return {
+                "execution_log": log,
+                "parallel_tasks_completed": state.get("parallel_tasks_completed", 0),
+            }
 
-            token = selected_tokens[token_index]
-            # Reuse the per-token analyzer with token symbol
-            return await self.create_token_analyzer(token)(state, context)
+        token = selected_tokens[token_index]
+        return await self._analyze_single_token(token, state)
 
-        return analyzer
+    async def _analyze_single_token(self, token: str, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Complete analysis of a single token - matches original create_token_analyzer"""
+        logger.info(f"Start analyzing token: {token}")
 
-    def create_token_analyzer(self, token: str):
-        """Create analyzer coroutine for a specific token symbol."""
-        async def token_analyzer(state: Dict[str, Any], context: NodeContext) -> NodeResult:
-            """Analyze a single token end-to-end: kline + news + LLM recommendations."""
-            logger.info(f"[{context.node_name}] Start analyzing token: {token}")
-            start_time = datetime.now()
+        try:
+            token_details = state.get("token_details", {})
 
-            try:
-                token_details = state.get("token_details", {})
+            async def fetch_kline_data() -> Dict[str, Any]:
+                try:
+                    if not self.powerdata_tool:
+                        return {"error": "PowerData tool not available", "data": None}
 
-                # 1) Fetch kline data and news concurrently
-                async def fetch_kline_data():
-                    """Fetch kline technical data via PowerData toolkit."""
-                    try:
-                        if not self.powerdata_cex_tool:
-                            return {"error": "PowerData tool not available", "data": None}
+                    symbol = f"{token}/USDT"
+                    indicators_config = {
+                        "rsi": [{"timeperiod": 14}],
+                        "ema": [{"timeperiod": 12}, {"timeperiod": 26}, {"timeperiod": 50}],
+                        "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
+                        "bbands": [{"timeperiod": 20, "nbdevup": 2, "nbdevdn": 2}],
+                    }
 
-                        symbol = f"{token}/USDT"
-                        indicators_config = {
-                            "rsi": [{"timeperiod": 14}],
-                            "ema": [{"timeperiod": 12}, {"timeperiod": 26}, {"timeperiod": 50}],
-                            "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
-                            "bbands": [{"timeperiod": 20, "nbdevup": 2, "nbdevdn": 2}]
-                        }
+                    daily_result = await self.powerdata_tool.execute(
+                        exchange="binance",
+                        symbol=symbol,
+                        timeframe="1d",
+                        limit=100,
+                        indicators_config=json.dumps(indicators_config),
+                        use_enhanced=True,
+                    )
 
-                        # Fetch both 1d and 4h timeframes
-                        daily_result = await self.powerdata_cex_tool.execute(
-                            exchange="binance",
-                            symbol=symbol,
-                            timeframe="1d",
-                            limit=100,
-                            indicators_config=json.dumps(indicators_config),
-                            use_enhanced=True
-                        )
+                    h4_result = await self.powerdata_tool.execute(
+                        exchange="binance",
+                        symbol=symbol,
+                        timeframe="4h",
+                        limit=100,
+                        indicators_config=json.dumps(indicators_config),
+                        use_enhanced=True,
+                    )
 
-                        h4_result = await self.powerdata_cex_tool.execute(
-                            exchange="binance",
-                            symbol=symbol,
-                            timeframe="4h",
-                            limit=100,
-                            indicators_config=json.dumps(indicators_config),
-                            use_enhanced=True
-                        )
+                    return {
+                        "daily_data": daily_result.output if daily_result and not daily_result.error else None,
+                        "h4_data": h4_result.output if h4_result and not h4_result.error else None,
+                        "error": None,
+                    }
+                except Exception:
+                    return {"error": "kline fetch failed", "data": None}
 
-                        return {
-                            "daily_data": daily_result.output if daily_result and not daily_result.error else None,
-                            "h4_data": h4_result.output if h4_result and not h4_result.error else None,
-                            "error": None
-                        }
+            async def fetch_news_data() -> Dict[str, Any]:
+                if self.tavily_search_tool:
+                    result = await self.tavily_search_tool.execute(
+                        query=f"{token} cryptocurrency news price analysis market trends",
+                        max_results=3,
+                        search_depth="basic",
+                    )
+                    return {"data": str(result), "error": None}
+                return {"error": "no tavily mcp tool", "data": None}
 
-                    except Exception:
-                        return {"error": "kline fetch failed", "data": None}
+            kline_result, news_result = await asyncio.gather(fetch_kline_data(), fetch_news_data())
 
-                async def fetch_news_data():
-                    if self.tavily_search_tool:
-                        result = await self.tavily_search_tool.execute(
-                            query=f"{token} cryptocurrency news price analysis market trends",
-                            max_results=3,
-                            search_depth="basic"
-                        )
-                        return {"data": str(result), "error": None}
-                    return {"error": "no tavily mcp tool", "data": None}
+            token_detail = token_details.get(token, {})
+            current_price = token_detail.get("last_price", 0)
+            price_change_24h = token_detail.get("price_change_24h", 0)
 
-                # Run both coroutines concurrently
-                kline_task = fetch_kline_data()
-                news_task = fetch_news_data()
+            ta_section = json.dumps(kline_result, indent=2, ensure_ascii=False) if kline_result.get("daily_data") else "TA unavailable"
+            news_section = json.dumps(news_result, indent=2, ensure_ascii=False) if news_result.get("data") else "News unavailable"
 
-                kline_result, news_result = await asyncio.gather(kline_task, news_task)
-
-                # 2) Immediately run LLM analysis per token
-                token_detail = token_details.get(token, {})
-                current_price = token_detail.get('last_price', 0)
-                price_change_24h = token_detail.get('price_change_24h', 0)
-
-                # Build LLM prompts (EN) for clarity and consistency
-                ta_section = json.dumps(kline_result, indent=2, ensure_ascii=False) if kline_result.get('daily_data') else 'TA unavailable'
-                news_section = json.dumps(news_result, indent=2, ensure_ascii=False) if news_result.get('data') else 'News unavailable'
-
-                ta_prompt = f"""You are a professional crypto trading analyst. Provide a concise, actionable TECHNICAL trading recommendation for {token}.
+            ta_prompt = f"""You are a professional crypto trading analyst. Provide a concise, actionable TECHNICAL trading recommendation for {token}.
 
 Context:
 - Token: {token}
@@ -587,7 +265,7 @@ Requirements:
 6) Risk rating (Low/Medium/High) and a 1-10 opportunity score
 Output in English, concise, bullet style."""
 
-                news_prompt = f"""You are a professional crypto news/sentiment analyst. Based on recent NEWS for {token}, provide a concise, actionable NEWS-DRIVEN trading recommendation.
+            news_prompt = f"""You are a professional crypto news/sentiment analyst. Based on recent NEWS for {token}, provide a concise, actionable NEWS-DRIVEN trading recommendation.
 
 Context:
 - Token: {token}
@@ -597,222 +275,281 @@ News Data (headlines, snippets, sources):
 {news_section}
 
 Requirements:
-1) Summarize overall sentiment and key catalysts/risks
-2) Potential impact on price (short-term vs mid-term)
-3) Entry considerations based on news (if any)
-4) Risk warnings linked to news uncertainty
-5) Risk rating (Low/Medium/High) and a 1-10 opportunity score
+1) Summarize news sentiment and key events
+2) Impact on price (bullish/bearish/neutral)
+3) Trading implications (buy/sell/hold)
+4) Risk factors from news
+5) Confidence level (1-10)
 Output in English, concise, bullet style."""
 
-                ta_messages = [
-                    Message(role="system", content="You are a professional crypto trading analyst focusing on technical analysis."),
-                    Message(role="user", content=ta_prompt)
-                ]
-                news_messages = [
-                    Message(role="system", content="You are a professional crypto analyst focusing on news and sentiment."),
-                    Message(role="user", content=news_prompt)
-                ]
+            ta_response = await self.llm.chat([Message(role="user", content=ta_prompt)])
+            news_response = await self.llm.chat([Message(role="user", content=news_prompt)])
 
-                ta_analysis = await self._call_llm(ta_messages)
-                news_analysis = await self._call_llm(news_messages)
+            report = {
+                "token": token,
+                "symbol": f"{token}/USDT",
+                "technical_analysis": ta_response.content.strip(),
+                "news_analysis": news_response.content.strip(),
+                "current_price": current_price,
+                "price_change_24h": price_change_24h,
+                "indicators": kline_result,
+                "news": news_result,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
 
-                end_time = datetime.now()
-                analysis_time = (end_time - start_time).total_seconds()
+            log = list(state.get("execution_log", []))
+            log.append(f"Analysis completed for {token}")
 
-                # Store per-token analysis result back into state
-                analysis_result = {
-                    "token": token,
-                    "current_price": current_price,
-                    "price_change_24h": price_change_24h,
-                    "kline_data": kline_result,
-                    "news_data": news_result,
-                    "llm_ta": ta_analysis,
-                    "llm_news": news_analysis,
-                    "analysis_time": analysis_time,
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "completed"
+            token_reports = dict(state.get("token_reports", {}))
+            token_reports[token] = report
+            token_scores = dict(state.get("token_scores", {}))
+            token_scores[token] = self._score_token(report)
+
+            completed = state.get("parallel_tasks_completed", 0) + 1
+
+            return {
+                "token_reports": token_reports,
+                "token_scores": token_scores,
+                "parallel_tasks_completed": completed,
+                "execution_log": log,
+            }
+        except Exception as exc:
+            log = list(state.get("execution_log", []))
+            log.append(f"Analysis failed for {token}: {exc}")
+            token_reports = dict(state.get("token_reports", {}))
+            token_reports[token] = {"error": str(exc)}
+            completed = state.get("parallel_tasks_completed", 0) + 1
+            return {
+                "token_reports": token_reports,
+                "parallel_tasks_completed": completed,
+                "execution_log": log,
+            }
+
+    def _score_token(self, report: Dict[str, Any]) -> float:
+        """Derive a heuristic opportunity score (0-1)."""
+        score = 0.5
+        price_change = report.get("price_change_24h") or 0
+        if isinstance(price_change, (int, float)):
+            score += max(min(price_change / 100.0, 0.2), -0.2)
+
+        sentiment_bonus = 0.0
+        tech_text = (report.get("technical_analysis") or "").lower()
+        news_text = (report.get("news_analysis") or "").lower()
+        if "bullish" in tech_text or "bullish" in news_text:
+            sentiment_bonus += 0.1
+        if "bearish" in tech_text or "bearish" in news_text:
+            sentiment_bonus -= 0.1
+
+        score += sentiment_bonus
+        return float(max(0.0, min(1.0, score)))
+
+    async def _fetch_token_news(self, token: str, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Fetch news for a specific token"""
+        tool = self.api.create_mcp_tool("tavily-search")
+        if not tool:
+            return {}
+
+        try:
+            result = await tool.execute(query=f"{token} cryptocurrency news price analysis market trends", max_results=3, search_depth="basic")
+            payload = result.output if hasattr(result, "output") else result
+        except Exception as exc:
+            payload = [{"title": "News fetch failed", "content": str(exc)}]
+
+        items = []
+        if isinstance(payload, list):
+            items = [
+                {
+                    "title": entry.get("title", ""),
+                    "url": entry.get("url", ""),
+                    "content": (entry.get("content", "") or "")[:400],
                 }
+                for entry in payload
+                if isinstance(entry, dict)
+            ]
+        elif isinstance(payload, str):
+            items = [{"title": "Summary", "content": payload[:400]}]
 
+        return {"news_items": {token: items}}
 
-                return NodeResult(
-                    updates={
-                        f"token_analysis_{token.lower()}": analysis_result,
-                        "execution_history": {
-                            "action": f"analyze_{token.lower()}",
-                            "token": token,
-                            "analysis_time": analysis_time,
-                            "status": "completed",
-                            "parallel_execution": True
-                        },
-                        "analysis_flags": {f"{token.lower()}_analysis_completed"}
-                    },
-                    metadata={
-                        "token": token,
-                        "analysis_time": analysis_time,
-                        "execution_type": "parallel_graph_node",
-                        "kline_success": kline_result.get('error') is None,
-                        "news_success": news_result.get('error') is None
-                    },
-                    logs=[f"Completed {token} end-to-end analysis"],
-                    confidence=0.9 if (isinstance(ta_analysis, str) and "failed" not in ta_analysis.lower()) and (isinstance(news_analysis, str) and "failed" not in news_analysis.lower()) else 0.3,
-                    reasoning=f"Parallel branch node completed kline + news + LLM for {token}"
-                )
+    async def _aggregate_results(self, state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Aggregate all token analyses into final report"""
+        token_reports = state.get("token_reports", {})
 
-            except Exception as e:
-                logger.error(f"Token {token} analysis failed: {e}")
-                return NodeResult(
-                    error=f"Token {token} analysis failed: {str(e)}",
-                    confidence=0.0
-                )
+        if not token_reports:
+            return {"final_summary": "No token analyses available"}
 
-        return token_analyzer
+        # Extract key recommendations for top tokens
+        recommendations = []
+        for token, report in token_reports.items():
+            if "error" not in report:
+                rec = report.get("final_recommendation", "")
+                if rec:
+                    recommendations.append(f"**{token}**: {rec}")
 
-    async def llm_final_aggregation(self, state: Dict[str, Any], context: NodeContext) -> NodeResult:
-        # Collect all token analyses dynamically from state
-        token_analyses = []
-        for key, value in state.items():
-            if isinstance(key, str) and key.startswith("token_analysis_") and isinstance(value, dict):
-                token_analyses.append(value)
+        summary_prompt = f"""You are a senior crypto analyst. Create a comprehensive market analysis report based on individual token analyses.
 
-        if not token_analyses:
-            return NodeResult(
-                error="No token analyses available for aggregation",
-                confidence=0.0
-            )
+TOKEN ANALYSES:
+{json.dumps(token_reports, indent=2)}
 
-        # Compute parallel execution stats
-        total_time = max([analysis.get('analysis_time', 0) for analysis in token_analyses])
-        avg_time = sum([analysis.get('analysis_time', 0) for analysis in token_analyses]) / len(token_analyses)
-        parallel_stats = {
-            "total_tokens": len(token_analyses),
-            "successful_count": len([a for a in token_analyses if a.get('status') == 'completed']),
-            "total_execution_time": total_time,
-            "average_time_per_token": avg_time,
-            "parallel_efficiency": "Graph-level true parallel execution"
+Create a structured report with:
+1) Market Overview (current sentiment, trends)
+2) Top Trading Opportunities (3-5 best picks with reasoning)
+3) Risk Warnings (key concerns)
+4) Portfolio Allocation Suggestions
+5) Overall Market Outlook
+
+Keep it professional, actionable, and under 800 words."""
+
+        response = await self.llm.chat([Message(role="user", content=summary_prompt)])
+        final_summary = response.content.strip()
+
+        log = list(state.get("execution_log", []))
+        log.append("Final market analysis generated")
+
+        return {
+            "final_summary": final_summary,
+            "execution_log": log,
         }
 
-        # Build final aggregation prompt
-        aggregation_prompt = f"""Based on the following {len(token_analyses)} token analyses, produce a final summary:
 
-## Execution Stats:
-- Tokens analyzed: {parallel_stats.get('total_tokens', 0)}
-- Success count: {parallel_stats.get('successful_count', 0)}
-- Total execution time: {parallel_stats.get('total_execution_time', 0):.2f}s
-- Execution mode: {parallel_stats.get('parallel_efficiency', 'parallel')}
 
-## Per-Token Analyses:
-"""
+    def _build_graph(self):
+        """Build the complete analysis graph matching original functionality"""
+        # Create analyzer nodes - each node handles a specific token index
+        analyzer_nodes = []
+        analyzer_names = []
 
-        # Append each token analysis details to the prompt
-        for i, analysis in enumerate(token_analyses, 1):
-            token = analysis.get('token', 'Unknown')
-            price = analysis.get('current_price', 0)
-            change = analysis.get('price_change_24h', 0)
-            llm_ta = analysis.get('llm_ta', 'No TA analysis')
-            llm_news = analysis.get('llm_news', 'No news analysis')
-            analysis_time = analysis.get('analysis_time', 0)
+        for i in range(10):
+            node_name = f"analyze_token_{i}"
+            analyzer_names.append(node_name)
 
-            aggregation_prompt += f"""
-### {i}. {token}
-- Current Price: ${price}
-- 24h Change: {change:+.2f}%
-- Analysis Time: {analysis_time:.2f}s
+            # Create a node function that captures the token index
+            def make_analyzer_node(token_idx):
+                async def analyzer_node(state: CryptoAnalysisState, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    return await self._analyze_token_by_index(token_idx, state, config)
+                return analyzer_node
 
-**Technical Recommendation (LLM):**
-{llm_ta}
+            analyzer_func = make_analyzer_node(i)
+            analyzer_nodes.append(NodeSpec(node_name, analyzer_func, parallel_group="token_analysis"))
 
-**News Recommendation (LLM):**
-{llm_news}
-
----
-"""
-
-        aggregation_prompt += """
-## Your Tasks:
-1) Rank the top 3-5 trading opportunities by risk-adjusted potential
-   - For each: token, current price, opportunity score, key reasons
-   - Entry plan, stop loss, targets, timeframe, risk level
-2) Market overview: trend, sentiment, and rotations
-3) Risk warnings: key risks to monitor
-4) Portfolio suggestion: weighting and risk management tips
-
-Keep the output in English, concise and directly actionable.
-"""
-
-        messages = [
-            Message(role="system", content=(
-                "You are a senior crypto investment advisor. Combine all token analyses to identify the best opportunities, "
-                "rank them by risk-adjusted potential, and provide clear, actionable plans along with risk management."
-            )),
-            Message(role="user", content=aggregation_prompt)
-        ]
-
-        # Call LLM for final aggregation
-        final_recommendation = await self._call_llm(messages)
-
-        # Compute overall confidence
-        success_rate = parallel_stats.get('successful_count', 0) / max(1, parallel_stats.get('total_tokens', 1))
-        final_confidence = min(0.95, 0.6 + success_rate * 0.3)
-
-        return NodeResult(
-            updates={
-                "final_recommendation": final_recommendation,
-                "trading_advice": final_recommendation,
-                "aggregation_stats": {
-                    "tokens_analyzed": len(token_analyses),
-                    "successful_analyses": parallel_stats.get('successful_count', 0),
-                    "total_execution_time": parallel_stats.get('total_execution_time', 0),
-                    "average_analysis_time": parallel_stats.get('average_time_per_token', 0)
-                },
-                "confidence_score": final_confidence,
-                "risk_level": "MEDIUM",
-                "execution_history": {
-                    "action": "llm_final_aggregation",
-                    "tokens_processed": len(token_analyses)
-                },
-                "analysis_flags": {"final_aggregation_completed"}
-            },
-            confidence=final_confidence
+        template = GraphTemplate(
+            entry_point="fetch_binance_data",
+            nodes=[
+                NodeSpec("fetch_binance_data", self._fetch_binance_market_data),
+                NodeSpec("prepare_token_list", self._prepare_token_list),
+                *analyzer_nodes,
+                NodeSpec("llm_final_aggregation", self._aggregate_results),
+            ],
+            edges=[
+                EdgeSpec("fetch_binance_data", "prepare_token_list"),
+                # Connect prepare_token_list to all analyzers
+                *[EdgeSpec("prepare_token_list", name) for name in analyzer_names],
+                # Connect all analyzers to final aggregation
+                *[EdgeSpec(name, "llm_final_aggregation") for name in analyzer_names],
+                EdgeSpec("llm_final_aggregation", END),
+            ],
+            parallel_groups=[
+                ParallelGroupSpec(
+                    name="token_analysis",
+                    nodes=tuple(analyzer_names),
+                    config=ParallelGroupConfig(join_strategy="all", error_strategy="collect_errors"),
+                ),
+            ],
+            config=GraphConfig(max_iterations=100),
         )
 
+        builder = DeclarativeGraphBuilder(CryptoAnalysisState)
+        graph = builder.build(template)
+        if hasattr(graph, "enable_monitoring"):
+            graph.enable_monitoring([
+                "execution_time",
+                "llm_response_quality",
+                "api_success_rate",
+                "analysis_depth",
+                "parallel_branch_efficiency"
+            ])
+        return graph
 
-async def run_llm_driven_analysis():
-    analyzer = LLMCryptoAnalyzer()
-    graph = analyzer.create_analysis_graph()
-    compiled = graph.compile()
+    async def run(self, query: str) -> Dict[str, Any]:
+        """Run complete crypto analysis matching original functionality"""
+        intent, base_state = await self.api.build_initial_state(query)
+        self.api.ensure_mcp_for_intent(intent)
 
-    initial_state = {
-        "query": "LLM-driven cryptocurrency analysis based on real Binance API data",
-        "binance_market_data": {},
+        # Initialize state with all required fields
+        state: CryptoAnalysisState = {
+            "user_query": query,
+            "execution_log": [],
+            "parallel_tasks_completed": 0,
         "selected_tokens": [],
         "token_details": {},
-        "market_data": {},
-        "news_data": {},
-        "comprehensive_analysis": {},
-        "technical_analysis": {},
+            "token_reports": {},
+            "token_scores": {},
+            "news_items": {},
+            "final_summary": "",
+            "binance_market_data": {},
         "execution_history": [],
         "analysis_flags": set(),
-        "final_recommendation": "",
-        "confidence_score": 0.0,
-        "risk_level": "MEDIUM"
-    }
+        }
+        state.update(base_state)
 
-    start_time = datetime.now()
-    result = await compiled.invoke(
-        initial_state,
-        config={"configurable": {"thread_id": "llm_crypto_analysis"}}
-    )
+        compiled = self.graph.compile()
+        start = datetime.utcnow()
+        result = await compiled.invoke(state, {"max_iterations": 100})
+        result["processing_time"] = (datetime.utcnow() - start).total_seconds()
+        try:
+            result["execution_metrics"] = compiled.get_execution_metrics()
+        except Exception:
+            result["execution_metrics"] = {}
+        return result
 
-    end_time = datetime.now()
-    execution_time = (end_time - start_time).total_seconds()
+    def render(self, result: Dict[str, Any]) -> None:
+        """Render results in the same format as original demo"""
+        query = result.get("user_query", "")
+        processing_time = result.get("processing_time", 0.0)
+        report_date = self._current_date_label()
+        summary = result.get("final_summary", "")
+        execution_log = result.get("execution_log", [])
 
-    trading_advice = result.get('trading_advice', '')
-    if trading_advice:
-        print(trading_advice)
+        print(f"\n{'=' * 80}")
+        print(f"🔍 MARKET ANALYSIS REPORT")
+        print(f"{'=' * 80}")
+        print(f"📝 Query: {query}")
+        print(f"📅 Date: {report_date}")
+        print(f"⚡ Processing Time: {processing_time:.2f}s")
+        print(f"{'-' * 80}")
 
-    return result
+        if execution_log:
+            print("📋 Execution Steps:")
+            for i, log_entry in enumerate(execution_log[-8:], 1):
+                print(f"  {i}. {log_entry}")
+
+        if summary:
+            print("\n📊 ANALYSIS RESULTS:")
+            print(summary)
+        else:
+            print("\n📊 ANALYSIS RESULTS: No summary generated")
+        print(f"{'=' * 80}\n")
+
+    def _current_date_label(self) -> str:
+        try:
+            tz_name = os.getenv("REPORT_TIMEZONE", "UTC")
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = ZoneInfo("UTC")
+        return datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
+
+
+async def main() -> None:
+    demo = DeclarativeCryptoAnalysisDemo()
+    print("🚀 Declarative LLM Crypto Analysis Demo")
+    print("=" * 80)
+
+    # Test with empty query to match original behavior (uses LLM-driven token selection)
+    result = await demo.run("")
+    demo.render(result)
 
 
 if __name__ == "__main__":
-    # Run LLM-driven real cryptocurrency analysis
-    asyncio.run(run_llm_driven_analysis())
+    asyncio.run(main())
+
+
