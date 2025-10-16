@@ -17,15 +17,6 @@ from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 
-# Add project paths
-current_dir = Path(__file__).resolve().parent
-project_root = current_dir.parent
-sys.path.insert(0, str(project_root))
-
-# Add toolkit path
-toolkit_path = project_root.parent / "spoon-toolkit"
-sys.path.insert(0, str(toolkit_path))
-
 # Import spoon_ai framework
 from spoon_ai.agents.toolcall import ToolCallAgent
 from spoon_ai.tools import ToolManager
