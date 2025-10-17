@@ -60,9 +60,19 @@ class MCPToolsCollection:
         # Create tool manager
         self.tool_manager = ToolManager(tools)
 
-        # Create MCP wrapper for each tool
+        # Create MCP wrapper for each tool using new FastMCP API
         for tool in tools:
-            self.mcp.add_tool(tool.execute, name=tool.name, description=tool.description)
+            # Use the new API: add_tool expects a FunctionTool object
+            from fastmcp.tools.tool import FunctionTool
+
+            # Create a FunctionTool from the existing tool
+            function_tool = FunctionTool(
+                name=tool.name,
+                description=tool.description,
+                fn=tool.execute,  # Pass the function directly
+                parameters=tool.parameters if hasattr(tool, 'parameters') else {}
+            )
+            self.mcp.add_tool(function_tool)
 
     async def run(self, **kwargs):
         """Start the MCP server
@@ -74,7 +84,16 @@ class MCPToolsCollection:
 
     async def add_tool(self, tool: BaseTool):
         """Add a tool to the MCP server"""
-        self.mcp.add_tool(tool.execute, name=tool.name, description=tool.description)
+        from fastmcp.tools.tool import FunctionTool
+
+        # Create a FunctionTool from the existing tool
+        function_tool = FunctionTool(
+            name=tool.name,
+            description=tool.description,
+            fn=tool.execute,  # Pass the function directly
+            parameters=tool.parameters if hasattr(tool, 'parameters') else {}
+        )
+        self.mcp.add_tool(function_tool)
 
 # Create default instance that can be imported directly
 mcp_tools = MCPToolsCollection()
