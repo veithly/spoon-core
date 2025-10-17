@@ -1,1265 +1,1114 @@
-"""
-SpoonOS Advanced Graph Demo - Parallel Processing & Intelligent Routing (Simplified)
+"""Intent graph demo (template-based) with freshly implemented nodes.
 
-Highlights:
-- Intelligent query routing: general_qa, short_term_trend, macro_trend, deep_research
-- TRUE parallel data fetching (15m, 30m, 1h, 4h, daily, weekly)
-- LLM-powered routing and summarization
-- Real market data via PowerData toolkit
+This version demonstrates how the new graph architecture can:
 
-Simplified design:
-- Removed external web/news search and reflection loops
-- Centralized symbol extraction (no hard-coded valid symbols)
-- Reduced prints and redundant try/except checks
+* Infer tool parameters automatically through ``HighLevelGraphAPI`` and
+  ``ParameterInferenceEngine``.
+* Build graphs declaratively via ``GraphTemplate`` / ``NodeSpec`` while keeping
+  all business logic inside modular node functions.
+* Integrate real tools (PowerData, Tavily MCP, EVM swap) without hard-coding
+  them in the core engine.
+
+All nodes below are new implementations – no reuse of the legacy
+``intent_graph_demo.py`` functions.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
-from typing import Dict, Any, List, Annotated, TypedDict, Optional
-from datetime import datetime
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TypedDict
+
 from dotenv import load_dotenv
-
-from spoon_ai.graph import (
-    StateGraph, END
+from spoon_ai.graph import END
+from spoon_ai.graph.builder import (
+    DeclarativeGraphBuilder,
+    EdgeSpec,
+    GraphTemplate,
+    Intent,
+    HighLevelGraphAPI,
+    MCPToolSpec,
+    NodePlugin,
+    NodeSpec,
+    ParallelGroupSpec,
 )
-
-# Import PowerData tool for real data integration (simplified)
-from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
-powerdata_tool = CryptoPowerDataCEXTool()
-
+from spoon_ai.graph.config import GraphConfig, ParallelGroupConfig, RouterConfig
 from spoon_ai.llm.manager import get_llm_manager
 from spoon_ai.schema import Message
-from spoon_ai.tools.mcp_tool import MCPTool
+
+from spoon_toolkits.crypto.crypto_powerdata.tools import CryptoPowerDataCEXTool
 from spoon_toolkits.crypto.evm import EvmSwapTool
 
-# Load environment variables
 load_dotenv()
 
-# Initialize Tavily MCP tool (simplified, like graph_crypto_analysis)
-import os
-import subprocess
-tavily_search_tool = None
-try:
-    tavily_key = os.getenv("TAVILY_API_KEY", "")
-    if tavily_key and "your-tavily-api-key-here" not in tavily_key:
-        cmd = None
-        try:
-            r = subprocess.run(["npx", "--version"], capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
-                cmd = "npx"
-        except Exception:
-            pass
-        if cmd is None and os.name == "nt":
-            try:
-                r = subprocess.run(["npx.cmd", "--version"], capture_output=True, text=True, timeout=5)
-                if r.returncode == 0:
-                    cmd = "npx.cmd"
-            except Exception:
-                pass
-        if cmd:
-            tavily_search_tool = MCPTool(
-                name="tavily-search",
-                description="Performs a web search using the Tavily API for cryptocurrency news and market sentiment.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query for cryptocurrency news and analysis"},
-                        "max_results": {"type": "integer", "description": "Maximum results", "default": 5},
-                        "search_depth": {"type": "string", "description": "basic or advanced", "default": "basic"}
-                    },
-                    "required": ["query"]
-                },
-                mcp_config={
-                    "command": cmd,
-                    "args": ["--yes", "tavily-mcp"],
-                    "env": {"TAVILY_API_KEY": tavily_key},
-                    "timeout": 30,
-                    "max_retries": 2
-                }
-            )
-except Exception:
-    tavily_search_tool = None
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
-def _extract_indicators(data: Any) -> Dict[str, Any]:
-    """Safely extract indicator-like fields from PowerData result.
-    Kept minimal to avoid errors; returns empty dict on unknown shapes.
-    """
-    indicators: Dict[str, Any] = {}
-    try:
-        if isinstance(data, dict):
-            for key, value in data.items():
-                key_l = str(key).lower()
-                if any(k in key_l for k in ("rsi", "ema", "macd", "bbands", "stoch", "adx", "cci")):
-                    indicators[key] = value
-        elif isinstance(data, list) and data:
-            last = data[-1]
-            if isinstance(last, dict):
-                for key, value in last.items():
-                    key_l = str(key).lower()
-                    if any(k in key_l for k in ("rsi", "ema", "macd", "bbands", "stoch", "adx", "cci")):
-                        indicators[key] = value
-    except Exception:
-        return {}
-    return indicators
+# ---------------------------------------------------------------------------
+# State schema for the new demo
+# ---------------------------------------------------------------------------
 
 
-async def _fetch_kline_data(symbol: str, timeframe: str, limit: int, indicators_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Generic PowerData fetch returning a normalized timeframe payload."""
-    symbol_pair = f"{symbol}/USDT"
-    result = await powerdata_tool.execute(
-        exchange="binance",
-        symbol=symbol_pair,
-        timeframe=timeframe,
-        limit=limit,
-        indicators_config=json.dumps(indicators_config),
-        use_enhanced=True,
-    )
-    return {
-        "symbol": symbol_pair,
-        "timeframe": timeframe,
-        "data": result.output,
-        "indicators": _extract_indicators(result.output),
-        "timestamp": datetime.now().isoformat(),
-    }
+class IntentGraphState(TypedDict, total=False):
+    user_query: str
+    user_name: str
+    session_id: str
+    query_intent: str
+    symbol: str
+    timeframes: List[str]
+    include_news: bool
+
+    short_timeframes: List[str]
+    macro_timeframes: List[str]
+
+    timeframe_payloads: Dict[str, Dict[str, Any]]
+    short_term_data: Dict[str, Dict[str, Any]]
+    short_term_metrics: Dict[str, Dict[str, Any]]
+    macro_data: Dict[str, Dict[str, Any]]
+    macro_metrics: Dict[str, Dict[str, Any]]
+    macro_news: List[Dict[str, Any]]
+    research_sources: List[Dict[str, Any]]
+
+    short_term_summary: str
+    macro_summary: str
+    deep_research_report: str
+    general_answer: str
+
+    trade_plan: Optional[Dict[str, Any]]
+    trade_status: str
+    trade_error: Optional[str]
+
+    execution_log: List[str]
+    routing_trace: List[str]
+    parallel_tasks_completed: int
+
+    final_output: str
+    processing_time: float
+    execution_metrics: Dict[str, Any]
+    memory_snapshot: Dict[str, Any]
 
 
+# ---------------------------------------------------------------------------
+# Helper utilities
+# ---------------------------------------------------------------------------
 
 
-# ==========================================================================
-# CONFIG PRESETS AND NODE FACTORY HELPERS
-# ==========================================================================
-
-# Indicator config presets for short-term and macro analyses
-SHORT_TERM_PRESETS: Dict[str, Dict[str, Any]] = {
+TIMEFRAME_CONFIG: Dict[str, Dict[str, Any]] = {
     "15m": {
-        "limit": 50,
+        "limit": 60,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
             "ema": [{"timeperiod": 12}, {"timeperiod": 26}],
             "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
-            "bbands": [{"timeperiod": 20, "nbdevup": 2, "nbdevdn": 2}],
         },
     },
     "30m": {
-        "limit": 40,
+        "limit": 50,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
-            "ema": [{"timeperiod": 12}, {"timeperiod": 26}],
-            "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
+            "ema": [{"timeperiod": 21}],
             "stoch": [{"fastkperiod": 14, "slowkperiod": 3, "slowdperiod": 3}],
         },
     },
     "1h": {
-        "limit": 30,
+        "limit": 40,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
-            "ema": [{"timeperiod": 12}, {"timeperiod": 26}],
+            "ema": [{"timeperiod": 50}],
             "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
             "adx": [{"timeperiod": 14}],
-            "cci": [{"timeperiod": 20}],
         },
     },
-}
-
-MACRO_PRESETS: Dict[str, Dict[str, Any]] = {
     "4h": {
-        "limit": 30,
+        "limit": 40,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
             "ema": [{"timeperiod": 50}, {"timeperiod": 200}],
             "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
-            "adx": [{"timeperiod": 14}],
         },
     },
     "1d": {
-        "limit": 30,
+        "limit": 60,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
             "ema": [{"timeperiod": 50}, {"timeperiod": 200}],
-            "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
-            "adx": [{"timeperiod": 14}],
             "bbands": [{"timeperiod": 20, "nbdevup": 2, "nbdevdn": 2}],
         },
     },
     "1w": {
-        "limit": 20,
+        "limit": 80,
         "indicators": {
             "rsi": [{"timeperiod": 14}],
             "ema": [{"timeperiod": 50}, {"timeperiod": 200}],
             "macd": [{"fastperiod": 12, "slowperiod": 26, "signalperiod": 9}],
-            "adx": [{"timeperiod": 14}],
-            "stoch": [{"fastkperiod": 14, "slowkperiod": 3, "slowdperiod": 3}],
         },
     },
 }
 
+SHORT_TIMEFRAMES = {"15m", "30m", "1h"}
+MACRO_TIMEFRAMES = {"4h", "1d", "1w"}
 
-def make_fetch_node(timeframe: str, limit: int, indicators_config: Dict[str, Any], result_key: str):
-    async def _node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-        symbol = state.get("symbol", "BTC")
-        payload = await _fetch_kline_data(symbol, timeframe, limit, indicators_config)
-        return {
-            result_key: payload,
-            "parallel_tasks_completed": state.get("parallel_tasks_completed", 0) + 1,
-            "execution_log": state.get("execution_log", []) + [f"{timeframe} data fetched for {payload['symbol']}"],
-        }
-    return _node
+MEMORY_FILE = CURRENT_DIR / "intent_graph_memory_new.json"
 
 
-# ==========================================================================
-# LIGHTWEIGHT GRAPH MEMORY (JSON persistence per user)
-# ==========================================================================
-
-MEMORY_FILE = os.path.join(os.path.dirname(__file__), "advanced_graph_memory.json")
-
-
-def _read_json_file(path: str) -> Dict[str, Any]:
+def _load_json(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
 
-def _write_json_file(path: str, data: Dict[str, Any]) -> None:
+def _save_json(path: Path, data: Dict[str, Any]) -> None:
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def _user_key(user_name: str) -> str:
-    return (user_name or "User").strip().lower()
-
-
-async def load_memory_node(state: "AdvancedComprehensiveState") -> Dict[str, Any]:
-    user_name = state.get("user_name", "User")
-    all_mem = _read_json_file(MEMORY_FILE)
-    ukey = _user_key(user_name)
-    user_mem = all_mem.get(ukey, {})
-    memory_state: MemoryState = {
-        "session_id": state.get("session_id", ""),
-        "conversation_history": user_mem.get("conversation_history", [])[-50:],
-        "user_context": user_mem.get("user_context", {}),
-        "learned_patterns": user_mem.get("learned_patterns", {}),
-    }
-    return {
-        "memory_state": memory_state,
-        "execution_log": state.get("execution_log", []) + [f"Memory loaded for {user_name}"],
-        "current_step": "memory_loaded",
-    }
-
-
-async def update_memory_node(state: "AdvancedComprehensiveState") -> Dict[str, Any]:
-    user_name = state.get("user_name", "User")
-    user_query = state.get("user_query", "")
-    symbol = state.get("symbol", "")
-    qa = state.get("query_analysis", {}) or {}
-    query_type = qa.get("query_type", "general_qa")
-    final_output = state.get("final_output", "")
-
-    all_mem = _read_json_file(MEMORY_FILE)
-    ukey = _user_key(user_name)
-    user_mem = all_mem.get(ukey, {"conversation_history": [], "user_context": {}, "learned_patterns": {}})
-
-    # Update conversation history
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "query": user_query,
-        "query_type": query_type,
-        "symbol": symbol,
-    }
-    user_mem.setdefault("conversation_history", []).append(entry)
-    # Trim
-    user_mem["conversation_history"] = user_mem["conversation_history"][-200:]
-
-    # Update learned patterns
-    lp = user_mem.setdefault("learned_patterns", {})
-    qtc = lp.setdefault("query_type_counts", {})
-    qtc[query_type] = int(qtc.get(query_type, 0)) + 1
-    sc = lp.setdefault("symbol_counts", {})
-    if symbol:
-        sc[symbol] = int(sc.get(symbol, 0)) + 1
-
-    # Update user context
-    uc = user_mem.setdefault("user_context", {})
-    uc["last_summary"] = final_output[:800]
-    if symbol:
-        per_symbol = uc.setdefault("last_symbol_summaries", {})
-        per_symbol[symbol] = final_output[:800]
-
-    all_mem[ukey] = user_mem
-    _write_json_file(MEMORY_FILE, all_mem)
-
-    memory_state: MemoryState = {
-        "session_id": state.get("session_id", ""),
-        "conversation_history": user_mem["conversation_history"],
-        "user_context": uc,
-        "learned_patterns": lp,
-    }
-    return {
-        "memory_state": memory_state,
-        "execution_log": state.get("execution_log", []) + ["Memory updated"],
-        "current_step": "memory_updated",
-    }
-
-# ============================================================================
-# STATE SCHEMAS
-# ============================================================================
-
-class QueryAnalysisState(TypedDict):
-    """State for query analysis and routing"""
-    user_query: str
-    query_type: str  # 'general_qa', 'short_term_trend', 'macro_trend', 'deep_research'
-    confidence: float
-    analysis_metadata: Annotated[Dict[str, Any], dict]
-
-
-class ShortTermTrendState(TypedDict):
-    """State for short-term trend analysis (15m/30m/1h parallel processing)"""
-    user_query: str
-    symbol: str
-    timeframe_data: Annotated[Dict[str, Any], dict]  # {'15m': data, '30m': data, '1h': data}
-    analysis_summary: str
-
-
-class MacroTrendState(TypedDict):
-    """State for macro trend analysis (4h/daily/weekly + news)"""
-    user_query: str
-    symbol: str
-    timeframe_data: Annotated[Dict[str, Any], dict]
-    news_data: Annotated[List[Dict[str, Any]], list]
-    macro_analysis: str
-
-
-class DeepResearchState(TypedDict):
-    """Simplified deep research state"""
-    user_query: str
-    final_insights: str
-
-
-class MemoryState(TypedDict):
-    """State for memory management"""
-    session_id: str
-    conversation_history: Annotated[List[Dict[str, str]], list]
-    user_context: Annotated[Dict[str, Any], dict]
-    learned_patterns: Annotated[Dict[str, Any], dict]
-
-
-class AdvancedComprehensiveState(TypedDict):
-    """Advanced comprehensive state supporting all query types"""
-    # Core query information
-    user_query: str
-    user_name: str
-    session_id: str
-    symbol: str
-    trade_params: Annotated[Optional[Dict[str, Any]], None]  # Trading parameters extracted from query
-
-    # Query analysis
-    query_analysis: Annotated[Optional[QueryAnalysisState], None]
-
-    # Analysis states (only one will be populated based on query type)
-    short_term_trend: Annotated[Optional[ShortTermTrendState], None]
-    macro_trend: Annotated[Optional[MacroTrendState], None]
-    deep_research: Annotated[Optional[DeepResearchState], None]
-
-    # Memory and context
-    memory_state: Annotated[Optional[MemoryState], None]
-
-    # Execution tracking
-    execution_log: Annotated[List[str], list]
-    routing_decisions: Annotated[List[str], list]
-    current_step: str
-    final_output: str
-
-    # Trading signals
-    trade_signal: str  # "BUY" or "NO_BUY"
-
-    # Performance metrics
-    processing_time: float
-    parallel_tasks_completed: int
-
-
-# ============================================================================
-# WORKFLOW NODES
-# ============================================================================
-
-async def initialize_session_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Initialize session and memory state"""
-    session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    return {
-        "session_id": session_id,
-        "current_step": "session_initialized",
-        "execution_log": ["Session initialized"],
-        "processing_time": 0.0,
-        "parallel_tasks_completed": 0
-    }
-
-
-async def analyze_query_intent_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Analyze user query and determine query type using LLM"""
-    query = state.get("user_query", "")
-    llm_manager = get_llm_manager()
-
-    intent_prompt = f"""
-    Analyze this cryptocurrency-related query and classify it into EXACTLY ONE category:
-
-    Query: "{query}"
-
-    Categories:
-    1. general_qa - General questions about crypto concepts, how things work, basic info
-       Examples: "What is blockchain?", "How does DeFi work?"
-
-    2. short_term_trend - Questions about immediate/short-term price movements and trends
-       Examples: "What's ETH doing now?", "Short-term BTC momentum", "Next hour trend"
-
-    3. macro_trend - Questions about long-term trends, analysis, forecasts, weekly/monthly outlook
-       Examples: "Long-term trends for ETH", "Macro analysis of BTC", "Weekly/monthly outlook"
-
-    4. deep_research - Complex research requiring multiple sources and deep analysis
-       Examples: "Research DeFi protocols", "Analyze market developments", "Investigate new projects"
-
-    CLASSIFICATION RULES:
-    - If query mentions "long-term", "macro", "trend analysis", "forecast", "weekly", "monthly" → macro_trend
-    - If query mentions "short-term", "now", "today", "momentum", "next hours" → short_term_trend
-    - If query asks to "research", "analyze thoroughly", "investigate" → deep_research
-    - If query is general question about crypto concepts → general_qa
-
-    Return ONLY: category|confidence
-    Example: macro_trend|0.95
-    """
-
-    messages = [Message(role="user", content=intent_prompt)]
-    response = await llm_manager.chat(messages)
-    result = response.content.strip()
-
-    # Parse result
-    try:
-        category, confidence_str = result.split("|")
-        confidence = float(confidence_str)
-    except:
-        category = "general_qa"
-        confidence = 0.5
-
-    # Ensure valid category
-    valid_categories = ["general_qa", "short_term_trend", "macro_trend", "deep_research"]
-    if category not in valid_categories:
-        category = "general_qa"
-
-    # Debug logging
-    print(f"DEBUG: Query classification - Category: {category}, Confidence: {confidence}, Raw LLM response: '{result}'")
-
-    return {
-        "query_analysis": {
-            "user_query": query,
-            "query_type": category,
-            "confidence": confidence,
-            "analysis_metadata": {
-                "llm_response": result,
-                "analysis_timestamp": datetime.now().isoformat()
-            }
-        },
-        "current_step": f"intent_analyzed_{category}",
-        "execution_log": state.get("execution_log", []) + [f"Query classified as: {category} (confidence: {confidence:.2f})"]
-    }
-
-
-async def general_qa_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Handle general Q&A queries directly with LLM"""
-    query = state.get("user_query", "")
-    llm_manager = get_llm_manager()
-
-    qa_prompt = f"""
-    You are a helpful cryptocurrency assistant. Answer this general question about cryptocurrency:
-
-    Question: {query}
-
-    Provide a clear, concise, and helpful response. If this involves financial advice,
-    remind the user that this is not financial advice and they should do their own research.
-    """
-
-    messages = [Message(role="user", content=qa_prompt)]
-    response = await llm_manager.chat(messages)
-
-    return {
-        "final_output": response.content.strip(),
-        "current_step": "general_qa_completed",
-        "execution_log": state.get("execution_log", []) + ["General Q&A response generated"]
-    }
-
-
-async def extract_symbol_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Extract trading parameters from user query for analysis and potential execution"""
-    query = state.get("user_query", "")
-    llm_manager = get_llm_manager()
-
-    # Extract symbol for analysis (default to ETH) and trading parameters
-    extraction_prompt = f"""
-    Analyze this crypto-related query and extract:
-
-    1. ANALYSIS_SYMBOL: The primary cryptocurrency to analyze for trend (e.g., BTC, ETH, SOL)
-
-    2. TRADE_PARAMS: If trading/buying/swapping is mentioned, extract in JSON format:
-       {{
-         "from_token": "token to sell (address like 0x... or symbol like USDC)",
-         "to_token": "token to buy (address like 0x... or symbol like ETH)",
-         "amount": "amount as string (e.g., '0.1', '100')"
-       }}
-
-    Look for phrases like:
-    - "swap X for Y"
-    - "buy X amount of Y"
-    - "trade X to Y"
-    - "if bullish, swap/buy..."
-
-    Query: "{query}"
-
-    Return format:
-    ANALYSIS_SYMBOL: [SYMBOL]
-    TRADE_PARAMS: [JSON or "NONE"]
-    """
-
-    messages = [Message(role="user", content=extraction_prompt)]
-    response = await llm_manager.chat(messages)
-    result = response.content.strip()
-
-    # Parse results
-    analysis_symbol = "ETH"  # Default to ETH
-    trade_params = None
-
-    for line in result.split('\n'):
-        line = line.strip()
-        if line.startswith('ANALYSIS_SYMBOL:'):
-            symbol_part = line.replace('ANALYSIS_SYMBOL:', '').strip()
-            if symbol_part and len(symbol_part) <= 10:  # Reasonable symbol length
-                analysis_symbol = symbol_part.upper()
-        elif line.startswith('TRADE_PARAMS:'):
-            params_part = line.replace('TRADE_PARAMS:', '').strip()
-            if params_part != "NONE" and params_part.startswith('{'):
-                try:
-                    trade_params = json.loads(params_part)
-                except:
-                    trade_params = None
-
-    return {
-        "symbol": analysis_symbol,
-        "trade_params": trade_params,
-        "current_step": f"symbol_extracted_{analysis_symbol}",
-        "execution_log": state.get("execution_log", []) + [
-            f"Analysis symbol: {analysis_symbol}",
-            f"Trade params: {trade_params if trade_params else 'None'}"
-        ]
-    }
-
-
-# ============================================================================
-# SHORT-TERM TREND ANALYSIS NODES (PARALLEL PROCESSING)
-# ============================================================================
-
-fetch_15m_data_node = make_fetch_node(
-    "15m",
-    SHORT_TERM_PRESETS["15m"]["limit"],
-    SHORT_TERM_PRESETS["15m"]["indicators"],
-    "timeframe_data_15m",
-)
-
-
-fetch_30m_data_node = make_fetch_node(
-    "30m",
-    SHORT_TERM_PRESETS["30m"]["limit"],
-    SHORT_TERM_PRESETS["30m"]["indicators"],
-    "timeframe_data_30m",
-)
-
-
-fetch_1h_data_node = make_fetch_node(
-    "1h",
-    SHORT_TERM_PRESETS["1h"]["limit"],
-    SHORT_TERM_PRESETS["1h"]["indicators"],
-    "timeframe_data_1h",
-)
-
-
-
-# preview function removed by simplification
-
-
-async def analyze_short_term_trend_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Analyze short-term trend from parallel data"""
-    # Combine data from all timeframes
-    timeframe_data = {}
-    indicators = {}
-
-    # Collect data from parallel nodes
-    if "timeframe_data_15m" in state:
-        timeframe_data["15m"] = state["timeframe_data_15m"]
-        indicators.update(state["timeframe_data_15m"].get("indicators", {}))
-
-    if "timeframe_data_30m" in state:
-        timeframe_data["30m"] = state["timeframe_data_30m"]
-        indicators.update(state["timeframe_data_30m"].get("indicators", {}))
-
-    if "timeframe_data_1h" in state:
-        timeframe_data["1h"] = state["timeframe_data_1h"]
-        indicators.update(state["timeframe_data_1h"].get("indicators", {}))
-
-    llm_manager = get_llm_manager()
-
-    analysis_prompt = f"""
-    You are a market analyst. Analyze short-term cryptocurrency trend using the raw multi-timeframe K-line data (candles). Write a concise, human-readable summary WITHOUT any JSON. Include:
-    - A clear conclusion (bullish/neutral/bearish) for the next few hours
-    - 2-4 key reasons grounded in price action across 15m/30m/1h (e.g., higher highs/lows, momentum, volatility, ranges, breakouts, reactions to levels)
-    - Notable support/resistance or key levels if inferable
-    - A brief risk note
-
-    User Query: {state.get("user_query", "")}
-    Timeframe Data: {json.dumps(timeframe_data, indent=2)}
-    Indicators: not used
-
-    IMPORTANT: After your analysis, also provide a simple BUY/NO_BUY recommendation based on bullish signals.
-    Format: End your response with "TRADE_SIGNAL: BUY" or "TRADE_SIGNAL: NO_BUY"
-    """
-
-    messages = [Message(role="user", content=analysis_prompt)]
-    response = await llm_manager.chat(messages)
-    ai_summary = response.content.strip()
-
-
-    trade_signal = "NO_BUY"
-    if "TRADE_SIGNAL: BUY" in ai_summary.upper():
-        trade_signal = "BUY"
-    elif "TRADE_SIGNAL: NO_BUY" in ai_summary.upper():
-        trade_signal = "NO_BUY"
-
-    symbol = state.get("symbol", "ETH")
-
-    return {
-        "short_term_trend": {
-            "user_query": state.get("user_query", ""),
-            "symbol": symbol,
-            "timeframe_data": timeframe_data,
-            "indicators": {},
-            "trade_signal": trade_signal,
-        },
-        "final_output": ai_summary,
-        "trade_signal": trade_signal,
-        "current_step": "short_term_analysis_completed",
-        "execution_log": state.get("execution_log", []) + [f"Short-term trend analysis completed - Trade signal: {trade_signal}"]
-    }
-
-
-async def execute_trade_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Execute swap trade based on extracted parameters if bullish signal detected."""
-    try:
-        # Check trade signal - only execute if bullish trend detected
-        trade_signal = state.get("trade_signal", "NO_BUY")
-        if trade_signal != "BUY":
-            return {
-                "execution_log": state.get("execution_log", []) + [f"Trade skipped: no bullish signal (signal: {trade_signal})"],
-            }
-
-        # Get trade parameters from state (extracted from user query)
-        trade_params = state.get("trade_params")
-        if not trade_params:
-            return {
-                "execution_log": state.get("execution_log", []) + ["Trade skipped: no trade parameters found in query"],
-            }
-
-        # Extract trading parameters
-        from_token = trade_params.get("from_token")
-        to_token = trade_params.get("to_token")
-        amount = trade_params.get("amount")
-
-        if not all([from_token, to_token, amount]):
-            return {
-                "execution_log": state.get("execution_log", []) + ["Trade skipped: incomplete trade parameters"],
-            }
-
-        # Get RPC URL for trading
-        rpc_url = os.getenv("EVM_PROVIDER_URL") or os.getenv("RPC_URL")
-        if not rpc_url:
-            return {"execution_log": state.get("execution_log", []) + ["Trade skipped: missing EVM_PROVIDER_URL/RPC_URL"]}
-
-        # Execute swap using extracted parameters
-        swap_tool = EvmSwapTool(rpc_url=rpc_url)
-        res = await swap_tool.execute(
-            from_token=from_token,
-            to_token=to_token,
-            amount=amount,
-            signer_type=os.getenv("SIGNER_TYPE", "auto"),
-            # signer params are picked up automatically from env if not provided
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        if res.error:
-            return {
-                "trade_result": {"status": "failed", "error": res.error},
-                "execution_log": state.get("execution_log", []) + [f"Trade failed: {res.error}"]
-            }
-        return {
-            "trade_result": {"status": "success", "tx": res.output},
-            "execution_log": state.get("execution_log", []) + [f"Trade executed: {res.output.get('hash')}"]
-        }
-    except Exception as e:
-        return {
-            "trade_result": {"status": "failed", "error": str(e)},
-            "execution_log": state.get("execution_log", []) + [f"Trade exception: {str(e)}"]
-        }
-
-
-
-
-# ============================================================================
-# MACRO TREND ANALYSIS NODES (PARALLEL PROCESSING)
-# ============================================================================
-
-fetch_4h_data_node = make_fetch_node(
-    "4h",
-    MACRO_PRESETS["4h"]["limit"],
-    MACRO_PRESETS["4h"]["indicators"],
-    "macro_timeframe_data_4h",
-)
-
-
-fetch_daily_data_node = make_fetch_node(
-    "1d",
-    MACRO_PRESETS["1d"]["limit"],
-    MACRO_PRESETS["1d"]["indicators"],
-    "macro_timeframe_data_daily",
-)
-
-
-fetch_weekly_data_node = make_fetch_node(
-    "1w",
-    MACRO_PRESETS["1w"]["limit"],
-    MACRO_PRESETS["1w"]["indicators"],
-    "macro_timeframe_data_weekly",
-)
-
-
-def _parse_tavily_text_response(text_response: str, symbol: str) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    try:
-        import re
-        sections = re.split(r'(?=Title:)', text_response.strip())
-        sections = [s.strip() for s in sections if s.strip().startswith('Title:')]
-        for section in sections[:5]:
-            title = None
-            url = None
-            content = None
-            import re as _re
-            m = _re.search(r'Title:\s*(.*?)(?=URL:|$)', section, _re.DOTALL)
-            if m: title = m.group(1).strip()
-            m = _re.search(r'URL:\s*(.*?)(?=Content:|$)', section, _re.DOTALL)
-            if m: url = m.group(1).strip()
-            m = _re.search(r'Content:\s*(.*?)(?=Title:|$)', section, _re.DOTALL)
-            if m: content = m.group(1).strip()
-            if title or url or content:
-                items.append({
-                    "title": title or f"{symbol} News",
-                    "url": url or "",
-                    "content": (content or "")[:500],
-                    "source": "Tavily"
-                })
     except Exception:
         pass
-    return items
 
 
-async def _tavily_search(query: str) -> List[Dict[str, Any]]:
-    if not tavily_search_tool:
-        return []
-    result = await tavily_search_tool.execute(query=query, max_results=5, search_depth="basic")
-    content = result.output if hasattr(result, "output") and result.output else result
-    items: List[Dict[str, Any]] = []
-    if isinstance(content, list):
-        for it in content[:5]:
-            if isinstance(it, dict):
-                items.append({
-                    "title": it.get("title", ""),
-                    "url": it.get("url", ""),
-                    "content": (it.get("content", "") or "")[:500],
-                    "source": it.get("source", ""),
-                })
-        return items
-    if isinstance(content, str):
+def _ensure_symbol_pair(symbol: Optional[str]) -> str:
+    if not symbol:
+        return "BTC/USDT"
+    token = symbol.strip().upper()
+    if "/" in token:
+        base, quote = token.split("/", 1)
+        base = base or "BTC"
+        quote = quote or "USDT"
+        return f"{base}/{quote}"
+    if token.endswith("USDT") and len(token) > 4:
+        base = token[:-4] or "BTC"
+        return f"{base}/USDT"
+    if token.endswith("USD") and len(token) > 3:
+        base = token[:-3] or "BTC"
+        return f"{base}/USD"
+    return f"{token}/USDT"
+
+
+# ---------------------------------------------------------------------------
+# Demo implementation
+# ---------------------------------------------------------------------------
+
+
+class IntentGraphTemplateDemo:
+    """Declarative demo built on top of the new high-level API."""
+
+    def __init__(self) -> None:
+        self.llm = get_llm_manager()
+        self.powerdata_tool = CryptoPowerDataCEXTool()
+        self.swap_tool: Optional[EvmSwapTool] = None
+
+        rpc_url = os.getenv("EVM_PROVIDER_URL") or os.getenv("RPC_URL")
+        if rpc_url:
+            self.swap_tool = EvmSwapTool(rpc_url=rpc_url)
+
+        self.api = HighLevelGraphAPI(
+            IntentGraphState,
+            llm_manager=self.llm,
+            intent_prompt_builder=self._build_intent_prompt,
+            intent_parser=self._parse_intent_response,
+            parameter_prompt_builder=self._build_parameter_prompt,
+            parameter_parser=self._parse_parameter_response,
+        )
+
+        tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
+        if tavily_key and "your-tavily-api-key-here" not in tavily_key:
+            tavily_config = {
+                "command": "npx",
+                "args": ["--yes", "tavily-mcp"],
+                "env": {"TAVILY_API_KEY": tavily_key},
+            }
+            self.api.register_mcp_tool(
+                intent_category="crypto_macro",
+                spec=MCPToolSpec(name="tavily-search", capability="news"),
+                config=tavily_config,
+            )
+            self.api.register_mcp_tool(
+                intent_category="deep_research",
+                spec=MCPToolSpec(name="tavily-search", capability="research"),
+                config=tavily_config,
+            )
+
+        self.graph = self._build_graph()
+
+    def _build_intent_prompt(self, query: str) -> List[Message]:
+        return [
+            Message(
+                role="system",
+                content=(
+                    "You classify user requests for SpoonAI portfolio assistant.\n"
+                    "Respond strictly with JSON containing category, confidence, notes, tags.\n"
+                    "Allowed categories: general_qa, crypto_short_term, crypto_macro, crypto_analysis, deep_research."
+                ),
+            ),
+            Message(role="user", content=f"Classify the intent of: {query}"),
+        ]
+
+    def _parse_intent_response(self, content: str) -> Dict[str, Any]:
         try:
-            import json as _json
-            parsed = _json.loads(content)
-            if isinstance(parsed, list):
-                for it in parsed[:5]:
-                    if isinstance(it, dict):
-                        items.append({
-                            "title": it.get("title", ""),
-                            "url": it.get("url", ""),
-                            "content": (it.get("content", "") or "")[:500],
-                            "source": it.get("source", ""),
-                        })
-            return items
-        except Exception:
-            pass
-        return _parse_tavily_text_response(content, query.split()[0])
-    return []
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
 
+    def _build_parameter_prompt(self, query: str, intent: Intent) -> List[Message]:
+        return [
+            Message(
+                role="system",
+                content=(
+                    "Extract structured trading parameters for SpoonAI.\n"
+                    "Return JSON with symbol, timeframes (array), include_news (bool), confidence, notes."
+                ),
+            ),
+            Message(
+                role="user",
+                content=(
+                    f"Intent category: {intent.category}. Query: {query}.\n"
+                    "Respond only with JSON."
+                ),
+            ),
+        ]
 
-async def search_crypto_news_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Search crypto news via Tavily MCP"""
-    symbol = state.get("symbol", "BTC")
-    news_data = await _tavily_search(f"{symbol} cryptocurrency latest news market analysis")
-    return {
-        "macro_news_data": news_data,
-        "execution_log": state.get("execution_log", []) + [f"News search completed for {symbol}"]
-    }
+    def _parse_parameter_response(self, content: str, intent: Intent) -> Dict[str, Any]:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            return {}
 
+        if not isinstance(data, dict):
+            return {}
 
-async def analyze_macro_trend_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Analyze macro trend from parallel data"""
-    # Combine data from all timeframes
-    timeframe_data = {}
-    indicators = {}
-    news_data = state.get("macro_news_data", [])
+        symbol = _ensure_symbol_pair(data.get("symbol"))
+        if symbol:
+            if "/" in symbol:
+                base, quote = symbol.split("/", 1)
+                symbol = f"{base or 'BTC'}/{quote or 'USDT'}"
+            elif symbol.endswith("USDT") and len(symbol) > 4:
+                base = symbol[:-4] or "BTC"
+                symbol = f"{base}/USDT"
+            elif symbol.endswith("USD") and len(symbol) > 3:
+                base = symbol[:-3] or "BTC"
+                symbol = f"{base}/USD"
+            else:
+                symbol = f"{symbol}/USDT"
+        timeframes = data.get("timeframes")
+        if isinstance(timeframes, str):
+            timeframes = [tf.strip() for tf in timeframes.split(",") if tf.strip()]
+        if not isinstance(timeframes, list) or not timeframes:
+            timeframes = (
+                ["4h", "1d", "1w"]
+                if intent.category in {"crypto_macro", "crypto_analysis"}
+                else ["15m", "30m", "1h"]
+            )
 
-    # Collect timeframe data
-    if "macro_timeframe_data_4h" in state:
-        timeframe_data["4h"] = state["macro_timeframe_data_4h"]
-        indicators.update(state["macro_timeframe_data_4h"].get("indicators", {}))
+        include_news = data.get("include_news")
+        if isinstance(include_news, str):
+            include_news = include_news.lower() in {"true", "1", "yes"}
+        if include_news is None:
+            include_news = intent.category in {"crypto_macro", "deep_research"}
 
-    if "macro_timeframe_data_daily" in state:
-        timeframe_data["daily"] = state["macro_timeframe_data_daily"]
-        indicators.update(state["macro_timeframe_data_daily"].get("indicators", {}))
-
-    if "macro_timeframe_data_weekly" in state:
-        timeframe_data["weekly"] = state["macro_timeframe_data_weekly"]
-        indicators.update(state["macro_timeframe_data_weekly"].get("indicators", {}))
-
-    symbol = state.get("symbol", "BTC")
-
-    llm_manager = get_llm_manager()
-
-    analysis_prompt = f"""
-    You are a market analyst. Analyze macro trend using raw K-line data from multiple timeframes (4h/daily/weekly) and recent news headlines. Write a concise, human-readable summary WITHOUT any JSON. Include:
-    - An overall macro conclusion (bullish/neutral/bearish)
-    - 2-4 key price action reasons across timeframes (structure, momentum, breakouts, ranges)
-    - Long-term outlook (weeks/months) and key levels if inferable
-    - A short risk note
-
-    User Query: {state.get("user_query", "")}
-    Timeframe Data: {json.dumps(timeframe_data, indent=2)}
-    Technical Indicators: not used
-    Recent News (titles+sources): {json.dumps(news_data[:5], indent=2)}
-    """
-
-    messages = [Message(role="user", content=analysis_prompt)]
-    response = await llm_manager.chat(messages)
-    ai_summary = response.content.strip()
-
-    return {
-        "macro_trend": {
-            "user_query": state.get("user_query", ""),
+        return {
             "symbol": symbol,
-            "timeframe_data": timeframe_data,
-            "news_data": news_data,
+            "timeframes": timeframes,
+            "include_news": include_news,
+            "parameter_metadata": {
+                "source": data.get("provider", "llm"),
+                "confidence": data.get("confidence", 0.6),
+                "notes": data.get("notes"),
+            },
+        }
 
-        },
-        "final_output": ai_summary,
-        "current_step": "macro_analysis_completed",
-        "execution_log": state.get("execution_log", []) + ["Macro trend analysis completed"]
-    }
+    # ------------------------------------------------------------------
+    # Node implementations
+    # ------------------------------------------------------------------
 
+    async def _bootstrap_session(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        session_id = f"session_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        log = list(state.get("execution_log", []))
+        if "Session bootstrap completed" not in log:
+            log.append("Session bootstrap completed")
+        return {
+            "session_id": session_id,
+            "execution_log": log,
+            "routing_trace": [],
+            "timeframe_payloads": {},
+            "short_term_data": {},
+            "macro_data": {},
+            "macro_news": [],
+            "research_sources": [],
+            "parallel_tasks_completed": 0,
+            "trade_status": "NOT_EVALUATED",
+        }
 
-async def deep_research_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Simplified deep research: LLM-only comprehensive analysis based on the query."""
-    query = state.get("user_query", "")
-    llm_manager = get_llm_manager()
+    async def _load_memory(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        all_mem = _load_json(MEMORY_FILE)
+        key = (state.get("user_name") or "user").lower()
+        snapshot = all_mem.get(key, {})
+        user_name = state.get("user_name", "User")
+        load_msg = f"Memory loaded for {user_name}"
+        log = list(state.get("execution_log", []))
+        if load_msg not in log:
+            log.append(load_msg)
+        return {
+            "memory_snapshot": snapshot,
+            "execution_log": log,
+        }
 
-    prompt = f"""
-    Provide a comprehensive, well-structured analysis of the following topic.
-    Cover technical/fundamental aspects, historical context, potential risks, and future outlook.
-    Use internal knowledge and reasoning only (no external browsing).
+    async def _plan_analysis(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        timeframes = state.get("timeframes", []) or ["15m", "1h", "4h", "1d"]
+        short_tf = [tf for tf in timeframes if tf in SHORT_TIMEFRAMES]
+        macro_tf = [tf for tf in timeframes if tf in MACRO_TIMEFRAMES]
 
-    Topic: {query}
-    """
+        if not short_tf and state.get("query_intent") in {
+            "crypto_short_term",
+            "crypto_analysis",
+        }:
+            short_tf = ["15m", "1h"]
+        if not macro_tf and state.get("query_intent") in {"crypto_macro"}:
+            macro_tf = ["4h", "1d"]
 
-    messages = [Message(role="user", content=prompt)]
-    response = await llm_manager.chat(messages)
-    insights = response.content.strip()
+        log = list(state.get("execution_log", []))
+        plan_msg = (
+            "Analysis plan -> short: "
+            f"{short_tf or 'none'}, macro: {macro_tf or 'none'}, include_news: {state.get('include_news', False)}"
+        )
+        if plan_msg not in log:
+            log.append(plan_msg)
 
-    return {
-        "deep_research": {
-            "user_query": query,
-            "final_insights": insights
-        },
-        "final_output": insights,
-        "current_step": "deep_research_completed",
-        "execution_log": state.get("execution_log", []) + ["Deep research completed"]
-    }
+        return {
+            "short_timeframes": short_tf,
+            "macro_timeframes": macro_tf,
+            "execution_log": log,
+        }
 
-async def search_deep_research_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Perform web search for deep research using Tavily MCP with the full user query."""
-    query = state.get("user_query", "")
-    results = await _tavily_search(query)
-    return {
-        "deep_research_results": results,
-        "execution_log": state.get("execution_log", []) + [f"Deep research web search completed ({len(results)} results)"]
-    }
+    async def _extract_trade_intent(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        prompt = f"""
+        You analyze the user's request and extract trading instructions when they are explicit.
 
-async def synthesize_deep_research_node(state: AdvancedComprehensiveState) -> Dict[str, Any]:
-    """Synthesize deep research insights from Tavily search results using LLM."""
-    query = state.get("user_query", "")
-    results = state.get("deep_research_results", [])
-    llm_manager = get_llm_manager()
+        Query: {state.get('user_query', '')}
 
-    synthesis_prompt = f"""
-    You are a research analyst. Based on the search results, synthesize a concise, well-structured report.
+        Respond in JSON with keys: trade (true/false), from_token, to_token, amount, notes.
+        If no trade is requested, respond with {{"trade": false}}.
+        """
 
-    Topic: {query}
+        response = await self.llm.chat([Message(role="user", content=prompt)])
+        plan: Optional[Dict[str, Any]] = None
+        try:
+            plan = json.loads(response.content)
+        except Exception:
+            plan = None
 
-    Search Results (title, url, content excerpt):
-    {json.dumps(results[:8], indent=2)}
+        log = list(state.get("execution_log", []))
+        if "Trade intent analyzed" not in log:
+            log.append("Trade intent analyzed")
+        return {
+            "trade_plan": plan if isinstance(plan, dict) else None,
+            "execution_log": log,
+        }
 
-    Instructions:
-    - Provide key findings, recent developments, and measurable data if present
-    - Include brief performance assessment if applicable
-    - Reference sources inline using (Title → URL)
-    - Keep it factual and avoid speculation
-    - No JSON in the output
-    """
+    async def _general_qa(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        prompt = f"""
+        You are Ada, a helpful SpoonAI assistant.
+        Answer the user's cryptocurrency question clearly and concisely.
+        Question: {state.get('user_query', '')}
+        """
+        response = await self.llm.chat([Message(role="user", content=prompt)])
+        log = list(state.get("execution_log", []))
+        if "General Q&A completed" not in log:
+            log.append("General Q&A completed")
+        return {
+            "general_answer": response.content.strip(),
+            "execution_log": log,
+        }
 
-    messages = [Message(role="user", content=synthesis_prompt)]
-    response = await llm_manager.chat(messages)
-    insights = response.content.strip()
+    async def _short_term_entry(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        log = list(state.get("execution_log", []))
+        if "Entering short-term analysis" not in log:
+            log.append("Entering short-term analysis")
+        trace = list(state.get("routing_trace", []))
+        trace.append("short_term")
+        return {"execution_log": log, "routing_trace": trace}
 
-    return {
-        "deep_research": {
-            "user_query": query,
-            "final_insights": insights
-        },
-        "final_output": insights,
-        "current_step": "deep_research_synthesized",
-        "execution_log": state.get("execution_log", []) + ["Deep research synthesized from Tavily results"]
-    }
+    async def _collect_short_term_data(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        symbol = _ensure_symbol_pair(state.get("symbol", "BTC/USDT"))
+        timeframes = state.get("short_timeframes", [])
+        log = list(state.get("execution_log", []))
 
+        async def fetch(tf: str) -> Optional[Dict[str, Any]]:
+            spec = TIMEFRAME_CONFIG.get(tf)
+            if not spec:
+                return None
+            try:
+                result = await self.powerdata_tool.execute(
+                    exchange="binance",
+                    symbol=symbol,
+                    timeframe=tf,
+                    limit=spec.get("limit", 50),
+                    indicators_config=json.dumps(spec.get("indicators", {})),
+                    use_enhanced=True,
+                )
+                logger.info(f"PowerData tool result for {tf}: error={result.error}, output_type={type(result.output)}, output_len={len(result.output) if isinstance(result.output, list) else 'N/A'}")
+                candles = getattr(result, "output", result)
+                metrics = {}
+                if isinstance(candles, list) and candles:
+                    closes = [row.get("close") for row in candles if isinstance(row, dict)]
+                    volumes = [row.get("volume") for row in candles if isinstance(row, dict)]
+                    closes = [c for c in closes if isinstance(c, (int, float))]
+                    volumes = [v for v in volumes if isinstance(v, (int, float))]
+                    if volumes:
+                        metrics["volume_sum"] = sum(volumes)
+                    if closes:
+                        closes_sorted = sorted(closes)
+                        metrics["close_avg"] = sum(closes) / len(closes)
+                        metrics["close_median"] = closes_sorted[len(closes_sorted) // 2]
+                        metrics["close_high"] = max(closes)
+                        metrics["close_low"] = min(closes)
+                return {
+                    "timeframe": tf,
+                    "data": candles,
+                    "metrics": metrics,
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                }
+            except Exception as exc:
+                logger.error(f"PowerData tool exception for {tf}: {exc}")
+                return {
+                    "timeframe": tf,
+                    "error": str(exc),
+                }
 
-# ============================================================================
-# DEPTH RESEARCH NODES (PARALLEL PROCESSING WITH REFLECTION)
-# ============================================================================
+        tasks = [fetch(tf) for tf in timeframes]
+        results = [res for res in await asyncio.gather(*tasks) if res]
 
+        payloads = dict(state.get("timeframe_payloads", {}))
+        for item in results:
+            payloads[item["timeframe"]] = item
 
-# ============================================================================
-# GRAPH CONSTRUCTION
-# ============================================================================
+        short_term_serialized = json.dumps(
+            {r["timeframe"]: r for r in results if "error" not in r},
+            ensure_ascii=False,
+        )
 
-def _build_advanced_graph() -> StateGraph:
-    """Build the advanced graph with intelligent routing and parallel processing"""
-    graph = StateGraph(AdvancedComprehensiveState)
+        previews: List[str] = []
+        for item in results:
+            tf = item.get("timeframe", "?")
+            if "error" in item:
+                previews.append(f"{tf}: error={item['error']}")
+                continue
+            candles = item.get("data") or []
+            sample_close: Optional[float] = None
+            if isinstance(candles, list) and candles:
+                first_row = next((row for row in candles if isinstance(row, dict)), {})
+                sample_close = first_row.get("close")
+            previews.append(
+                f"{tf}: candles={len(candles)} sample_close={sample_close}"
+            )
+        if previews:
+            preview_msg = "Short-term tool output -> " + "; ".join(previews)
+            if preview_msg not in log:
+                log.append(preview_msg)
 
-    # Enable monitoring
-    graph.enable_monitoring(["execution_time", "success_rate", "routing_performance"])
+        completed = state.get("parallel_tasks_completed", 0) + len(results)
+        collect_msg = f"Short-term data collected for {len(results)} timeframes"
+        if collect_msg not in log:
+            log.append(collect_msg)
 
-    # Add core nodes
-    graph.add_node("initialize_session", initialize_session_node)
-    graph.add_node("load_memory", load_memory_node)
-    graph.add_node("analyze_query_intent", analyze_query_intent_node)
+        return {
+            "timeframe_payloads": payloads,
+            "short_term_data": short_term_serialized,
+            "short_term_metrics": {r["timeframe"]: r.get("metrics", {}) for r in results if "error" not in r},
+            "short_term_debug": previews,
+            "parallel_tasks_completed": completed,
+            "execution_log": log,
+        }
 
-    # Add all nodes
-    graph.add_node("general_qa", general_qa_node)
-    graph.add_node("extract_symbol", extract_symbol_node)
+    async def _summarize_short_term(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        symbol = state.get("symbol", "BTC")
+        data_raw = state.get("short_term_data", {})
+        if isinstance(data_raw, str):
+            data_json = data_raw
+        else:
+            data_json = json.dumps(data_raw, ensure_ascii=False)
+        prompt = f"""
+        You are a market analyst. Using the following multi-timeframe data, produce a concise
+        short-term outlook for {symbol}. Focus on actionable insights for the next few hours.
 
-    # Add short-term trend analysis nodes
-    graph.add_node("fetch_15m_data", fetch_15m_data_node)
-    graph.add_node("fetch_30m_data", fetch_30m_data_node)
-    graph.add_node("fetch_1h_data", fetch_1h_data_node)
-    graph.add_node("analyze_short_term_trend", analyze_short_term_trend_node)
-    graph.add_node("execute_trade", execute_trade_node)
+        Data (JSON): {data_json[:4000]}
 
-    # Add macro trend analysis nodes
-    graph.add_node("fetch_4h_data", fetch_4h_data_node)
-    graph.add_node("fetch_daily_data", fetch_daily_data_node)
-    graph.add_node("fetch_weekly_data", fetch_weekly_data_node)
-    graph.add_node("search_crypto_news", search_crypto_news_node)
-    graph.add_node("analyze_macro_trend", analyze_macro_trend_node)
+        Provide:
+        - Market stance (bullish/neutral/bearish)
+        - Key observations (2-3 bullet points)
+        - Risk considerations
+        End the response with a line: SIGNAL: BUY or SIGNAL: HOLD
+        """
 
-    # Add simplified deep research node
-    graph.add_node("deep_research_search", search_deep_research_node)
-    graph.add_node("deep_research_synthesize", synthesize_deep_research_node)
+        metrics = state.get("short_term_metrics", {})
+        market_stats = json.dumps(metrics, ensure_ascii=False).strip()
+        debug_info = state.get("short_term_debug", [])
+        debug_str = "; ".join(debug_info) if isinstance(debug_info, list) else str(debug_info)
 
-    # Disable LLM routing completely to ensure conditional routing works
-    graph.llm_router = None
-    graph.llm_router_config = {}
+        combined_prompt = f"""
+        {prompt}
 
-    # Set entry point
-    graph.set_entry_point("initialize_session")
+        Metrics:
+        {market_stats}
 
-    # Build routing logic based on query type
-    graph.add_edge("initialize_session", "load_memory")
-    graph.add_edge("load_memory", "analyze_query_intent")
+        Debug:
+        {debug_str}
+        """
 
-    # Conditional routing based on query analysis
-    def route_based_on_query_type(state):
-        """Route based on query analysis result"""
-        query_analysis = state.get("query_analysis", {})
-        query_type = query_analysis.get("query_type", "general_qa")
-        return query_type
+        response = await self.llm.chat([Message(role="user", content=combined_prompt)])
+        summary = response.content.strip()
+        signal = "HOLD"
+        if "SIGNAL:" in summary.upper():
+            marker = summary.upper().split("SIGNAL:", 1)[1].strip()
+            if marker.startswith("BUY"):
+                signal = "BUY"
+            elif marker.startswith("SELL"):
+                signal = "SELL"
 
-    # Clear any existing routing rules that might interfere
-    if hasattr(graph, 'routing_rules'):
-        graph.routing_rules.clear()
+        log = list(state.get("execution_log", []))
+        summary_msg = f"Short-term summary generated (signal={signal})"
+        if summary_msg not in log:
+            log.append(summary_msg)
 
-    graph.add_conditional_edges(
-        "analyze_query_intent",
-        route_based_on_query_type,
+        return {
+            "short_term_summary": summary,
+            "trade_status": signal,
+            "execution_log": log,
+        }
+
+    async def _review_trade(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        plan = state.get("trade_plan") or {}
+        status = state.get("trade_status", "HOLD")
+        log = list(state.get("execution_log", []))
+
+        if status != "BUY" or not plan.get("trade"):
+            if "Trade skipped" not in log:
+                log.append("Trade skipped")
+            return {"execution_log": log}
+
+        if not self.swap_tool:
+            log.append("Trade tool unavailable")
+            return {
+                "trade_status": "FAILED",
+                "trade_error": "Swap tool not configured",
+                "execution_log": log,
+            }
+
+        try:
+            result = await self.swap_tool.execute(
+                from_token=plan.get("from_token"),
+                to_token=plan.get("to_token"),
+                amount=plan.get("amount", "0"),
+                signer_type=os.getenv("SIGNER_TYPE", "auto"),
+            )
+            if result.error:
+                raise RuntimeError(result.error)
+            log.append("Trade executed successfully")
+            return {
+                "trade_status": "EXECUTED",
+                "execution_log": log,
+            }
+        except Exception as exc:
+            log.append(f"Trade execution failed: {exc}")
+            return {
+                "trade_status": "FAILED",
+                "trade_error": str(exc),
+                "execution_log": log,
+            }
+
+    async def _macro_entry(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        log = list(state.get("execution_log", []))
+        if "Entering macro analysis" not in log:
+            log.append("Entering macro analysis")
+        trace = list(state.get("routing_trace", []))
+        trace.append("macro")
+        return {"execution_log": log, "routing_trace": trace}
+
+    async def _collect_macro_data(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        symbol = _ensure_symbol_pair(state.get("symbol", "BTC/USDT"))
+        timeframes = state.get("macro_timeframes", [])
+        log = list(state.get("execution_log", []))
+
+        async def fetch(tf: str) -> Optional[Dict[str, Any]]:
+            spec = TIMEFRAME_CONFIG.get(tf)
+            if not spec:
+                return None
+            try:
+                result = await self.powerdata_tool.execute(
+                    exchange="binance",
+                    symbol=symbol,
+                    timeframe=tf,
+                    limit=spec.get("limit", 60),
+                    indicators_config=json.dumps(spec.get("indicators", {})),
+                    use_enhanced=True,
+                )
+                candles = getattr(result, "output", result)
+                metrics = {}
+                if isinstance(candles, list) and candles:
+                    closes = [row.get("close") for row in candles if isinstance(row, dict)]
+                    volumes = [row.get("volume") for row in candles if isinstance(row, dict)]
+                    closes = [c for c in closes if isinstance(c, (int, float))]
+                    volumes = [v for v in volumes if isinstance(v, (int, float))]
+                    if volumes:
+                        metrics["volume_sum"] = sum(volumes)
+                    if closes:
+                        closes_sorted = sorted(closes)
+                        metrics["close_avg"] = sum(closes) / len(closes)
+                        metrics["close_median"] = closes_sorted[len(closes_sorted) // 2]
+                        metrics["close_high"] = max(closes)
+                        metrics["close_low"] = min(closes)
+                return {
+                    "timeframe": tf,
+                    "data": candles,
+                    "metrics": metrics,
+                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                }
+            except Exception as exc:
+                return {
+                    "timeframe": tf,
+                    "error": str(exc),
+                }
+
+        tasks = [fetch(tf) for tf in timeframes]
+        results = [res for res in await asyncio.gather(*tasks) if res]
+
+        payloads = dict(state.get("timeframe_payloads", {}))
+        for item in results:
+            payloads[item["timeframe"]] = item
+
+        macro_serialized = json.dumps(
+            {r["timeframe"]: r for r in results if "error" not in r},
+            ensure_ascii=False,
+        )
+
+        previews: List[str] = []
+        for item in results:
+            tf = item.get("timeframe", "?")
+            if "error" in item:
+                previews.append(f"{tf}: error={item['error']}")
+                continue
+            candles = item.get("data") or []
+            sample_close: Optional[float] = None
+            if isinstance(candles, list) and candles:
+                first_row = next((row for row in candles if isinstance(row, dict)), {})
+                sample_close = first_row.get("close")
+            previews.append(
+                f"{tf}: candles={len(candles)} sample_close={sample_close}"
+            )
+        if previews:
+            preview_msg = "Macro tool output -> " + "; ".join(previews)
+            if preview_msg not in log:
+                log.append(preview_msg)
+
+        macro_msg = f"Macro data collected for {len(results)} timeframes"
+        if macro_msg not in log:
+            log.append(macro_msg)
+        completed = state.get("parallel_tasks_completed", 0) + len(results)
+
+        return {
+            "timeframe_payloads": payloads,
+            "macro_data": macro_serialized,
+            "macro_metrics": {r["timeframe"]: r.get("metrics", {}) for r in results if "error" not in r},
+            "macro_debug": previews,
+            "parallel_tasks_completed": completed,
+            "execution_log": log,
+        }
+
+    async def _fetch_macro_news(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        include_news = state.get("include_news", False)
+        tool = self.api.create_mcp_tool("tavily-search") if include_news else None
+        if not include_news or not tool:
+            return {}
+
+        symbol = state.get("symbol", "BTC")
+        query = f"{symbol} cryptocurrency weekly outlook market news"
+        try:
+            result = await tool.execute(
+                query=query, max_results=5, search_depth="basic"
+            )
+            payload = result.output if hasattr(result, "output") else result
+        except Exception as exc:
+            payload = [{"title": "News fetch failed", "content": str(exc)}]
+
+        items: List[Dict[str, Any]] = []
+        if isinstance(payload, list):
+            items = [
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "content": (item.get("content", "") or "")[:500],
+                }
+                for item in payload[:5]
+                if isinstance(item, dict)
+            ]
+        elif isinstance(payload, str):
+            items = [{"title": "Summary", "content": payload[:500]}]
+
+        log = list(state.get("execution_log", []))
+        news_msg = f"Macro news fetched ({len(items)} items)"
+        if news_msg not in log:
+            log.append(news_msg)
+        return {"macro_news": items, "execution_log": log}
+
+    async def _summarize_macro(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        symbol = state.get("symbol", "BTC")
+        data_raw = state.get("macro_data", {})
+        if isinstance(data_raw, str):
+            macro_json = data_raw
+        else:
+            macro_json = json.dumps(data_raw, ensure_ascii=False)
+        metrics = state.get("macro_metrics", {})
+        news_items = state.get("macro_news", [])
+        debug_info = state.get("macro_debug", [])
+        debug_str = "; ".join(debug_info) if isinstance(debug_info, list) else str(debug_info)
+        prompt = f"""
+        Produce a macro trend assessment for {symbol}.
+        Market data: {macro_json[:4000]}
+        News: {json.dumps(news_items, ensure_ascii=False)[:2000]}
+
+        Provide outlook for the coming weeks, major drivers, and risk notice.
+        Keep it under 180 words.
+        """
+
+        combined_prompt = f"""
+        {prompt}
+
+        Metrics:
+        {json.dumps(metrics, ensure_ascii=False).strip()}
+
+        Debug:
+        {debug_str}
+        """
+
+        response = await self.llm.chat([Message(role="user", content=combined_prompt)])
+        summary = response.content.strip()
+        log = list(state.get("execution_log", []))
+        if "Macro summary generated" not in log:
+            log.append("Macro summary generated")
+        return {"macro_summary": summary, "execution_log": log}
+
+    async def _deep_research_entry(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        log = list(state.get("execution_log", []))
+        if "Entering deep-research flow" not in log:
+            log.append("Entering deep-research flow")
+        trace = list(state.get("routing_trace", []))
+        trace.append("deep_research")
+        return {"execution_log": log, "routing_trace": trace}
+
+    async def _fetch_research_sources(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        tool = self.api.create_mcp_tool("tavily-search")
+        query = state.get("user_query", "crypto research")
+        try:
+            result = (
+                await tool.execute(query=query, max_results=6, search_depth="advanced")
+                if tool
+                else []
+            )
+            payload = result.output if hasattr(result, "output") else result
+        except Exception as exc:
+            payload = [{"title": "Research fetch failed", "content": str(exc)}]
+
+        sources: List[Dict[str, Any]] = []
+        if isinstance(payload, list):
+            sources = [
+                {
+                    "title": item.get("title", ""),
+                    "excerpt": (item.get("content", "") or "")[:400],
+                    "url": item.get("url", ""),
+                }
+                for item in payload[:6]
+                if isinstance(item, dict)
+            ]
+        elif isinstance(payload, str):
+            sources = [{"title": "Summary", "excerpt": payload[:400]}]
+
+        log = list(state.get("execution_log", []))
+        research_msg = f"Research sources gathered ({len(sources)} items)"
+        if research_msg not in log:
+            log.append(research_msg)
+        return {"research_sources": sources, "execution_log": log}
+
+    async def _produce_research_report(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        query = state.get("user_query", "")
+        sources = state.get("research_sources", [])
+        prompt = f"""
+        Create a structured research memo for the following request.
+        Request: {query}
+        Sources: {json.dumps(sources)[:3000]}
+
+        Provide sections: Overview, Key Findings, Risks, Opportunities. Limit to 220 words.
+        """
+        response = await self.llm.chat([Message(role="user", content=prompt)])
+        report = response.content.strip()
+        log = list(state.get("execution_log", []))
+        if "Deep research report produced" not in log:
+            log.append("Deep research report produced")
+        return {"deep_research_report": report, "execution_log": log}
+
+    async def _update_memory(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        snapshot = dict(state.get("memory_snapshot", {}))
+        history = snapshot.setdefault("conversation_history", [])
+        history.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "query": state.get("user_query", ""),
+                "intent": state.get("query_intent", "unknown"),
+                "symbol": state.get("symbol", ""),
+                "trade_status": state.get("trade_status", "UNKNOWN"),
+            }
+        )
+        history[:] = history[-200:]
+
+        key = (state.get("user_name") or "user").lower()
+        all_mem = _load_json(MEMORY_FILE)
+        all_mem[key] = snapshot
+        _save_json(MEMORY_FILE, all_mem)
+
+        log = list(state.get("execution_log", []))
+        if "Memory updated" not in log:
+            log.append("Memory updated")
+        return {"memory_snapshot": snapshot, "execution_log": log}
+
+    async def _finalize_response(
+        self, state: IntentGraphState, config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        intent = state.get("query_intent", "general")
+        output = (
+            state.get("general_answer")
+            or state.get("short_term_summary")
+            or state.get("macro_summary")
+            or state.get("deep_research_report")
+            or "No result generated."
+        )
+
+        trade_status = state.get("trade_status", "NOT_EVALUATED")
+        if trade_status == "EXECUTED":
+            output += "\n\nTrade execution initiated."
+        elif trade_status == "FAILED":
+            output += (
+                f"\n\nTrade attempt failed: {state.get('trade_error', 'unknown error')}"
+            )
+
+        log = list(state.get("execution_log", []))
+        if "Response finalized" not in log:
+            log.append("Response finalized")
+        return {
+            "final_output": output,
+            "execution_log": log,
+            "routing_trace": state.get("routing_trace", []) + [f"final:{intent}"],
+        }
+
+    # ------------------------------------------------------------------
+    # Graph construction
+    # ------------------------------------------------------------------
+
+    def _build_graph(self):
+        template = GraphTemplate(
+            entry_point="bootstrap_session",
+            nodes=[
+                NodeSpec("bootstrap_session", self._bootstrap_session),
+                NodeSpec("load_memory", self._load_memory),
+                NodeSpec("plan_analysis", self._plan_analysis),
+                NodeSpec("extract_trade_intent", self._extract_trade_intent),
+                NodeSpec("general_qa", self._general_qa),
+                NodeSpec("short_term_entry", self._short_term_entry),
+                NodeSpec("collect_short_term_data", self._collect_short_term_data),
+                NodeSpec("short_term_summary", self._summarize_short_term),
+                NodeSpec("trade_review", self._review_trade),
+                NodeSpec("macro_entry", self._macro_entry),
+                NodeSpec("collect_macro_data", self._collect_macro_data),
+                NodeSpec("fetch_macro_news", self._fetch_macro_news),
+                NodeSpec("macro_summary", self._summarize_macro),
+                NodeSpec("deep_research_entry", self._deep_research_entry),
+                NodeSpec("fetch_research_sources", self._fetch_research_sources),
+                NodeSpec("deep_research_summary", self._produce_research_report),
+                NodeSpec("update_memory", self._update_memory),
+                NodeSpec("finalize_response", self._finalize_response),
+            ],
+            edges=[
+                EdgeSpec("bootstrap_session", "load_memory"),
+                EdgeSpec("load_memory", "plan_analysis"),
+                EdgeSpec("plan_analysis", "extract_trade_intent"),
+                EdgeSpec(
+                    "extract_trade_intent",
         {
             "general_qa": "general_qa",
-            "short_term_trend": "extract_symbol",
-            "macro_trend": "extract_symbol",
-            "deep_research": "deep_research_search"
-        }
-    )
+                        "short_term_flow": "short_term_entry",
+                        "macro_flow": "macro_entry",
+                        "deep_research_flow": "deep_research_entry",
+                    },
+                    condition=self._route_after_intent,
+                ),
+                EdgeSpec("general_qa", "update_memory"),
+                EdgeSpec("short_term_entry", "collect_short_term_data"),
+                EdgeSpec("collect_short_term_data", "short_term_summary"),
+                EdgeSpec("short_term_summary", "trade_review"),
+                EdgeSpec("trade_review", "update_memory"),
+                EdgeSpec("macro_entry", "collect_macro_data"),
+                EdgeSpec("collect_macro_data", "fetch_macro_news"),
+                EdgeSpec("fetch_macro_news", "macro_summary"),
+                EdgeSpec("macro_summary", "update_memory"),
+                EdgeSpec("deep_research_entry", "fetch_research_sources"),
+                EdgeSpec("fetch_research_sources", "deep_research_summary"),
+                EdgeSpec("deep_research_summary", "update_memory"),
+                EdgeSpec("update_memory", "finalize_response"),
+                EdgeSpec("finalize_response", END),
+            ],
+            parallel_groups=[
+                ParallelGroupSpec(
+                    name="macro_collection",
+                    nodes=("collect_macro_data", "fetch_macro_news"),
+                    config=ParallelGroupConfig(
+                        join_strategy="all", error_strategy="collect_errors"
+                    ),
+                ),
+            ],
+            config=GraphConfig(max_iterations=80, router=RouterConfig(allow_llm=False)),
+        )
 
-    # Add fallback edge to ensure graph can complete
-    graph.add_edge("analyze_query_intent", "general_qa")
+        builder = DeclarativeGraphBuilder(IntentGraphState)
+        graph = builder.build(template)
+        if hasattr(graph, "enable_monitoring"):
+            graph.enable_monitoring(
+                [
+                    "execution_time",
+                    "routing_performance",
+                    "tool_latency",
+                ]
+            )
+        return graph
 
-    # Create parallel execution groups
-    # Short-term trend parallel group
-    graph.add_parallel_group(
-        "short_term_data_fetch",
-        ["fetch_15m_data", "fetch_30m_data", "fetch_1h_data"],
-        {"join_strategy": "all_complete", "error_strategy": "ignore_errors"}
-    )
+    def _route_after_intent(self, state: IntentGraphState) -> str:
+        intent = (state.get("query_intent") or "general").lower()
+        if intent in {"crypto_short_term", "crypto_analysis"}:
+            return "short_term_flow"
+        if intent == "crypto_macro":
+            return "macro_flow"
+        if intent == "deep_research":
+            return "deep_research_flow"
+        return "general_qa"
 
-    # Macro trend parallel group
-    graph.add_parallel_group(
-        "macro_trend_data_fetch",
-        ["fetch_4h_data", "fetch_daily_data", "fetch_weekly_data", "search_crypto_news"],
-        {"join_strategy": "all_complete", "error_strategy": "ignore_errors"}
-    )
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    # Define execution flow
-    # General Q&A path goes through memory update before END
-    graph.add_node("update_memory", update_memory_node)
-    graph.add_edge("general_qa", "update_memory")
+    async def process_query(
+        self, user_query: str, user_name: str = "User"
+    ) -> Dict[str, Any]:
+        intent, base_state = await self.api.build_initial_state(user_query, user_name)
+        self.api.ensure_mcp_for_intent(intent)
 
-    # Route based on query type - use different entry points for different analysis types
-    def route_to_analysis_type(state):
-        """Route to appropriate analysis type based on query classification"""
-        query_analysis = state.get("query_analysis", {})
-        query_type = query_analysis.get("query_type", "short_term_trend")
-
-        if query_type == "macro_trend":
-            return "macro_analysis_entry"
-        else:  # short_term_trend or default
-            return "short_term_analysis_entry"
-
-    # Create entry point nodes for different analysis types
-    async def short_term_analysis_entry_node(state):
-        """Entry point for short-term analysis - triggers parallel data fetching"""
-        return {"analysis_type": "short_term"}
-
-    async def macro_analysis_entry_node(state):
-        """Entry point for macro analysis - triggers parallel data fetching"""
-        return {"analysis_type": "macro"}
-
-    graph.add_node("short_term_analysis_entry", short_term_analysis_entry_node)
-    graph.add_node("macro_analysis_entry", macro_analysis_entry_node)
-
-    # Conditional routing from extract_symbol to analysis type entry
-    graph.add_conditional_edges(
-        "extract_symbol",
-        route_to_analysis_type,
-        {
-            "short_term_analysis_entry": "short_term_analysis_entry",
-            "macro_analysis_entry": "macro_analysis_entry",
-        }
-    )
-
-    # Connect analysis entry points to their respective data fetching nodes
-    # Short-term analysis triggers parallel data fetching
-    graph.add_edge("short_term_analysis_entry", "fetch_15m_data")
-    graph.add_edge("short_term_analysis_entry", "fetch_30m_data")
-    graph.add_edge("short_term_analysis_entry", "fetch_1h_data")
-
-    # Macro analysis triggers parallel data fetching
-    graph.add_edge("macro_analysis_entry", "fetch_4h_data")
-    graph.add_edge("macro_analysis_entry", "fetch_daily_data")
-    graph.add_edge("macro_analysis_entry", "fetch_weekly_data")
-    graph.add_edge("macro_analysis_entry", "search_crypto_news")
-
-    # Short-term trend path entry and joins
-    graph.add_edge("fetch_15m_data", "analyze_short_term_trend")
-    graph.add_edge("fetch_30m_data", "analyze_short_term_trend")
-    graph.add_edge("fetch_1h_data", "analyze_short_term_trend")
-    graph.add_edge("analyze_short_term_trend", "execute_trade")
-    graph.add_edge("execute_trade", "update_memory")
-
-    # Macro trend joins
-    graph.add_edge("fetch_4h_data", "analyze_macro_trend")
-    graph.add_edge("fetch_daily_data", "analyze_macro_trend")
-    graph.add_edge("fetch_weekly_data", "analyze_macro_trend")
-    graph.add_edge("search_crypto_news", "analyze_macro_trend")
-    graph.add_edge("analyze_macro_trend", "update_memory")
-
-    # Deep research path
-    graph.add_edge("deep_research_search", "deep_research_synthesize")
-    graph.add_edge("deep_research_synthesize", "update_memory")
-
-    # Final memory update to END
-    graph.add_edge("update_memory", END)
-
-    return graph
-
-
-# Legacy agent factory removed in simplified version
-
-
-# ============================================================================
-# MAIN DEMONSTRATION
-# ============================================================================
-
-class AdvancedGraphDemo:
-    """Advanced demonstration of intelligent routing and parallel processing"""
-
-    def __init__(self):
-        self.llm_manager = get_llm_manager()
-        self.graph = _build_advanced_graph()
-
-    async def process_query(self, user_query: str, user_name: str = "User") -> Dict[str, Any]:
-        """Process a user query through the advanced graph"""
-
-        # Always use real tools - no shutdown interruptions
-
-        # Create initial state
-        initial_state = {
-            "user_query": user_query,
-            "user_name": user_name,
-            "session_id": "",
-            "query_analysis": None,
-            "short_term_trend": None,
-            "macro_trend": None,
-            "deep_research": None,
-            "memory_state": None,
+        state: IntentGraphState = {
+            **base_state,
             "execution_log": [],
-            "routing_decisions": [],
-            "current_step": "started",
-            "final_output": "",
-            "processing_time": 0.0,
-            "parallel_tasks_completed": 0
+            "routing_trace": [],
+            "short_term_summary": "",
+            "macro_summary": "",
+            "deep_research_report": "",
+            "general_answer": "",
+            "trade_plan": None,
+            "trade_status": "NOT_EVALUATED",
+            "trade_error": None,
+            "macro_news": [],
+            "research_sources": [],
+            "timeframe_payloads": {},
+            "short_term_data": {},
+            "macro_data": {},
         }
 
-        # Execute graph with reduced max iterations for faster feedback
-        start_time = datetime.now()
-        compiled_graph = self.graph.compile()
-
-        # Configure with reduced iterations and real-time logging
-        config = {
-            "max_iterations": 50,  # Reduced from default 100
-            "enable_partial_output": True
-        }
-
-        print(f"🔍 Processing query: '{user_query}'")
-
-        # Always use real tools - let exceptions propagate
-        result = await compiled_graph.invoke(initial_state, config)
-
-        end_time = datetime.now()
-
-        # Add execution metrics
-        result["processing_time"] = (end_time - start_time).total_seconds()
+        compiled = self.graph.compile()
+        start = datetime.now(timezone.utc)
+        result = await compiled.invoke(state, {"max_iterations": 80})
+        result["processing_time"] = (datetime.now(timezone.utc) - start).total_seconds()
         try:
-            metrics = compiled_graph.get_execution_metrics()
-            result["execution_metrics"] = metrics
-        except:
+            result["execution_metrics"] = compiled.get_execution_metrics()
+        except Exception:
             result["execution_metrics"] = {}
-
+        result["query_intent"] = intent.category
         return result
 
-    def display_result(self, result: Dict[str, Any]):
-        """Display final response with concise, readable output including memory context"""
-        user_query = result.get("user_query", "")
-        final_output = result.get("final_output", "")
-        query_type = result.get("query_analysis", {}).get("query_type", "unknown") if result.get("query_analysis") else "unknown"
-        processing_time = result.get("processing_time", 0.0)
-        parallel_tasks = result.get("parallel_tasks_completed", 0)
-        execution_log = result.get("execution_log", [])[-6:]
-        memory_state = result.get("memory_state") or {}
-
+    def display_result(self, result: Dict[str, Any]) -> None:
         header = (
-            f"\n{'='*80}\n"
-            f"🤖 SpoonOS Intelligence Assistant\n"
-            f"{'='*80}\n"
-            f"📝 Query: {user_query}\n"
-            f"🎯 Route: {query_type} | ⚡ {processing_time:.2f}s | 🔄 {parallel_tasks}\n"
-            f"{'-'*80}"
+            f"\n{'=' * 80}\n"
+            "Intent Graph Template Demo\n"
+            f"{'=' * 80}\n"
+            f"Query: {result.get('user_query', '')}\n"
+            f"Intent: {result.get('query_intent', 'unknown')} | Time {result.get('processing_time', 0):.2f}s\n"
+            f"{'-' * 80}"
         )
         print(header)
 
-        # Short execution trace
-        if execution_log:
-            print("Steps:")
-            for i, log in enumerate(execution_log, 1):
-                print(f"  {i}. {log}")
+        for idx, log in enumerate(result.get("execution_log", [])[-8:], 1):
+            print(f"  {idx}. {log}")
 
-        # Memory teaser
-        lp = (memory_state.get("learned_patterns") or {}).get("query_type_counts", {})
-        if lp:
-            try:
-                common = max(lp.items(), key=lambda x: x[1])[0]
-                print(f"Memory: frequent route → {common}")
-            except Exception:
-                pass
-
-        # Final output
-        if final_output:
-            print("\nResult:")
-            print(final_output)
-        else:
-            print("\nResult: (no output)")
-
-        # Macro extras
-        if query_type == "macro_trend":
-            macro_section = result.get("macro_trend") or {}
-            news_data = macro_section.get("news_data", [])
-            if isinstance(news_data, list) and news_data:
-                print("\nNews (top 3):")
-                for item in news_data[:3]:
-                    title = item.get("title", "").strip()
-                    url = item.get("url", "").strip()
-                    print(f" - {title} -> {url}")
-
-        print(f"{'='*80}\n")
+        print("\nResult:\n" + (result.get("final_output") or "(empty)"))
+        print(f"\nRouting trace: {result.get('routing_trace', [])}")
+        trade = result.get("trade_status", "NOT_EVALUATED")
+        if trade not in {"NOT_EVALUATED", "HOLD"}:
+            print(f"Trade status: {trade}")
+        print(f"{'=' * 80}\n")
 
 
-async def main():
-    """Run the advanced demonstration with intelligent routing"""
-    print("🚀 SpoonOS Advanced Graph Demo - Intelligent Routing & Parallel Processing")
-    print("=" * 80)
-    print("=" * 80)
-
-    demo = AdvancedGraphDemo()
-
-    # Test queries for different scenarios
-    test_queries = [
-        # General Q&A
-        ("How does blockchain work?", "Bob"),
-
-        # Short-term trend analysis with potential trade
-        ("Analyze ETH short-term trend and if bullish, swap 0.1 USDC for ETH on Base", "Diana"),
-
-        # Macro trend analysis
-        ("What are the long-term trends for NEO?", "Eve"),
-
-        # Deep research
-        ("Research the development of DeFi protocols in the second quarter of 2025, identify any new DeFi projects that have launched, and evaluate their performance.", "Henry"),
+async def main() -> None:
+    demo = IntentGraphTemplateDemo()
+    queries = [
+        ("How does blockchain reach consensus?", "Ada"),
+        ("Analyze ETH short-term momentum and buy 0.05 ETH if bullish", "Ben"),
+        ("Give me a macro outlook for BTC", "Cara"),
+        (
+            "Research DeFi developments in Q2 2025 and summarize key opportunities",
+            "Dana",
+        ),
     ]
 
-    print(f"🧪 Testing {len(test_queries)} queries across different scenarios...\n")
-
-    for i, (query, user_name) in enumerate(test_queries, 1):
-        print(f"Test {i}/{len(test_queries)}")
-        result = await demo.process_query(query, user_name)
+    for idx, (query, user) in enumerate(queries, 1):
+        print(f"Run {idx}/{len(queries)} -> {query}")
+        result = await demo.process_query(query, user)
         demo.display_result(result)
         await asyncio.sleep(1)
 
+
 if __name__ == "__main__":
-    import sys
     asyncio.run(main())
