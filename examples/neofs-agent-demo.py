@@ -160,7 +160,7 @@ class NeoFSAgentDemo:
         "test_scenarios": {
             "existing_containers": [
                 {
-                    "id": "GuZWKoBFg8GYCWdgHxZwVdBfdHTvNPJhvY1EHFQTCoXV",
+                    "id": "xxxxxx",
                     "name": "demo-public-storage",
                     "type": "public",
                     "acl": "public-read-write"
@@ -483,7 +483,7 @@ class NeoFSAgentDemo:
         self.print_section_header("3. PUBLIC Container Complete Workflow")
         
         # Use PUBLIC container ID
-        public_container_id = "GAi2JaAnrf1jdvyEChn8sSMrkh5Tgq7GPKLcikLMnCFh"
+        public_container_id = "xxxxxxxxx"
         
         # Use persistent agent to remember object_id
         agent = self.agents['object']
@@ -537,7 +537,7 @@ class NeoFSAgentDemo:
         self.print_section_header("4. eACL Container Complete Workflow")
         
         # Use existing eACL container
-        eacl_container_id = "9TCtdgWADLEE4qaWsVC5Rn5KKhdNLBQ8A9bggwzvGr1j"
+        eacl_container_id = "xxxxxxxxx"
         
         # Use persistent agent
         agent = self.agents['access']
@@ -662,8 +662,8 @@ class NeoFSAgentDemo:
         self.print_section_header("6. Advanced Object Operations")
         
         # User-provided container IDs
-        public_container_id = "GAi2JaAnrf1jdvyEChn8sSMrkh5Tgq7GPKLcikLMnCFh"
-        eacl_container_id = "9TCtdgWADLEE4qaWsVC5Rn5KKhdNLBQ8A9bggwzvGr1j"
+        public_container_id = "xxxxxxxxx"
+        eacl_container_id = "xxxxxxxxx"
         
         # Use persistent agent
         agent = self.agents['object']
