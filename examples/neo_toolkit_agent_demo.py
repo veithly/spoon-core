@@ -228,24 +228,37 @@ class NeoToolkitAgentDemo:
             Always specify network='{network}' when calling tools.
 
             **Pagination Support:**
-            Many tools support optional Skip and Limit parameters for efficient pagination:
+            21 tools support optional Skip and Limit parameters for efficient pagination:
             - Skip: the number of items to skip (default: {test_skip})
             - Limit: the number of items to return (default: {test_limit})
 
             When calling tools that support pagination (especially for list queries), always include:
-            - Skip parameter to control which batch of results to retrieve
-            - Limit parameter to control how many items to return
             - Example: GetAssetInfoByNameTool(asset_name="NEO", Skip={test_skip}, Limit={test_limit}, network="{network}")
 
-            Use pagination parameters for these types of queries:
-            - Asset queries (GetAssetInfoByNameTool, GetAssetsInfoByUserAddressTool)
-            - Transfer queries (GetNep11TransferByAddressTool, GetNep17TransferByAddressTool)
-            - Block queries (GetRecentBlocksInfoTool)
-            - Contract queries (GetContractListByNameTool, GetVerifiedContractTool)
-            - Transaction queries (GetRawTransactionByBlockHeightTool)
-            - Voting queries (GetVotersByCandidateAddressTool, GetScVoteCallByVoterAddressTool)
-            - Smart contract call queries (GetScCallByContractHashTool, GetScCallByContractHashAddressTool)
-            - Application log queries (GetApplicationStateTool)
+            Complete list of tools supporting pagination:
+            - GetAssetInfoByNameTool 
+            - GetAssetsInfoByUserAddressTool 
+            - GetRecentBlocksInfoTool 
+            - GetContractListByNameTool 
+            - GetVerifiedContractTool 
+            - GetCommitteeInfoTool 
+            - GetApplicationStateTool 
+            - GetNep11ByAddressAndHashTool 
+            - GetNep11TransferByAddressTool 
+            - GetNep11TransferByBlockHeightTool 
+            - GetNep11TransferByTransactionHashTool 
+            - GetNep17TransferByAddressTool 
+            - GetNep17TransferByBlockHeightTool 
+            - GetNep17TransferByContractHashTool 
+            - GetNep17TransferByTransactionHashTool 
+            - GetScCallByContractHashTool 
+            - GetScCallByContractHashAddressTool 
+            - GetScCallByTransactionHashTool 
+            - GetRawTransactionByBlockHeightTool 
+            - GetCandidateByVoterAddressTool 
+            - GetScVoteCallByCandidateAddressTool 
+            - GetScVoteCallByVoterAddressTool
+            - GetVotersByCandidateAddressTool 
 
             Provide clear, informative responses based on the tool results.
             """
