@@ -322,19 +322,21 @@ class NeoFSAgentDemo:
             "Expert in NeoFS container management, creation, and configuration"
         )
         
-        # Object Storage Agent (6 tools)
+        # Object Storage Agent (8 tools)
         object_tools = [
             CreateBearerTokenTool(),
             UploadObjectTool(),
             DownloadObjectByIdTool(),
+            DownloadObjectByAttributeTool(),
             GetObjectHeaderByIdTool(),
+            GetObjectHeaderByAttributeTool(),
             DeleteObjectTool(),
             SearchObjectsTool(),
         ]
         self.agents['object'] = self.create_agent(
             "Object Storage Manager",
             object_tools,
-            "Specialist in NeoFS object operations, upload, download, and search"
+            "Specialist in NeoFS object operations, upload, download, and search. Supports both by_id and by_attribute operations."
         )
         
         # Access Control Agent (4 tools)
@@ -677,11 +679,16 @@ class NeoFSAgentDemo:
         print(f" Scenario: Upload to PUBLIC Container")
         print(f"{'-'*60}")
         
-        response1 = await agent.run(f"""Upload a file to PUBLIC container {public_container_id}:
-                    File details:
-                    - Content: 'Test file for advanced demo'
-                    - Attributes: {{"FileName": "advanced-test.txt", "Type": "Demo"}}
-                    No bearer token needed. Remember the object_id for next steps.""")
+        response1 = await agent.run(f"""Upload a file to PUBLIC container.
+
+Call the upload_object_to_neofs tool with exactly these parameters:
+- container_id: "{public_container_id}"
+- content: "Test file for advanced demo"
+- attributes_json: "{{\\"FileName\\": \\"advanced-test.txt\\", \\"Type\\": \\"Demo\\"}}"
+
+Note: Use attributes_json (string type) instead of attributes (object type).
+No bearer_token parameter needed (PUBLIC container).
+Remember the object_id from the response for next steps.""")
         print(f"✅ Response: {response1}")
         
         # Scenario 2: Get object header by attribute
@@ -690,10 +697,15 @@ class NeoFSAgentDemo:
         print(f" Scenario: Get Object Header by Attribute (PUBLIC)")
         print(f"{'-'*60}")
         
-        response2 = await agent.run(f"""Get object header by attribute from PUBLIC container {public_container_id}:
-                    - Attribute key: FileName
-                    - Attribute value: advanced-test.txt
-                    No bearer token needed.""")
+        response2 = await agent.run(f"""Get object header by attribute from PUBLIC container.
+
+Call the get_neofs_object_header_by_attribute tool with exactly these parameters:
+- container_id: "{public_container_id}"
+- attr_key: "FileName"
+- attr_val: "advanced-test.txt"
+
+No bearer_token parameter needed (PUBLIC container).
+Show me the object metadata.""")
         print(f"✅ Response: {response2}")
         
         # Scenario 3: Download object by attribute
@@ -701,10 +713,16 @@ class NeoFSAgentDemo:
         print(f" Agent: {agent.agent_name}")
         print(f" Scenario: Download Object by Attribute (PUBLIC)")
         print(f"{'-'*60}")
-        response3 = await agent.run(f"""Download object by attribute from PUBLIC container {public_container_id}:
-                - Attribute key: FileName
-                - Attribute value: advanced-test.txt
-                Show me the file content. No bearer token needed.""")
+        
+        response3 = await agent.run(f"""Download object by attribute from PUBLIC container.
+
+Call the download_neofs_object_by_attribute tool with exactly these parameters:
+- container_id: "{public_container_id}"
+- attr_key: "FileName"
+- attr_val: "advanced-test.txt"
+
+No bearer_token parameter needed (PUBLIC container).
+Show me the file content.""")
         print(f"✅ Response: {response3}")
         
         # Scenario 4: Get object header by ID
@@ -753,15 +771,22 @@ Show me the current access control configuration.""")
         print(f" Scenario: Upload to eACL Container")
         print(f"{'-'*60}")
         
-        response7 = await agent.run(f"""Upload a file to eACL container {eacl_container_id}:
-                    Steps:
-                    1. Create bearer token (token_type="object", operation="PUT", lifetime=3600)
-                    2. Upload file:
-                    - Content: 'Advanced eACL demo file'
-                    - Attributes: {{"FileName": "eacl-advanced-test.txt", "Type": "Demo"}}
-                    - Use the bearer token
+        response7 = await agent.run(f"""Upload a file to eACL container.
 
-                    Remember the object_id for next steps. Explain why PUT bearer token is needed.""")
+Steps:
+1. First, call create_neofs_bearer_token with:
+   - token_type: "object"
+   - operation: "PUT"
+   - lifetime: 3600
+
+2. Then, call upload_object_to_neofs with exactly these parameters:
+   - container_id: "{eacl_container_id}"
+   - content: "Advanced eACL demo file"
+   - attributes_json: "{{\\"FileName\\": \\"eacl-advanced-test.txt\\", \\"Type\\": \\"Demo\\"}}"
+   - bearer_token: <the token from step 1>
+
+Note: Use attributes_json (string) instead of attributes (object).
+Remember the object_id from the response. Explain why PUT bearer token is needed.""")
         print(f"✅ Response: {response7}")
         
         # Scenario 8: Get object header by attribute (eACL - needs GET token)
@@ -770,29 +795,42 @@ Show me the current access control configuration.""")
         print(f" Scenario: Get Object Header by Attribute (eACL)")
         print(f"{'-'*60}")
         
-        response8 = await agent.run("""Get object header by attribute from eACL container for the object we just uploaded:
+        response8 = await agent.run(f"""Get object header by attribute from eACL container.
 
 Steps:
-1. Create bearer token (token_type="object", operation="GET", lifetime=3600)
-2. Get header by attribute using the object_id from upload step as a fallback
-3. Use the bearer token
+1. First, call create_neofs_bearer_token with:
+   - token_type: "object"
+   - operation: "GET"
+   - lifetime: 3600
 
-Note: If by_attribute fails due to Gateway limitations, use the object_id directly.
-Show the object metadata.""")
+2. Then, call get_neofs_object_header_by_attribute with exactly these parameters:
+   - container_id: "{eacl_container_id}"
+   - attr_key: "FileName"
+   - attr_val: "eacl-advanced-test.txt"
+   - bearer_token: <the token from step 1>
+
+Show the object metadata. Explain why GET bearer token is needed.""")
         print(f"✅ Response: {response8}")
         
-        # Scenario 9: Download object by ID (eACL - needs GET token)
+        # Scenario 9: Download object by attribute (eACL - needs GET token)
         print(f"\n{'-'*60}")
         print(f" Agent: {agent.agent_name}")
-        print(f" Scenario: Download Object by ID (eACL)")
+        print(f" Scenario: Download Object by Attribute (eACL)")
         print(f"{'-'*60}")
         
-        response9 = await agent.run("""Download the object we uploaded from eACL container:
+        response9 = await agent.run(f"""Download object by attribute from eACL container.
 
 Steps:
-1. Create bearer token (token_type="object", operation="GET", lifetime=3600)
-2. Download object using the object_id from the upload step
-3. Use the bearer token
+1. First, call create_neofs_bearer_token with:
+   - token_type: "object"
+   - operation: "GET"
+   - lifetime: 3600
+
+2. Then, call download_neofs_object_by_attribute with exactly these parameters:
+   - container_id: "{eacl_container_id}"
+   - attr_key: "FileName"
+   - attr_val: "eacl-advanced-test.txt"
+   - bearer_token: <the token from step 1>
 
 Show me the file content. Explain why GET bearer token is needed.""")
         print(f"✅ Response: {response9}")
