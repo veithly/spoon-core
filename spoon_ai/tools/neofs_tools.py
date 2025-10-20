@@ -185,6 +185,10 @@ class UploadObjectTool(BaseTool):
                 "type": "object",
                 "description": "Object attributes as key-value pairs, e.g. {'FileName': 'test.txt', 'Type': 'Demo'}. Required if you want to retrieve object by attribute later."
             },
+            "attributes_json": {
+                "type": "string",
+                "description": "Alternative: Object attributes as JSON string, e.g. '{\"FileName\": \"test.txt\", \"Type\": \"Demo\"}'. Use this if attributes parameter doesn't work."
+            },
             "expiration_rfc3339": {
                 "type": "string",
                 "description": "Expiration time in RFC3339 format"
@@ -215,6 +219,7 @@ class UploadObjectTool(BaseTool):
         content: str, 
         bearer_token: str = None, 
         attributes: dict = None,
+        attributes_json: str = None,
         expiration_rfc3339: str = None,
         expiration_duration: str = None,
         expiration_timestamp: int = None,
@@ -222,12 +227,22 @@ class UploadObjectTool(BaseTool):
         wallet_connect: bool = True,
         **kwargs
     ) -> str:
+        import json
+        
         try:
             client = get_shared_neofs_client()
             content_bytes = content.encode('utf-8')
             
-            # Use user-provided attributes directly
-            attrs = attributes if attributes else {}
+            # Parse attributes from JSON string if provided, otherwise use dict
+            if attributes_json:
+                try:
+                    attrs = json.loads(attributes_json)
+                except json.JSONDecodeError:
+                    attrs = {}
+            elif attributes:
+                attrs = attributes
+            else:
+                attrs = {}
             
             result = client.upload_object(
                 container_id=container_id,
@@ -241,10 +256,13 @@ class UploadObjectTool(BaseTool):
                 wallet_connect=wallet_connect
             )
             
+            # Include attributes in response
+            attrs_str = f"\nAttributes: {attrs}" if attrs else ""
+            
             return f"""✅ Object uploaded!
 Object ID: {result.object_id}
 Container ID: {result.container_id}
-Size: {len(content_bytes)} bytes"""
+Size: {len(content_bytes)} bytes{attrs_str}"""
         except Exception as e:
             return f"❌ Failed: {str(e)}"
 
