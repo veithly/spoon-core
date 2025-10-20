@@ -216,6 +216,8 @@ class NeoToolkitAgentDemo:
     def create_agent(self, name: str, tools: List, description: str) -> ToolCallAgent:
         """Create a specialized agent with specific tools"""
         network = self.network
+        test_limit = self.test_limit
+        test_skip = self.test_skip
 
         class NeoSpecializedAgent(ToolCallAgent):
             agent_name: str = name
@@ -224,6 +226,27 @@ class NeoToolkitAgentDemo:
             You are a Neo blockchain specialist focused on {description}.
             Use the available tools to analyze Neo blockchain data and provide comprehensive insights.
             Always specify network='{network}' when calling tools.
+
+            **Pagination Support:**
+            Many tools support optional Skip and Limit parameters for efficient pagination:
+            - Skip: the number of items to skip (default: {test_skip})
+            - Limit: the number of items to return (default: {test_limit})
+
+            When calling tools that support pagination (especially for list queries), always include:
+            - Skip parameter to control which batch of results to retrieve
+            - Limit parameter to control how many items to return
+            - Example: GetAssetInfoByNameTool(asset_name="NEO", Skip={test_skip}, Limit={test_limit}, network="{network}")
+
+            Use pagination parameters for these types of queries:
+            - Asset queries (GetAssetInfoByNameTool, GetAssetsInfoByUserAddressTool)
+            - Transfer queries (GetNep11TransferByAddressTool, GetNep17TransferByAddressTool)
+            - Block queries (GetRecentBlocksInfoTool)
+            - Contract queries (GetContractListByNameTool, GetVerifiedContractTool)
+            - Transaction queries (GetRawTransactionByBlockHeightTool)
+            - Voting queries (GetVotersByCandidateAddressTool, GetScVoteCallByVoterAddressTool)
+            - Smart contract call queries (GetScCallByContractHashTool, GetScCallByContractHashAddressTool)
+            - Application log queries (GetApplicationStateTool)
+
             Provide clear, informative responses based on the tool results.
             """
             max_steps: int = 5
@@ -454,19 +477,19 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'asset',
             "Asset Discovery",
-            f"How many assets are registered on Neo {self.network}? Give me an overview of the asset ecosystem."
+            f"How many assets are registered on Neo {self.network}? Give me an overview of the asset ecosystem. When retrieving asset lists, use Skip={self.test_skip} and Limit={self.test_limit} for pagination."
         )
 
         await self.run_agent_scenario(
             'asset',
             "NEO Token Analysis",
-            f"Analyze the {self.demo_asset_name} token. What are its key properties and characteristics?"
+            f"Analyze the {self.demo_asset_name} token with pagination (Skip={self.test_skip}, Limit={self.test_limit}). What are its key properties and characteristics?"
         )
 
         await self.run_agent_scenario(
             'asset',
             "Portfolio Analysis",
-            f"Analyze the asset portfolio for address {self.demo_address}. What assets does this address hold?"
+            f"Analyze the asset portfolio for address {self.demo_address} using pagination parameters Skip={self.test_skip} and Limit={self.test_limit}. What assets does this address hold?"
         )
 
     async def demo_transaction_tracking(self):
@@ -482,13 +505,13 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'transaction',
             "Address Transaction History",
-            f"Analyze the transaction history for address {self.demo_address}. What can you tell me about its transaction patterns?"
+            f"Analyze the transaction history for address {self.demo_address}. When retrieving transaction lists, use pagination with Skip={self.test_skip} and Limit={self.test_limit}. What can you tell me about its transaction patterns?"
         )
 
         await self.run_agent_scenario(
             'transaction',
             "Block Transaction Analysis",
-            f"Analyze transactions in block height {self.test_block_height} on {self.network}. What types of transactions occurred?"
+            f"Analyze transactions in block height {self.test_block_height} on {self.network} using pagination (Skip={self.test_skip}, Limit={self.test_limit}). What types of transactions occurred?"
         )
 
     async def demo_nep_tokens(self):
@@ -498,19 +521,19 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'nep',
             "NEP-17 Transfer Analysis",
-            f"Analyze NEP-17 token transfers for address {self.demo_address} and contract {self.demo_contract}. What token activity can you find?"
+            f"Analyze NEP-17 token transfers for address {self.demo_address} and contract {self.demo_contract} using pagination (Skip={self.test_skip}, Limit={self.test_limit}). What token activity can you find?"
         )
 
         await self.run_agent_scenario(
             'nep',
             "Contract Token Activity",
-            f"Analyze token activity for contract {self.demo_contract}. What transfer patterns do you see?"
+            f"Analyze token activity for contract {self.demo_contract} with pagination Skip={self.test_skip} and Limit={self.test_limit}. What transfer patterns do you see?"
         )
 
         await self.run_agent_scenario(
             'nep',
             "NEP-11 Asset Holdings",
-            f"Check NEP-11 (NFT) assets for address {self.demo_address} and contract {self.demo_contract}. What NFT information can you find?"
+            f"Check NEP-11 (NFT) assets for address {self.demo_address} and contract {self.demo_contract} using Skip={self.test_skip} and Limit={self.test_limit}. What NFT information can you find?"
         )
 
     async def demo_smart_contracts(self):
@@ -520,7 +543,7 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'contract',
             "Contract Ecosystem Overview",
-            f"Give me an overview of the smart contract ecosystem on Neo {self.network}. How many contracts are deployed?"
+            f"Give me an overview of the smart contract ecosystem on Neo {self.network}. How many contracts are deployed? When retrieving contract lists, use Skip={self.test_skip} and Limit={self.test_limit}."
         )
 
         await self.run_agent_scenario(
@@ -532,26 +555,25 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'contract',
             "Contract Call Analysis",
-            f"Analyze smart contract calls for contract {self.demo_contract}. What contract interactions can you find?"
+            f"Analyze smart contract calls for contract {self.demo_contract} using pagination (Skip={self.test_skip}, Limit={self.test_limit}). What contract interactions can you find?"
         )
-        
+
         await self.run_agent_scenario(
             'contract',
             "Verified Contracts Overview",
-            f"Give me an overview of verified smart contracts on Neo {self.network}. What are the benefits of contract verification?"
+            f"Give me an overview of verified smart contracts on Neo {self.network} with pagination Skip={self.test_skip} and Limit={self.test_limit}. What are the benefits of contract verification?"
         )
-        
         if self.demo_contract:
             await self.run_agent_scenario(
                 'contract',
                 "Contract Verification Check",
                 f"Check if contract {self.demo_contract} is verified. If yes, show me its verification details."
             )
-            
+
             await self.run_agent_scenario(
                 'contract',
                 "Contract Call Pattern Analysis",
-                f"Analyze smart contract call patterns for {self.demo_contract}. What are the most common interactions and who are the main users?"
+                f"Analyze smart contract call patterns for {self.demo_contract} using Skip={self.test_skip} and Limit={self.test_limit}. What are the most common interactions and who are the main users?"
             )
         
         # Transaction-based contract call analysis
@@ -569,13 +591,13 @@ class NeoToolkitAgentDemo:
         await self.run_agent_scenario(
             'governance',
             "Governance Overview",
-            f"Give me an overview of Neo {self.network} governance. How many candidates and what's the voting situation?"
+            f"Give me an overview of Neo {self.network} governance. How many candidates and what's the voting situation? When retrieving lists, use Skip={self.test_skip} and Limit={self.test_limit}."
         )
 
         await self.run_agent_scenario(
             'governance',
             "Committee Analysis",
-            f"Analyze the current Neo committee members on {self.network}. Who are the active committee members?"
+            f"Analyze the current Neo committee members on {self.network} using pagination (Skip={self.test_skip}, Limit={self.test_limit}). Who are the active committee members?"
         )
 
         await self.run_agent_scenario(
@@ -591,15 +613,15 @@ class NeoToolkitAgentDemo:
             await self.run_agent_scenario(
                 'governance',
                 "Candidate Deep Analysis",
-                f"Analyze candidate with public key {candidate_key}. Show me their detailed information, voters, and vote statistics."
+                f"Analyze candidate with public key {candidate_key} using pagination Skip={self.test_skip} and Limit={self.test_limit}. Show me their detailed information, voters, and vote statistics."
             )
-            
+
         # Voter analysis scenario
         if self.demo_address:
             await self.run_agent_scenario(
                 'governance',
                 "Voter Activity Analysis",
-                f"Analyze voting activity for address {self.demo_address}. What candidates have they voted for? Show me their voting history."
+                f"Analyze voting activity for address {self.demo_address} with pagination (Skip={self.test_skip}, Limit={self.test_limit}). What candidates have they voted for? Show me their voting history."
             )
 
     async def demo_application_logs(self):
@@ -619,9 +641,9 @@ class NeoToolkitAgentDemo:
             await self.run_agent_scenario(
                 'logs',
                 "Block State Analysis",
-                f"Analyze the application state for block {self.test_block_hash}. What contract executions happened in this block?"
+                f"Analyze the application state for block {self.test_block_hash} using pagination (Skip={self.test_skip}, Limit={self.test_limit}). What contract executions happened in this block?"
             )
-            
+
         await self.run_agent_scenario(
             'logs',
             "Smart Contract Debugging",
