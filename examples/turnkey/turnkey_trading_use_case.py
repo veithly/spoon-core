@@ -82,6 +82,14 @@ def main():
                 from eth_utils import to_bytes
 
                 w3 = Web3(Web3.HTTPProvider(rpc_url))
+                
+                # 注入 PoA 兼容中间件（处理 extraData 长度问题）
+                try:
+                    from web3.middleware import ExtraDataToPOAMiddleware
+                    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+                except ImportError:
+                    from web3.middleware import geth_poa_middleware
+                    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
                 signed_tx = (
                     resp.get("activity", {})
                     .get("result", {})
@@ -195,7 +203,7 @@ def main():
     
     print()
 
-    # 4) Activity Audit
+    4) Activity Audit
     print("🧩 Step 4/4 · Activity Audit & History")
     print("-" * 40)
     print("📊 Querying recent signing activities...")
