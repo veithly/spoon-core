@@ -7,6 +7,7 @@ import uuid
 import inspect
 import time
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal
 from abc import ABC, abstractmethod
@@ -31,6 +32,7 @@ from .reducers import (
 )
 from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
+from spoon_ai.schema import Message
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,96 @@ class RouteRule:
             # Custom function matching
             return self.condition(state, query)
         return False
+
+
+@dataclass
+class RunningSummary:
+    """Rolling conversation summary used by the summarisation node."""
+
+    summary: str = ""
+    last_updated: datetime = field(default_factory=datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "last_updated": self.last_updated.isoformat(),
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "RunningSummary":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            summary = value.get("summary", "")
+            last_updated_val = value.get("last_updated")
+            if isinstance(last_updated_val, datetime):
+                last_updated = last_updated_val
+            elif isinstance(last_updated_val, str):
+                last_updated = datetime.fromisoformat(last_updated_val)
+            else:
+                last_updated = datetime.utcnow()
+            return cls(summary=summary, last_updated=last_updated)
+        return cls()
+
+
+class SummarizationNode(BaseNode[Dict[str, Any]]):
+    """Node that summarises conversation history before model invocation."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        llm_manager,
+        max_tokens: int,
+        messages_to_keep: int = 5,
+        summary_model: Optional[str] = None,
+        summary_key: str = "summary_context",
+        output_messages_key: str = "llm_messages",
+        manager: Optional["ShortTermMemoryManager"] = None,
+    ) -> None:
+        super().__init__(name)
+        self.llm_manager = llm_manager
+        self.max_tokens = max_tokens
+        self.messages_to_keep = messages_to_keep
+        self.summary_model = summary_model
+        self.summary_key = summary_key
+        self.output_messages_key = output_messages_key
+        if manager is None:
+            from spoon_ai.memory.short_term_manager import (
+                ShortTermMemoryManager,
+                MessageTokenCounter,
+            )
+
+            manager = ShortTermMemoryManager(token_counter=MessageTokenCounter())
+        self.manager = manager
+
+    async def __call__(self, state: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        messages: List[Message] = state.get("messages", [])
+        if not messages:
+            return {self.output_messages_key: []}
+
+        running_summary = RunningSummary.from_value(state.get(self.summary_key))
+
+        llm_messages, removals, summary_text = await self.manager.summarize_messages(
+            messages=messages,
+            max_tokens_before_summary=self.max_tokens,
+            messages_to_keep=self.messages_to_keep,
+            summary_model=self.summary_model,
+            llm_manager=self.llm_manager,
+            existing_summary=running_summary.summary,
+        )
+
+        updates: Dict[str, Any] = {self.output_messages_key: llm_messages}
+
+        if summary_text:
+            running_summary.summary = summary_text
+            running_summary.last_updated = datetime.utcnow()
+            updates[self.summary_key] = running_summary.to_dict()
+
+        if removals:
+            updates.setdefault("messages", removals)
+
+        return updates
 
 
 class StateGraph(Generic[State]):
@@ -1035,4 +1127,3 @@ class CompiledGraph(Generic[State]):
                 state[key] = combined[-100:]
             else:
                 state[key] = value
-

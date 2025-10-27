@@ -39,6 +39,10 @@ class InMemoryCheckpointer:
                 self.checkpoints.pop(tid, None)
                 self.last_access.pop(tid, None)
 
+    @staticmethod
+    def _checkpoint_id(snapshot: StateSnapshot) -> str:
+        return snapshot.metadata.get("checkpoint_id") or str(snapshot.created_at.timestamp())
+
     def save_checkpoint(self, thread_id: str, snapshot: StateSnapshot) -> None:
         try:
             if not thread_id:
@@ -54,7 +58,7 @@ class InMemoryCheckpointer:
         except Exception as e:
             raise CheckpointError(f"Failed to save checkpoint: {str(e)}", thread_id=thread_id, operation="save") from e
 
-    def get_checkpoint(self, thread_id: str, checkpoint_id: str = None) -> Optional[StateSnapshot]:
+    def get_checkpoint(self, thread_id: str, checkpoint_id: Optional[str] = None) -> Optional[StateSnapshot]:
         try:
             if not thread_id:
                 raise CheckpointError("Thread ID cannot be empty", operation="get")
@@ -66,7 +70,7 @@ class InMemoryCheckpointer:
                 return None
             if checkpoint_id:
                 for checkpoint in checkpoints:
-                    if str(checkpoint.created_at.timestamp()) == checkpoint_id:
+                    if self._checkpoint_id(checkpoint) == checkpoint_id:
                         return checkpoint
                 return None
             return checkpoints[-1]
