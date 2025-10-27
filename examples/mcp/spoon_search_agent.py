@@ -1,13 +1,8 @@
 
 import os
-import sys
 import asyncio
 import logging
 from typing import Dict, Any
-
-# Ensure the toolkit is in the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../spoon-toolkit')))
-
 from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.tools.mcp_tool import MCPTool
 from spoon_ai.tools.tool_manager import ToolManager
@@ -36,7 +31,7 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
 
     async def initialize(self):
         logger.info("Initializing agent and loading tools...")
-        
+
         tavily_key = os.getenv("TAVILY_API_KEY", "")
         if not tavily_key or "your-tavily-api-key-here" in tavily_key:
             raise ValueError("TAVILY_API_KEY is not set or is a placeholder.")
@@ -50,7 +45,7 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
                 "env": {"TAVILY_API_KEY": tavily_key}
             }
         )
-        
+
         crypto_tool = CryptoPowerDataCEXTool()
         self.avaliable_tools = ToolManager([tavily_tool, crypto_tool])
         logger.info(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")

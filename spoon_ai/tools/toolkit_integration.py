@@ -21,21 +21,21 @@ def get_all_toolkit_tools() -> List[BaseTool]:
         List[BaseTool]: List of instantiated tools from all modules
     """
     all_tools = []
-    
+
     # Get tools from each module
     all_tools.extend(get_crypto_tools())
     all_tools.extend(get_security_tools())
     all_tools.extend(get_data_platform_tools())
     all_tools.extend(get_storage_tools())
     all_tools.extend(get_social_media_tools())
-    
+
     logger.info(f"🔧 Loaded {len(all_tools)} total toolkit tools successfully")
     return all_tools
 
 def get_crypto_tools() -> List[BaseTool]:
     """Import crypto tools from spoon-toolkit"""
     crypto_tools = []
-    
+
     try:
         # Import crypto data tools
         from spoon_toolkits.crypto.crypto_data_tools import (
@@ -64,6 +64,19 @@ def get_crypto_tools() -> List[BaseTool]:
             CryptoPowerDataPriceTool,
         )
 
+        # Import EVM tools
+        try:
+            from spoon_toolkits.crypto.evm import (
+                EvmTransferTool,
+                EvmSwapTool,
+                EvmBridgeTool,
+                EvmErc20TransferTool,
+                EvmBalanceTool,
+                EvmSwapQuoteTool,
+            )
+        except Exception as e:
+            logger.warning(f"EVM tools not available: {e}")
+
         tool_classes = [
             GetTokenPriceTool,
             Get24hStatsTool,
@@ -82,6 +95,15 @@ def get_crypto_tools() -> List[BaseTool]:
             CryptoPowerDataDEXTool,
             CryptoPowerDataIndicatorsTool,
             CryptoPowerDataPriceTool,
+            # EVM tools (conditionally present)
+            *[cls for cls in [
+                'EvmTransferTool' in globals() and EvmTransferTool or None,
+                'EvmSwapTool' in globals() and EvmSwapTool or None,
+                'EvmBridgeTool' in globals() and EvmBridgeTool or None,
+                'EvmErc20TransferTool' in globals() and EvmErc20TransferTool or None,
+                'EvmBalanceTool' in globals() and EvmBalanceTool or None,
+                'EvmSwapQuoteTool' in globals() and EvmSwapQuoteTool or None,
+            ] if cls],
         ]
 
         for tool_class in tool_classes:
@@ -102,12 +124,12 @@ def get_crypto_tools() -> List[BaseTool]:
 def get_security_tools() -> List[BaseTool]:
     """Import security tools from spoon-toolkit"""
     security_tools = []
-    
+
     try:
         # Note: GoPlusLabs tools are primarily MCP-based
         # They would need to be adapted to BaseTool interface or used via MCP
         logger.info("Security tools (GoPlusLabs) are available via MCP integration")
-        
+
     except ImportError as e:
         logger.error(f"❌ Failed to import security tools: {e}")
     except Exception as e:
@@ -118,7 +140,7 @@ def get_security_tools() -> List[BaseTool]:
 def get_data_platform_tools() -> List[BaseTool]:
     """Import data platform tools from spoon-toolkit"""
     data_tools = []
-    
+
     try:
         # Import Chainbase tools
         from spoon_toolkits.data_platforms.chainbase.chainbase_tools import (
@@ -183,7 +205,7 @@ def get_data_platform_tools() -> List[BaseTool]:
 def get_storage_tools() -> List[BaseTool]:
     """Import storage tools from spoon-toolkit"""
     storage_tools = []
-    
+
     try:
         # Import storage tools (these may require specific dependencies)
         try:
@@ -191,13 +213,13 @@ def get_storage_tools() -> List[BaseTool]:
         except ImportError:
             logger.warning("AiozStorageTool not available - missing dependencies")
             AiozStorageTool = None
-            
+
         try:
             from spoon_toolkits.storage.foureverland.foureverland_tools import FoureverLandStorageTool
         except ImportError:
             logger.warning("FoureverLandStorageTool not available - missing dependencies")
             FoureverLandStorageTool = None
-            
+
         try:
             from spoon_toolkits.storage.oort.oort_tools import OortStorageTool
         except ImportError:
@@ -205,7 +227,7 @@ def get_storage_tools() -> List[BaseTool]:
             OortStorageTool = None
 
         tool_classes = [
-            cls for cls in [AiozStorageTool, FoureverLandStorageTool, OortStorageTool] 
+            cls for cls in [AiozStorageTool, FoureverLandStorageTool, OortStorageTool]
             if cls is not None
         ]
 
@@ -227,7 +249,7 @@ def get_storage_tools() -> List[BaseTool]:
 def get_social_media_tools() -> List[BaseTool]:
     """Import social media tools from spoon-toolkit"""
     social_tools = []
-    
+
     try:
         # Import social media tools (these may require specific dependencies)
         try:
@@ -235,19 +257,19 @@ def get_social_media_tools() -> List[BaseTool]:
         except ImportError:
             logger.warning("DiscordTool not available - missing dependencies")
             DiscordTool = None
-            
+
         try:
             from spoon_toolkits.social_media.email_tool import EmailTool
         except ImportError:
             logger.warning("EmailTool not available - missing dependencies")
             EmailTool = None
-            
+
         try:
             from spoon_toolkits.social_media.telegram_tool import TelegramTool
         except ImportError:
             logger.warning("TelegramTool not available - missing dependencies")
             TelegramTool = None
-            
+
         try:
             from spoon_toolkits.social_media.twitter_tool import TwitterTool
         except ImportError:
@@ -255,7 +277,7 @@ def get_social_media_tools() -> List[BaseTool]:
             TwitterTool = None
 
         tool_classes = [
-            cls for cls in [DiscordTool, EmailTool, TelegramTool, TwitterTool] 
+            cls for cls in [DiscordTool, EmailTool, TelegramTool, TwitterTool]
             if cls is not None
         ]
 
@@ -308,8 +330,10 @@ class ToolkitConfig:
             "price_threshold_alert", "lp_range_check", "monitor_sudden_price_increase",
             "lending_rate_monitor", "crypto_market_monitor", "predict_price",
             "token_holders", "trading_history", "uniswap_liquidity", "wallet_analysis",
-            "crypto_powerdata_cex", "crypto_powerdata_dex", 
-            "crypto_powerdata_indicators", "crypto_powerdata_price"
+            "crypto_powerdata_cex", "crypto_powerdata_dex",
+            "crypto_powerdata_indicators", "crypto_powerdata_price",
+            # EVM toolkit tools
+            "evm_transfer", "evm_swap", "evm_bridge", "evm_erc20_transfer", "evm_get_balance", "evm_swap_quote",
         ],
         "data_platforms": [
             "get_latest_block_number", "get_block_by_number", "get_transaction_by_hash",
@@ -326,7 +350,7 @@ class ToolkitConfig:
         ],
         "security": [
             # GoPlusLabs tools available via MCP
-            "token_security", "malicious_address", "nft_security", 
+            "token_security", "malicious_address", "nft_security",
             "dapp_security", "phishing_site", "rug_pull_detection"
         ]
     }
@@ -334,7 +358,7 @@ class ToolkitConfig:
     # Tools that require API keys or special configuration
     TOOLS_REQUIRING_CONFIG = [
         # Crypto tools
-        "lending_rate_monitor", "predict_price", "token_holders", 
+        "lending_rate_monitor", "predict_price", "token_holders",
         "trading_history", "wallet_analysis", "crypto_powerdata_dex",
         # Data platform tools
         "chainbase_tools", "thirdweb_tools",

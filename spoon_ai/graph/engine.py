@@ -9,6 +9,7 @@ import time
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal
 from abc import ABC, abstractmethod
 
@@ -33,6 +34,7 @@ from .reducers import (
 from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
 from spoon_ai.schema import Message
+from .config import GraphConfig, ParallelGroupConfig, ParallelRetryPolicy, RouterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +283,8 @@ class StateGraph(Generic[State]):
     def __init__(self, state_schema: type, checkpointer: Optional[Any] = None, config_schema: Optional[type] = None):
         self.state_schema = state_schema
         self.config_schema = config_schema
-        self.checkpointer = checkpointer
+        # Default to in-memory checkpointer if none provided
+        self.checkpointer = checkpointer or InMemoryCheckpointer()
 
         # Node storage - LangGraph style
         self.nodes: Dict[str, BaseNode[State]] = {}
@@ -300,11 +303,12 @@ class StateGraph(Generic[State]):
         self.intelligent_router: Optional[Callable[[Dict[str, Any], str], str]] = None
 
         # LLM Router
-        self.llm_router: Optional[Callable[[Dict[str, Any], str], str]] = None
+        self.llm_router: Optional[Callable[[Dict[str, Any], str], Union[str, None, asyncio.Future]]] = None
         self.llm_router_config: Dict[str, Any] = {
             "model": "gpt-4",
             "temperature": 0.1,
-            "max_tokens": 100
+            "max_tokens": 100,
+            "timeout": 8,
         }
 
         # Parallel execution
@@ -315,13 +319,17 @@ class StateGraph(Generic[State]):
         self.parallel_entry_nodes: List[str] = []
 
         # Configuration
-        self.config: Dict[str, Any] = {}
+        self.config: GraphConfig = GraphConfig()
         self.stream_mode: str = "values"
         self.stream_channels: List[str] = ["values", "updates", "debug"]
 
         # Monitoring
         self.monitoring_enabled: bool = False
         self.monitoring_metrics: List[str] = []
+
+        # Optional hooks
+        self.state_cleanup: Optional[Callable[[Dict[str, Any]], None]] = None
+        self.state_validator: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def enable_monitoring(self, metrics: Optional[List[str]] = None) -> "StateGraph":
         self.monitoring_enabled = True
@@ -345,16 +353,19 @@ class StateGraph(Generic[State]):
 
         return self
 
-    def add_edge(self, start_node: str, end_node: str) -> "StateGraph":
-        """Add an unconditional edge - LangGraph style"""
+    def add_edge(self, start_node: str, end_node: str, condition: Optional[Callable[[State], bool]] = None) -> "StateGraph":
+        """Add an edge. When condition is provided, edge becomes conditional."""
         if start_node not in self.nodes and start_node != START:
             raise GraphConfigurationError(f"Start node '{start_node}' does not exist", component="edge")
         if end_node not in self.nodes and end_node != END:
             raise GraphConfigurationError(f"End node '{end_node}' does not exist", component="edge")
 
+        if condition is not None and not callable(condition):
+            raise GraphConfigurationError("Edge condition must be callable", component="edge")
+
         if start_node not in self.edges:
             self.edges[start_node] = []
-        self.edges[start_node].append((end_node, None))
+        self.edges[start_node].append((end_node, condition))
         return self
 
     def add_conditional_edges(self, start_node: str, condition: Callable[[State], str],
@@ -391,7 +402,7 @@ class StateGraph(Generic[State]):
         return self.add_node(name, condition_node)
 
     def add_parallel_group(self, group_name: str, nodes: List[str],
-                          config: Optional[Dict[str, Any]] = None) -> "StateGraph":
+                          config: Optional[Union[Dict[str, Any], ParallelGroupConfig]] = None) -> "StateGraph":
         """Add a parallel execution group"""
         # Validate that all nodes exist
         for node_name in nodes:
@@ -399,7 +410,14 @@ class StateGraph(Generic[State]):
                 raise GraphConfigurationError(f"Node '{node_name}' does not exist", component="parallel_group")
 
         self.parallel_groups[group_name] = nodes
-        self.parallel_group_configs[group_name] = config or {}
+        if isinstance(config, ParallelGroupConfig):
+            group_cfg = config
+        elif isinstance(config, dict):
+            group_cfg = ParallelGroupConfig(**config)
+        else:
+            group_cfg = self.config.parallel_groups.get(group_name, ParallelGroupConfig())
+
+        self.parallel_group_configs[group_name] = group_cfg
 
         # Mark nodes as belonging to this group
         for node_name in nodes:
@@ -577,7 +595,7 @@ class StateGraph(Generic[State]):
             "nodes": list(self.nodes.keys()),
             "edges": self.edges,
             "entry_point": self._entry_point,
-            "config": self.config
+            "config": self.config,
         }
 
 
@@ -624,73 +642,87 @@ class CompiledGraph(Generic[State]):
 
         return None
 
-    def get_execution_metrics(self) -> Dict[str, Any]:
-        """Get execution metrics"""
-        return self.execution_metrics.copy()
+    def _find_edge_target(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
+        if current_node in self.graph.edges:
+            for edge_target, edge_condition in self.graph.edges[current_node]:
+                if edge_condition is None and isinstance(edge_target, str) and (edge_target in self.graph.nodes or edge_target == END):
+                    return edge_target
+                if callable(edge_target) and isinstance(edge_condition, dict):
+                    try:
+                        cond_key = edge_target(state)
+                        if isinstance(cond_key, str) and cond_key in edge_condition:
+                            return edge_condition[cond_key]
+                    except Exception as e:
+                        logger.warning(f"Conditional map evaluation failed: {e}")
+                if isinstance(edge_target, str) and callable(edge_condition):
+                    try:
+                        if edge_condition(state):
+                            return edge_target
+                    except Exception as e:
+                        logger.warning(f"Predicate condition failed: {e}")
+        return None
 
-    def _get_next_node(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
-        """Determine the next node to execute"""
+    async def _determine_next_node(self, current_node: str, state: Dict[str, Any]) -> Optional[str]:
+        """Determine the next node to execute (async to support async LLM router)."""
         query = state.get("user_query", "")
         logger.info(f"Getting next node from '{current_node}' for query: '{query}'")
 
-        # Priority 1: LLM Router (if available)
-        if self.graph.llm_router:
-            try:
-                next_node = self.graph.llm_router(state, query)
-                if next_node and next_node != current_node and next_node in self.graph.nodes:
-                    logger.info(f"LLM Router selected: {next_node}")
-                    return next_node
-            except Exception as e:
-                logger.warning(f"LLM router failed: {e}")
+        graph_cfg = self.graph.config if isinstance(self.graph.config, GraphConfig) else GraphConfig()
+        router_cfg: RouterConfig = graph_cfg.router
 
-        # Priority 2: Intelligent router function
-        if self.graph.intelligent_router:
-            logger.info("Trying intelligent router...")
-            try:
-                next_node = self.graph.intelligent_router(state, query)
-                if next_node and next_node != current_node:
-                    logger.info(f"Intelligent router selected: {next_node}")
-                    return next_node
-            except Exception as e:
-                logger.warning(f"Intelligent router failed: {e}")
+        # Priority 1: Explicit edges (LangGraph-style)
+        logger.info("Checking explicit edges...")
+        explicit_target = self._find_edge_target(current_node, state)
+        if explicit_target:
+            return explicit_target
 
-        # Priority 3: Intelligent routing rules
+        # Priority 2: Intelligent routing rules
         logger.info("Trying routing rules...")
         matching_route = self._find_matching_route(current_node, state)
         if matching_route:
             logger.info(f"Routing rule matched: {matching_route}")
             return matching_route
 
-        # Priority 4: Fall back to regular edges
-        logger.info("Falling back to regular edges...")
-        if current_node in self.graph.edges:
-            logger.info(f"Found {len(self.graph.edges[current_node])} edges from {current_node}")
-            for edge_target, edge_condition in self.graph.edges[current_node]:
-                logger.info(f"Checking edge: target={edge_target}, condition={edge_condition}")
-                # Case A: Unconditional edge (edge_target must be a valid node or END)
-                if edge_condition is None and isinstance(edge_target, str) and (edge_target in self.graph.nodes or edge_target == END):
-                    logger.info(f"Using unconditional edge to: {edge_target}")
-                    return edge_target
+        # Priority 3: Intelligent router function
+        if self.graph.intelligent_router:
+            logger.info("Trying intelligent router...")
+            try:
+                router = self.graph.intelligent_router
+                next_node = await router(state, query) if asyncio.iscoroutinefunction(router) else router(state, query)
+                if next_node and next_node != current_node:
+                    if router_cfg.allowed_targets and next_node not in router_cfg.allowed_targets:
+                        logger.warning(f"Intelligent router returned disallowed target '{next_node}'")
+                    else:
+                        logger.info(f"Intelligent router selected: {next_node}")
+                        return next_node
+            except Exception as e:
+                logger.warning(f"Intelligent router failed: {e}")
 
-                # Case B: LangGraph-style conditional edges stored as (condition_func, path_map)
-                if callable(edge_target) and isinstance(edge_condition, dict):
-                    try:
-                        cond_key = edge_target(state)
-                        if isinstance(cond_key, str) and cond_key in edge_condition:
-                            selected = edge_condition[cond_key]
-                            logger.info(f"Conditional map selected: {selected} for key {cond_key}")
-                            return selected
-                    except Exception as e:
-                        logger.warning(f"Conditional map evaluation failed: {e}")
+        # Priority 4: LLM Router (if available)
+        if router_cfg.allow_llm and self.graph.llm_router:
+            try:
+                router = self.graph.llm_router
+                if asyncio.iscoroutinefunction(router):
+                    next_node = await asyncio.wait_for(router(state, query), timeout=router_cfg.llm_timeout)
+                else:
+                    next_node = router(state, query)
+                if next_node and next_node != current_node and next_node in self.graph.nodes:
+                    if router_cfg.allowed_targets and next_node not in router_cfg.allowed_targets:
+                        logger.warning(f"LLM router returned disallowed target '{next_node}'")
+                    else:
+                        logger.info(f"LLM Router selected: {next_node}")
+                        return next_node
+            except Exception as e:
+                logger.warning(f"LLM router failed: {e}")
 
-                # Case C: Simple boolean condition (edge_target is destination)
-                if isinstance(edge_target, str) and (edge_target in self.graph.nodes or edge_target == END) and callable(edge_condition):
-                    try:
-                        if edge_condition(state):
-                            logger.info(f"Predicate condition to {edge_target} is true")
-                            return edge_target
-                    except Exception as e:
-                        logger.warning(f"Predicate condition failed: {e}")
+        # Priority 5: Default target
+        if router_cfg.enable_fallback_to_default and router_cfg.default_target:
+            target = router_cfg.default_target
+            if router_cfg.allowed_targets and target not in router_cfg.allowed_targets:
+                logger.warning(f"Default target '{target}' not in allowed targets")
+            elif target in self.graph.nodes:
+                logger.info(f"Using default router target: {target}")
+                return target
 
         logger.warning("No valid next node found")
         return None
@@ -716,7 +748,7 @@ class CompiledGraph(Generic[State]):
             current_node = self.graph._entry_point
             iteration = 0
 
-        max_iterations = 100
+        max_iterations = int(config.get("max_iterations", 100) or 100)
         self._current_thread_id = thread_id
         try:
             while current_node and iteration < max_iterations:
@@ -740,6 +772,12 @@ class CompiledGraph(Generic[State]):
                         if isinstance(result, dict):
                             self._update_state_with_reducers(state, result)
                             self._maybe_cleanup_state(state)
+                            # optional validation
+                            try:
+                                if callable(self.graph.state_validator):
+                                    self.graph.state_validator(state)
+                            except Exception as e:
+                                raise GraphExecutionError(f"State validation failed: {e}", node=current_node, iteration=iteration)
                 except InterruptError as e:
                     # record interrupt + checkpoint
                     try:
@@ -750,7 +788,7 @@ class CompiledGraph(Generic[State]):
                     return {**state, "__interrupt__": [{"interrupt_id": e.interrupt_id, "value": e.interrupt_data, "node": current_node, "iteration": iteration}]}
 
                 # next - use intelligent routing
-                next_node = self._get_next_node(current_node, state)
+                next_node = await self._determine_next_node(current_node, state)
                 if next_node == current_node:
                     break
                 current_node = next_node
@@ -790,6 +828,7 @@ class CompiledGraph(Generic[State]):
             raise GraphExecutionError(f"Node '{node_name}' not found")
 
         try:
+            start_dt = datetime.now()
             # Call the node with proper parameters
             if hasattr(node, '__call__'):
                 if config is not None:
@@ -799,9 +838,19 @@ class CompiledGraph(Generic[State]):
             else:
                 # Fallback for old-style nodes
                 result = await node(state)
+            end_dt = datetime.now()
+            # record metrics
+            try:
+                self._record_execution_metrics(node_name, start_dt, end_dt, True, metadata={})
+            except Exception:
+                pass
             return result if isinstance(result, dict) else {"result": result}
         except Exception as e:
             logger.error(f"Node {node_name} execution failed: {e}")
+            try:
+                self._record_execution_metrics(node_name, start_dt, datetime.now(), False, error=str(e))
+            except Exception:
+                pass
             raise NodeExecutionError(f"Node '{node_name}' failed", node_name=node_name, original_error=e, state=state) from e
 
     def _update_state(self, state: State, updates: Dict[str, Any]) -> None:
@@ -929,15 +978,19 @@ class CompiledGraph(Generic[State]):
         nodes = self.graph.parallel_groups.get(group_name, [])
         if not nodes:
             return
-        cfg = self.graph.parallel_group_configs.get(group_name, {})
-        join_strategy = cfg.get("join_strategy", "all_complete")
-        timeout = cfg.get("timeout")
-        error_strategy = cfg.get("error_strategy", "fail_fast")
-        join_condition = cfg.get("join_condition")
+        graph_cfg = self.graph.config if isinstance(self.graph.config, GraphConfig) else GraphConfig()
+        group_cfg = self.graph.parallel_group_configs.get(group_name)
+        if not group_cfg:
+            group_cfg = graph_cfg.parallel_groups.get(group_name, ParallelGroupConfig())
+
+        join_strategy = group_cfg.join_strategy
+        timeout = group_cfg.timeout
+        error_strategy = group_cfg.error_strategy
+        join_condition = group_cfg.join_condition
 
         # create tasks
         loop = asyncio.get_event_loop()
-        tasks = {}
+        tasks: Dict[str, asyncio.Task] = {}
         for n in nodes:
             tasks[n] = loop.create_task(self._execute_node(n, state))
 
@@ -971,7 +1024,7 @@ class CompiledGraph(Generic[State]):
                         raise e
 
         try:
-            if join_strategy == "any_first":
+            if join_strategy == "any":
                 done, pending = await asyncio.wait(tasks.values(), timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
                 await handle_done(done)
                 # cancel pending
@@ -979,26 +1032,14 @@ class CompiledGraph(Generic[State]):
                     p.cancel()
             else:
                 # all_complete or quorum
-                if isinstance(join_strategy, str) and join_strategy.startswith("quorum_"):
-                    quorum_val = join_strategy.split("_", 1)[1]
-                    quorum_n = None
-                    quorum_p = None
-                    # attempt parse as int or float
-                    try:
-                        quorum_n = int(quorum_val)
-                    except Exception:
-                        try:
-                            quorum_p = float(quorum_val)
-                        except Exception:
-                            pass
+                if join_strategy == "quorum":
                     needed = 0
                     total = len(tasks)
-                    if quorum_n is not None:
-                        needed = min(total, max(1, quorum_n))
-                    elif quorum_p is not None and 0 < quorum_p <= 1:
-                        needed = max(1, int(total * quorum_p + 0.9999))
+                    quorum = group_cfg.quorum or 0.5
+                    if quorum >= 1:
+                        needed = min(total, int(quorum))
                     else:
-                        needed = total
+                        needed = max(1, int(total * quorum + 0.9999))
                     remaining = set(tasks.values())
                     start = datetime.now()
                     while remaining and len(completed_nodes) < needed:
@@ -1051,9 +1092,13 @@ class CompiledGraph(Generic[State]):
         # finally merge accumulated updates
         for upd in updates_to_merge:
             self._update_state_with_reducers(state, upd)
-        if errors and error_strategy == "ignore_errors":
-            # attach errors but don't raise
-            self._update_state_with_reducers(state, {"__errors__": errors})
+        if errors:
+            if error_strategy in {"ignore_errors", "collect_errors"}:
+                self._update_state_with_reducers(state, {"__errors__": errors})
+            elif error_strategy == "fail_fast":
+                raise GraphExecutionError(
+                    f"Parallel group '{group_name}' failed", node=group_name, iteration=self._current_iteration
+                )
         # optional cleanup per group
         self._maybe_cleanup_state(state)
 
@@ -1063,7 +1108,7 @@ class CompiledGraph(Generic[State]):
         state = self._initialize_state(initial_state)
         current_node = self.graph._entry_point
         iteration = 0
-        max_iterations = 100
+        max_iterations = int(config.get("max_iterations", 100) or 100)
         while current_node and iteration < max_iterations:
             iteration += 1
             try:
@@ -1089,7 +1134,7 @@ class CompiledGraph(Generic[State]):
             except InterruptError as e:
                 yield {"type": "interrupt", "node": current_node, "interrupt_id": e.interrupt_id, "interrupt_data": e.interrupt_data, "state": state.copy()}
                 return
-            next_node = await self._get_next_node(current_node, state)
+            next_node = await self._determine_next_node(current_node, state)
             if next_node == "END" or next_node is None:
                 if stream_mode == "values":
                     yield state.copy()

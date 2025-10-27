@@ -99,6 +99,12 @@ PRIVATE_KEY=your-wallet-private-key
 RPC_URL=https://mainnet.rpc
 CHAIN_ID=12345
 
+# Turnkey SDK Configuration
+TURNKEY_BASE_URL=https://api.turnkey.com
+TURNKEY_API_PUBLIC_KEY=your-turnkey-public-key
+TURNKEY_API_PRIVATE_KEY=your-turnkey-private-key-hex
+TURNKEY_ORG_ID=your-turnkey-organization-id
+
 # Tool-specific Keys
 TAVILY_API_KEY=your-tavily-api-key
 OKX_API_KEY=your-okx-api-key
@@ -261,6 +267,31 @@ response = await llm_manager.chat_with_tools(
 )
 ```
 
+### Turnkey SDK Usage
+
+For blockchain key management and secure transaction signing:
+
+```python
+from spoon_ai.turnkey import Turnkey
+
+# Initialize Turnkey client (requires TURNKEY_* env vars)
+client = Turnkey()
+
+# Sign an EVM transaction
+result = client.sign_evm_transaction(
+    sign_with="0x_your_wallet_address",
+    unsigned_tx="0x_unsigned_transaction_hex"
+)
+
+# Sign a message
+result = client.sign_message(
+    sign_with="0x_your_wallet_address", 
+    message="Hello Turnkey!"
+)
+```
+
+See `examples/turnkey/` for complete usage examples.
+
 ### Provider Configuration
 
 Configure providers in your `config.json`:
@@ -422,53 +453,6 @@ result = await compiled.invoke({"counter": 0, "completed": False})
 📖 **[Complete Graph System Guide](doc/graph_agent.md)**
 
 🎯 **[Comprehensive Demo](examples/llm_integrated_graph_demo.py)**
-
-## 🚀 Quick Start
-
-### 1. Start the CLI
-
-```bash
-python main.py
-```
-
-### 2. Load an Agent
-
-```bash
-# Load the default trading agent (includes web search + crypto tools)
-> load-agent trading_agent
-
-# Or load a specific agent
-> load-agent web_researcher
-```
-
-### 3. Start Chatting
-
-```bash
-# Simple chat
-> action chat "Hello, what can you help me with?"
-
-# Use tools automatically
-> action chat "Search for latest Bitcoin news"
-
-# Get crypto market data
-> action chat "Get BTC price and trading volume"
-```
-
-### 4. Explore Available Commands
-
-```bash
-# List all available commands
-> help
-
-# View current configuration
-> config
-
-# List available agents
-> list-agents
-
-# Check tool status
-> action list_mcp_tools
-```
 
 ## 🧩 Build Your Own Agent
 

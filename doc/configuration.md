@@ -51,6 +51,12 @@ OKX_PROJECT_ID=your_okx_project_id
 CHAINBASE_API_KEY=your_chainbase_api_key
 THIRDWEB_CLIENT_ID=your_thirdweb_client_id
 BITQUERY_API_KEY=your_bitquery_api_key
+
+# Turnkey SDK - Required for spoon_ai.turnkey.Turnkey client
+TURNKEY_BASE_URL=https://api.turnkey.com
+TURNKEY_API_PUBLIC_KEY=your_turnkey_public_key_here
+TURNKEY_API_PRIVATE_KEY=your_turnkey_private_key_hex_here
+TURNKEY_ORG_ID=your_turnkey_organization_id_here
 ```
 
 Load it at the top of your Python entry file:
