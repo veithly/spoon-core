@@ -1,9 +1,9 @@
 """
 In-memory checkpointer for the graph package.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime
-from .types import StateSnapshot
+from .types import StateSnapshot, CheckpointTuple
 from .exceptions import CheckpointError
 
 
@@ -42,6 +42,23 @@ class InMemoryCheckpointer:
     @staticmethod
     def _checkpoint_id(snapshot: StateSnapshot) -> str:
         return snapshot.metadata.get("checkpoint_id") or str(snapshot.created_at.timestamp())
+
+    @staticmethod
+    def _snapshot_to_tuple(snapshot: StateSnapshot) -> CheckpointTuple:
+        checkpoint_id = snapshot.metadata.get("checkpoint_id") or str(snapshot.created_at.timestamp())
+        checkpoint_payload: Dict[str, Any] = {
+            "id": checkpoint_id,
+            "ts": snapshot.created_at.isoformat(),
+            "values": snapshot.values,
+            "next": list(snapshot.next),
+        }
+        return CheckpointTuple(
+            config=snapshot.config or {},
+            checkpoint=checkpoint_payload,
+            metadata=snapshot.metadata,
+            parent_config=snapshot.parent_config,
+            pending_writes=[],
+        )
 
     def save_checkpoint(self, thread_id: str, snapshot: StateSnapshot) -> None:
         try:
@@ -82,6 +99,24 @@ class InMemoryCheckpointer:
                 operation="get",
             ) from e
 
+    def get_checkpoint_tuple(self, config: Dict[str, Any]) -> Optional[CheckpointTuple]:
+        """Return a tuple-style checkpoint view, mirroring LangGraph's API."""
+        if not isinstance(config, dict):
+            raise CheckpointError("config must be a dictionary", operation="get_tuple")
+
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+        checkpoint_id = configurable.get("checkpoint_id")
+
+        if not thread_id:
+            raise CheckpointError("thread_id is required", operation="get_tuple")
+
+        snapshot = self.get_checkpoint(thread_id, checkpoint_id)
+        if not snapshot:
+            return None
+
+        return self._snapshot_to_tuple(snapshot)
+
     def list_checkpoints(self, thread_id: str) -> List[StateSnapshot]:
         try:
             if not thread_id:
@@ -91,9 +126,21 @@ class InMemoryCheckpointer:
         except Exception as e:
             raise CheckpointError(f"Failed to list checkpoints: {str(e)}", thread_id=thread_id, operation="list") from e
 
+    def iter_checkpoint_history(self, config: Dict[str, Any]) -> Iterable[CheckpointTuple]:
+        """Return checkpoint tuples for the specified thread, newest last."""
+        if not isinstance(config, dict):
+            raise CheckpointError("config must be a dictionary", operation="history_tuple")
+
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+        if not thread_id:
+            raise CheckpointError("thread_id is required", operation="history_tuple")
+
+        snapshots = self.list_checkpoints(thread_id)
+        return [self._snapshot_to_tuple(snapshot) for snapshot in snapshots]
+
     def clear_thread(self, thread_id: str) -> None:
         if thread_id in self.checkpoints:
             del self.checkpoints[thread_id]
         if thread_id in self.last_access:
             del self.last_access[thread_id]
-

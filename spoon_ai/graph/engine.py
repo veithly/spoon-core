@@ -9,8 +9,7 @@ import time
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal
+from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal, Iterable
 from abc import ABC, abstractmethod
 
 from .exceptions import (
@@ -19,6 +18,7 @@ from .exceptions import (
     GraphConfigurationError,
     EdgeRoutingError,
     InterruptError,
+    CheckpointError,
 )
 from .types import (
     NodeContext,
@@ -30,6 +30,7 @@ from .types import (
 )
 from .reducers import (
     merge_dicts,
+    add_messages,
 )
 from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
@@ -448,6 +449,35 @@ class StateGraph(Generic[State]):
 
         return self
 
+    def get_state(self, config: Optional[Dict[str, Any]] = None) -> Optional[StateSnapshot]:
+        """Fetch the latest (or specified) checkpoint snapshot for a thread."""
+        if not self.checkpointer:
+            raise CheckpointError("No checkpointer configured for this graph", operation="get_state")
+
+        config = config or {}
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+        checkpoint_id = configurable.get("checkpoint_id")
+
+        if not thread_id:
+            raise CheckpointError("thread_id is required to fetch state", operation="get_state")
+
+        return self.checkpointer.get_checkpoint(thread_id, checkpoint_id)
+
+    def get_state_history(self, config: Optional[Dict[str, Any]] = None) -> Iterable[StateSnapshot]:
+        """Return all checkpoints for the given thread, ordered by creation time."""
+        if not self.checkpointer:
+            raise CheckpointError("No checkpointer configured for this graph", operation="state_history")
+
+        config = config or {}
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+
+        if not thread_id:
+            raise CheckpointError("thread_id is required to fetch state history", operation="state_history")
+
+        return list(self.checkpointer.list_checkpoints(thread_id))
+
     def add_pattern_routing(self, source_node: str, pattern: str, target_node: str,
                            priority: int = 0) -> "StateGraph":
         """Add pattern-based routing rule"""
@@ -861,6 +891,9 @@ class CompiledGraph(Generic[State]):
         for key, value in updates.items():
             if key not in state:
                 state[key] = value
+            elif key == "messages" and isinstance(value, list):
+                existing = state.get(key) or []
+                state[key] = add_messages(existing, value)
             elif isinstance(state[key], dict) and isinstance(value, dict):
                 # Deep merge for dicts
                 self._deep_merge(state[key], value)
@@ -1165,6 +1198,9 @@ class CompiledGraph(Generic[State]):
             # merge dicts deeply, else replace
             if isinstance(state[key], dict) and isinstance(value, dict):
                 state[key] = merge_dicts(state[key], value)
+            elif key == "messages" and isinstance(value, list):
+                existing = state.get(key) or []
+                state[key] = add_messages(existing, value)
             elif isinstance(state[key], list) and isinstance(value, list):
                 # Cap list growth to avoid MemoryError
                 combined = state[key] + value

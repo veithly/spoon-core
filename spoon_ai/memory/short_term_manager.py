@@ -162,6 +162,7 @@ class ShortTermMemoryManager:
         messages_to_keep: int = 5,
         summary_model: Optional[str] = None,
         llm_manager=None,
+        llm_provider: Optional[str] = None,
         existing_summary: str = "",
     ) -> Tuple[List[Message], List[RemoveMessage], Optional[str]]:
         """Summarize earlier messages and emit removal directives."""
@@ -188,7 +189,7 @@ class ShortTermMemoryManager:
         try:
             response = await llm_manager.chat(
                 messages=messages + [prompt_message],
-                provider=None,
+                provider=llm_provider,
                 model=summary_model,
             )
             summary_text = response.content
