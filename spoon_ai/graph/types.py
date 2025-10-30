@@ -69,3 +69,13 @@ class StateSnapshot:
     parent_config: Optional[Dict[str, Any]] = None
     tasks: Tuple[Any, ...] = field(default_factory=tuple)
 
+
+@dataclass
+class CheckpointTuple:
+    """Tuple-style view of a checkpoint, mirroring LangGraph's structure."""
+
+    config: Dict[str, Any]
+    checkpoint: Dict[str, Any]
+    metadata: Dict[str, Any]
+    parent_config: Optional[Dict[str, Any]]
+    pending_writes: List[Any] = field(default_factory=list)
