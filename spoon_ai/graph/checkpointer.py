@@ -100,7 +100,6 @@ class InMemoryCheckpointer:
             ) from e
 
     def get_checkpoint_tuple(self, config: Dict[str, Any]) -> Optional[CheckpointTuple]:
-        """Return a tuple-style checkpoint view, mirroring LangGraph's API."""
         if not isinstance(config, dict):
             raise CheckpointError("config must be a dictionary", operation="get_tuple")
 

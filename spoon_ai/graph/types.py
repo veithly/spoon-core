@@ -72,8 +72,6 @@ class StateSnapshot:
 
 @dataclass
 class CheckpointTuple:
-    """Tuple-style view of a checkpoint, mirroring LangGraph's structure."""
-
     config: Dict[str, Any]
     checkpoint: Dict[str, Any]
     metadata: Dict[str, Any]

@@ -1,5 +1,5 @@
 """
-Graph engine: StateGraph, CompiledGraph, and interrupt API - LangGraph style implementation.
+Graph engine: StateGraph, CompiledGraph, and interrupt API implementation.
 """
 import asyncio
 import logging
@@ -43,13 +43,11 @@ logger = logging.getLogger(__name__)
 State = TypeVar('State')
 ConfigurableFieldSpec = Dict[str, Any]
 
-# Special nodes in LangGraph style
 START = "__start__"
 END = "__end__"
 
-
 class BaseNode(ABC, Generic[State]):
-    """Base class for all graph nodes - LangGraph style"""
+    """Base class for all graph nodes"""
 
     def __init__(self, name: str):
         self.name = name
@@ -64,7 +62,7 @@ class BaseNode(ABC, Generic[State]):
 
 
 class RunnableNode(BaseNode[State]):
-    """Runnable node that wraps a function - LangGraph style"""
+    """Runnable node that wraps a function"""
 
     def __init__(self, name: str, func: Callable[[State], Any]):
         super().__init__(name)
@@ -94,7 +92,7 @@ class RunnableNode(BaseNode[State]):
 
 
 class ToolNode(BaseNode[State]):
-    """Tool node for executing tools - LangGraph style"""
+    """Tool node for executing tools"""
 
     def __init__(self, name: str, tools: List[Any]):
         super().__init__(name)
@@ -142,7 +140,7 @@ class ToolNode(BaseNode[State]):
 
 
 class ConditionNode(BaseNode[State]):
-    """Conditional node for routing decisions - LangGraph style"""
+    """Conditional node for routing decisions"""
 
     def __init__(self, name: str, condition_func: Callable[[State], str]):
         super().__init__(name)
@@ -279,19 +277,17 @@ class SummarizationNode(BaseNode[Dict[str, Any]]):
 
 
 class StateGraph(Generic[State]):
-    """StateGraph implementation following LangGraph patterns"""
-
     def __init__(self, state_schema: type, checkpointer: Optional[Any] = None, config_schema: Optional[type] = None):
         self.state_schema = state_schema
         self.config_schema = config_schema
         # Default to in-memory checkpointer if none provided
         self.checkpointer = checkpointer or InMemoryCheckpointer()
 
-        # Node storage - LangGraph style
+        # Node storage
         self.nodes: Dict[str, BaseNode[State]] = {}
         self.node_functions: Dict[str, Callable] = {}  # For backward compatibility
 
-        # Edge management - LangGraph style
+        # Edge management
         self.edges: Dict[str, List[tuple]] = {}  # (end_node, condition_func)
         self.conditional_edges: Dict[str, Dict[str, Callable[[State], bool]]] = {}
 
@@ -339,7 +335,7 @@ class StateGraph(Generic[State]):
         return self
 
     def add_node(self, node_name: str, node: Union[BaseNode[State], Callable[[State], Any]]) -> "StateGraph":
-        """Add a node to the graph - LangGraph style"""
+        """Add a node to the graph"""
         if node_name in [START, END]:
             raise GraphConfigurationError(f"Node name '{node_name}' is reserved", component="node")
 
@@ -371,7 +367,7 @@ class StateGraph(Generic[State]):
 
     def add_conditional_edges(self, start_node: str, condition: Callable[[State], str],
                              path_map: Dict[str, str]) -> "StateGraph":
-        """Add conditional edges - LangGraph style"""
+        """Add conditional edges"""
         if start_node not in self.nodes and start_node != START:
             raise GraphConfigurationError(f"Start node '{start_node}' does not exist", component="conditional_edge")
 
@@ -386,19 +382,19 @@ class StateGraph(Generic[State]):
         return self
 
     def set_entry_point(self, node_name: str) -> "StateGraph":
-        """Set the entry point - LangGraph style"""
+        """Set the entry point"""
         if node_name not in self.nodes and node_name != START:
             raise GraphConfigurationError(f"Entry point node '{node_name}' does not exist", component="entry_point")
         self._entry_point = node_name
         return self
 
     def add_tool_node(self, tools: List[Any], name: str = "tools") -> "StateGraph":
-        """Add a tool node - LangGraph style"""
+        """Add a tool node"""
         tool_node = ToolNode(name, tools)
         return self.add_node(name, tool_node)
 
     def add_conditional_node(self, condition_func: Callable[[State], str], name: str = "condition") -> "StateGraph":
-        """Add a conditional node - LangGraph style"""
+        """Add a conditional node"""
         condition_node = ConditionNode(name, condition_func)
         return self.add_node(name, condition_node)
 
@@ -600,7 +596,7 @@ class StateGraph(Generic[State]):
         return self
 
     def compile(self, checkpointer: Optional[Any] = None) -> "CompiledGraph":
-        """Compile the graph - LangGraph style"""
+        """Compile the graph"""
         errors: List[str] = []
 
         if not self._entry_point:
@@ -632,7 +628,7 @@ class StateGraph(Generic[State]):
 
 
 class CompiledGraph(Generic[State]):
-    """Compiled graph for execution - LangGraph style"""
+    """Compiled graph for execution"""
 
     def __init__(self, graph: StateGraph[State], checkpointer: Optional[Any] = None):
         self.graph = graph
@@ -700,7 +696,7 @@ class CompiledGraph(Generic[State]):
         graph_cfg = self.graph.config if isinstance(self.graph.config, GraphConfig) else GraphConfig()
         router_cfg: RouterConfig = graph_cfg.router
 
-        # Priority 1: Explicit edges (LangGraph-style)
+        # Priority 1: Explicit edges
         logger.info("Checking explicit edges...")
         explicit_target = self._find_edge_target(current_node, state)
         if explicit_target:
@@ -921,7 +917,7 @@ class CompiledGraph(Generic[State]):
                 if edge_condition is None and isinstance(edge_target, str):
                     return edge_target
 
-                # Case B: LangGraph-style conditional edges stored as (condition_func, path_map)
+                # Case B: conditional edges stored as (condition_func, path_map)
                 if callable(edge_target) and isinstance(edge_condition, dict):
                     try:
                         condition_key = edge_target(state)
