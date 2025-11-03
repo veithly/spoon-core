@@ -41,7 +41,7 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
     max_steps: int = 10
     tool_choice: str = "auto"
 
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
+    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
     llm: ChatBot = Field(default_factory=lambda: ChatBot())
 
     # MCP integration configuration
@@ -72,16 +72,16 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
         
         try:
             # ToolManager uses tools list, not add_tool method
-            if not hasattr(self.avaliable_tools, 'tools'):
-                self.avaliable_tools.tools = []
+            if not hasattr(self.available_tools, 'tools'):
+                self.available_tools.tools = []
             
-            self.avaliable_tools.tools.append(tool)
+            self.available_tools.tools.append(tool)
             
             # Update tool_map if it exists
-            if hasattr(self.avaliable_tools, 'tool_map'):
-                self.avaliable_tools.tool_map[tool.name] = tool
+            if hasattr(self.available_tools, 'tool_map'):
+                self.available_tools.tool_map[tool.name] = tool
             
-            logger.info(f"Added tool: {tool.name} (total: {len(self.avaliable_tools.tools)})")
+            logger.info(f"Added tool: {tool.name} (total: {len(self.available_tools.tools)})")
             
         except Exception as e:
             logger.error(f"Failed to add tool {tool.name}: {e}")
@@ -139,23 +139,23 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
         
         try:
             # Find and remove from tools list
-            if hasattr(self.avaliable_tools, 'tools'):
-                original_count = len(self.avaliable_tools.tools)
-                self.avaliable_tools.tools = [
-                    tool for tool in self.avaliable_tools.tools 
+            if hasattr(self.available_tools, 'tools'):
+                original_count = len(self.available_tools.tools)
+                self.available_tools.tools = [
+                    tool for tool in self.available_tools.tools 
                     if getattr(tool, 'name', '') != tool_name
                 ]
-                removed = len(self.avaliable_tools.tools) < original_count
+                removed = len(self.available_tools.tools) < original_count
             else:
                 removed = False
             
             # Remove from tool_map if it exists
-            if hasattr(self.avaliable_tools, 'tool_map') and tool_name in self.avaliable_tools.tool_map:
-                del self.avaliable_tools.tool_map[tool_name]
+            if hasattr(self.available_tools, 'tool_map') and tool_name in self.available_tools.tool_map:
+                del self.available_tools.tool_map[tool_name]
                 removed = True
             
             if removed:
-                logger.info(f"Removed tool: {tool_name} (remaining: {len(self.avaliable_tools.tools)})")
+                logger.info(f"Removed tool: {tool_name} (remaining: {len(self.available_tools.tools)})")
                 return True
             else:
                 logger.warning(f"Tool '{tool_name}' not found for removal")
@@ -173,8 +173,8 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
             List of tool names, empty list if no tools
         """
         try:
-            if hasattr(self.avaliable_tools, 'tools') and self.avaliable_tools.tools:
-                return [getattr(tool, 'name', 'unnamed') for tool in self.avaliable_tools.tools]
+            if hasattr(self.available_tools, 'tools') and self.available_tools.tools:
+                return [getattr(tool, 'name', 'unnamed') for tool in self.available_tools.tools]
             return []
         except Exception as e:
             logger.error(f"Error listing tools: {e}")
@@ -189,8 +189,8 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
         """
         tool_info = {}
         try:
-            if hasattr(self.avaliable_tools, 'tools'):
-                for tool in self.avaliable_tools.tools:
+            if hasattr(self.available_tools, 'tools'):
+                for tool in self.available_tools.tools:
                     if hasattr(tool, 'name'):
                         tool_info[tool.name] = {
                             'description': getattr(tool, 'description', 'No description'),
@@ -217,13 +217,13 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
         }
         
         try:
-            if not hasattr(self.avaliable_tools, 'tools'):
+            if not hasattr(self.available_tools, 'tools'):
                 report['issues'].append("ToolManager missing 'tools' attribute")
                 return report
             
-            report['total_tools'] = len(self.avaliable_tools.tools)
+            report['total_tools'] = len(self.available_tools.tools)
             
-            for tool in self.avaliable_tools.tools:
+            for tool in self.available_tools.tools:
                 tool_name = getattr(tool, 'name', 'unnamed')
                 
                 # Basic validation
@@ -290,8 +290,8 @@ When you need to use tools, please use the provided tool API. Don't pretend to c
         
         # Validate tool manager state after clear
         try:
-            if hasattr(self.avaliable_tools, 'tools'):
-                logger.debug(f"Agent cleared with {len(self.avaliable_tools.tools)} tools remaining")
+            if hasattr(self.available_tools, 'tools'):
+                logger.debug(f"Agent cleared with {len(self.available_tools.tools)} tools remaining")
             else:
                 logger.warning("ToolManager missing 'tools' attribute after clear")
         except Exception as e:

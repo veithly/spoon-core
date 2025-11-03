@@ -27,7 +27,7 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.avaliable_tools = ToolManager([])
+        self.available_tools = ToolManager([])
 
     async def initialize(self):
         logger.info("Initializing agent and loading tools...")
@@ -47,8 +47,8 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
         )
 
         crypto_tool = CryptoPowerDataCEXTool()
-        self.avaliable_tools = ToolManager([tavily_tool, crypto_tool])
-        logger.info(f"Available tools: {list(self.avaliable_tools.tool_map.keys())}")
+        self.available_tools = ToolManager([tavily_tool, crypto_tool])
+        logger.info(f"Available tools: {list(self.available_tools.tool_map.keys())}")
 
 async def main():
     print("--- SpoonOS Macro Analysis Agent Demo ---")

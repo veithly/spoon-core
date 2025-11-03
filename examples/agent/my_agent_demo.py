@@ -104,7 +104,7 @@ class MyInfoAgent(ToolCallAgent):
 
     max_steps: int = 5
 
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([
+    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([
         SmartWeatherTool(),
     ]))
 

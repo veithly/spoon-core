@@ -5,7 +5,7 @@ from logging import getLogger
 from typing import Any, List, Optional
 import logging
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from termcolor import colored
 
 from spoon_ai.agents.react import ReActAgent
@@ -28,7 +28,10 @@ class ToolCallAgent(ReActAgent):
     system_prompt: str = TOOLCALL_SYSTEM_PROMPT
     next_step_prompt: str = TOOLCALL_NEXT_STEP_PROMPT
 
-    avaliable_tools: ToolManager = Field(default_factory=ToolManager)
+    available_tools: ToolManager = Field(
+        default_factory=ToolManager,
+        validation_alias=AliasChoices("available_tools", "avaliable_tools"),
+    )
     special_tool_names: List[str] = Field(default_factory=list)
 
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO # type: ignore
@@ -92,14 +95,14 @@ class ToolCallAgent(ReActAgent):
 
 
 
-    # Compatibility alias: support both 'avaliable_tools' (existing) and 'available_tools' (docs/examples)
+    # Legacy compatibility alias for previous misspelling 'avaliable_tools'
     @property
-    def available_tools(self) -> ToolManager:  # type: ignore[override]
-        return self.avaliable_tools
+    def avaliable_tools(self) -> ToolManager:  # type: ignore[override]
+        return self.available_tools
 
-    @available_tools.setter
-    def available_tools(self, value: ToolManager) -> None:  # type: ignore[override]
-        self.avaliable_tools = value
+    @avaliable_tools.setter
+    def avaliable_tools(self, value: ToolManager) -> None:  # type: ignore[override]
+        self.available_tools = value
 
 
 
@@ -127,7 +130,7 @@ class ToolCallAgent(ReActAgent):
                 }
             }
 
-        all_tools = self.avaliable_tools.to_params()
+        all_tools = self.available_tools.to_params()
         mcp_tools_params = [convert_mcp_tool(tool) for tool in mcp_tools]
         unique_tools = {}
         for tool in all_tools + mcp_tools_params:
@@ -233,8 +236,8 @@ class ToolCallAgent(ReActAgent):
                         step_timeout = self._default_timeout
                         has_mcp_tools = False
                         try:
-                            if hasattr(self, 'avaliable_tools') and hasattr(self.avaliable_tools, 'tool_map'):
-                                has_mcp_tools = any(hasattr(t, 'mcp_config') for t in self.avaliable_tools.tool_map.values())
+                            if hasattr(self, 'available_tools') and hasattr(self.available_tools, 'tool_map'):
+                                has_mcp_tools = any(hasattr(t, 'mcp_config') for t in self.available_tools.tool_map.values())
                             if not has_mcp_tools:
                                 has_mcp_tools = bool(getattr(self, 'mcp_tools_cache', None))
                         except Exception:
@@ -338,12 +341,12 @@ class ToolCallAgent(ReActAgent):
             else:
                 return {}
 
-        if tool_call.function.name not in self.avaliable_tools.tool_map:
+        if tool_call.function.name not in self.available_tools.tool_map:
             kwargs = parse_tool_arguments(tool_call.function.arguments)
 
             # Prefer executing via an existing MCPTool instance if available
             try:
-                mcp_tools = [t for t in self.avaliable_tools.tool_map.values() if hasattr(t, 'mcp_config')]
+                mcp_tools = [t for t in self.available_tools.tool_map.values() if hasattr(t, 'mcp_config')]
                 # Direct name match to a specific MCPTool instance (post-rename)
                 direct_match = next((t for t in mcp_tools if getattr(t, 'name', None) == tool_call.function.name), None)
                 if direct_match is not None:
@@ -364,7 +367,7 @@ class ToolCallAgent(ReActAgent):
                 try:
                     actual_tool_name = self._map_mcp_tool_name(tool_call.function.name)
                     if not actual_tool_name:
-                        return f"MCP tool '{tool_call.function.name}' not found. Available tools: {list(self.avaliable_tools.tool_map.keys())}"
+                        return f"MCP tool '{tool_call.function.name}' not found. Available tools: {list(self.available_tools.tool_map.keys())}"
                     result = await self.call_mcp_tool(actual_tool_name, **kwargs)
                     return result
                 except Exception as e:
@@ -377,12 +380,12 @@ class ToolCallAgent(ReActAgent):
             return "Error: Invalid tool call"
 
         name = tool_call.function.name
-        if name not in self.avaliable_tools.tool_map:
+        if name not in self.available_tools.tool_map:
             return f"Error: Tool {name} not found"
 
         try:
             args = parse_tool_arguments(tool_call.function.arguments)
-            result = await self.avaliable_tools.execute(name=name, tool_input=args)
+            result = await self.available_tools.execute(name=name, tool_input=args)
 
             observation = (
                 f"Observed output of cmd {name} execution: {result}"

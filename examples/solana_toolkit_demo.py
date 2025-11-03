@@ -118,7 +118,7 @@ class SolanaToolkitDemo:
             Provide clear, informative responses based on the tool results.
             """
             max_steps: int = 5
-            avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
+            available_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
 
         agent = SolanaSpecialistAgent(
             llm=ChatBot(
