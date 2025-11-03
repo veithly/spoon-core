@@ -273,7 +273,7 @@ class TurnkeyAgentDemo:
         Always explain security implications and best practices.
         """
             max_steps: int = 20
-            avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
+            available_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
         
         agent = TurnkeySpecializedAgent(
             llm=ChatBot(
@@ -816,10 +816,10 @@ class TurnkeyAgentDemo:
             # Final summary
             self.print_section_header("Demo Completed Successfully")
             for agent_name, agent in self.agents.items():
-                tool_count = len(agent.avaliable_tools.tools)
+                tool_count = len(agent.available_tools.tools)
                 print(f"  ✅ {agent.agent_name}: {tool_count} specialized tools")
 
-            total_tools = sum(len(agent.avaliable_tools.tools) for agent in self.agents.values())
+            total_tools = sum(len(agent.available_tools.tools) for agent in self.agents.values())
             print(f"\n🔧 Total Tools Demonstrated: 16 Turnkey tools")
             print("   All demonstrations powered by AI agents with domain expertise")
             print("   Each agent provides intelligent analysis and secure operations")

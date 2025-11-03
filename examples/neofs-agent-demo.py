@@ -295,7 +295,7 @@ class NeoFSAgentDemo:
         Explain each step clearly.
         """
             max_steps: int = 20
-            avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
+            available_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
         
         agent = NeoFSSpecializedAgent(
             llm=ChatBot(
@@ -893,10 +893,10 @@ No bearer token needed for delete operation.""")
             # Final summary
             self.print_section_header("Demo Completed Successfully")
             for agent_name, agent in self.agents.items():
-                tool_count = len(agent.avaliable_tools.tools)
+                tool_count = len(agent.available_tools.tools)
                 print(f"  ✅ {agent.agent_name}: {tool_count} specialized tools")
 
-            total_tools = sum(len(agent.avaliable_tools.tools) for agent in self.agents.values())
+            total_tools = sum(len(agent.available_tools.tools) for agent in self.agents.values())
             print(f"\n🔧 Total Tools Demonstrated: 16 NeoFS tools")
             print("   All demonstrations powered by AI agents with domain expertise")
             print("   Each agent provides intelligent analysis and workflow orchestration")

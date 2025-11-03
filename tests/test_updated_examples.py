@@ -84,7 +84,7 @@ class TestUpdatedExamples:
         agent = ToolCallAgent(
             name="test_agent",
             llm=mock_chatbot_new,
-            avaliable_tools=ToolManager([])
+            available_tools=ToolManager([])
         )
         
         # Test agent run
@@ -101,7 +101,7 @@ class TestUpdatedExamples:
         agent = ToolCallAgent(
             name="test_agent",
             llm=mock_chatbot_legacy,
-            avaliable_tools=ToolManager([])
+            available_tools=ToolManager([])
         )
         
         # Test agent run

@@ -9,20 +9,20 @@ logger = logging.getLogger(__name__)
 class SpoonReactMCP(SpoonReactAI):
     name: str = "spoon_react_mcp"
     description: str = "A smart ai agent in neo blockchain with mcp"
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
+    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
 
     def __init__(self, tools=None, **kwargs):
         # Handle tools parameter
         if tools is not None:
             from spoon_ai.tools.tool_manager import ToolManager
-            kwargs['avaliable_tools'] = ToolManager(tools)
+            kwargs['available_tools'] = ToolManager(tools)
 
         # Initialize SpoonReactAI
         super().__init__(**kwargs)
         logger.info(f"Initialized SpoonReactMCP agent: {self.name}")
 
     async def list_mcp_tools(self):
-        """Return MCP tools from avaliable_tools manager"""
+        """Return MCP tools from available_tools manager"""
         # Import here to avoid circular imports
         from mcp.types import Tool as MCPTool
 
@@ -44,14 +44,14 @@ class SpoonReactMCP(SpoonReactAI):
                     logger.warning(f"Failed loading parameters for tool {tool.name}: {e}")
             return tool
 
-        mcp_tool_instances = [tool for tool in self.avaliable_tools.tool_map.values() if hasattr(tool, 'mcp_config')]
+        mcp_tool_instances = [tool for tool in self.available_tools.tool_map.values() if hasattr(tool, 'mcp_config')]
         loaded_tools = await asyncio.gather(*[load_tool_params(tool) for tool in mcp_tool_instances])
 
         # Some MCP tools may have updated their name after fetching server schema
         # Ensure the ToolManager reflects any dynamic renames
         try:
-            if hasattr(self, 'avaliable_tools') and hasattr(self.avaliable_tools, 'reindex'):
-                self.avaliable_tools.reindex()
+            if hasattr(self, 'available_tools') and hasattr(self.available_tools, 'reindex'):
+                self.available_tools.reindex()
         except Exception:
             pass
 

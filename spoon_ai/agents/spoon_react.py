@@ -45,7 +45,7 @@ class SpoonReactAI(ToolCallAgent):
     max_steps: int = 10
     tool_choice: str = "auto"
 
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
+    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
     llm: ChatBot = Field(default_factory=create_configured_chatbot)
 
     mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, NpxStdioTransport, FastMCPTransport, FastMCPStdioTransport, UvxStdioTransport, StdioTransport] = Field(default="mcp_server")
