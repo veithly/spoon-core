@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 REMOVE_ALL_MESSAGES = "__remove_all_messages__"
@@ -26,7 +26,5 @@ class RemoveMessage(BaseModel):
             raise ValueError("RemoveMessage does not support 'content'.")
         return values
 
-    class Config:
-        allow_population_by_field_name = True
-        extra = "allow"
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 

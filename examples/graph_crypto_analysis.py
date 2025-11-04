@@ -13,7 +13,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict, Set
 import aiohttp
 from dotenv import load_dotenv
@@ -294,7 +294,7 @@ Output in English, concise, bullet style."""
                 "price_change_24h": price_change_24h,
                 "indicators": kline_result,
                 "news": news_result,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             log = list(state.get("execution_log", []))
@@ -493,9 +493,9 @@ Keep it professional, actionable, and under 800 words."""
         state.update(base_state)
 
         compiled = self.graph.compile()
-        start = datetime.utcnow()
+        start = datetime.now(timezone.utc)
         result = await compiled.invoke(state, {"max_iterations": 100})
-        result["processing_time"] = (datetime.utcnow() - start).total_seconds()
+        result["processing_time"] = (datetime.now(timezone.utc) - start).total_seconds()
         try:
             result["execution_metrics"] = compiled.get_execution_metrics()
         except Exception:

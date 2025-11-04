@@ -135,7 +135,7 @@ class CustomProvider(LLMProviderInterface):
 ```python
 from spoon_ai.llm import ConfigurationManager
 
-config_manager = ConfigurationManager()
+config_manager = ConfigurationManager()  # environment-first configuration
 
 # Load provider configuration
 provider_config = config_manager.load_provider_config("openai")
@@ -328,7 +328,7 @@ response = llm.chat("Hello")
 
 **After:**
 ```python
-config_manager = ConfigurationManager()
+config_manager = ConfigurationManager()  # reads provider data from environment by default
 llm_manager = LLMManager(config_manager)
 response = await llm_manager.chat([
     {"role": "user", "content": "Hello"}
@@ -427,7 +427,7 @@ from spoon_ai.llm.providers import openai_provider  # This registers the provide
 ```python
 # Check configuration
 from spoon_ai.llm import ConfigurationManager
-config_manager = ConfigurationManager()
+config_manager = ConfigurationManager()  # refreshes from environment variables
 try:
     config = config_manager.load_provider_config("openai")
     print("Configuration valid")
