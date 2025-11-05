@@ -93,8 +93,8 @@ class ChatBot:
 
         Configuration Priority System:
         1. Full manual override (highest priority) - all params provided
-        2. Partial override with config fallback - llm_provider provided, api_key from config
-        3. Full config-based loading - only use_llm_manager=True, loads from config.json
+        2. Partial override with config fallback - llm_provider provided, credentials pulled from environment (or config files if explicitly enabled)
+        3. Full environment-based loading - only use_llm_manager=True, reads from environment variables
 
         Args:
             use_llm_manager: Enable LLM manager architecture (default: True)

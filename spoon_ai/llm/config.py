@@ -1,22 +1,13 @@
 """
-Configuration management for LLM providers with validation and loading capabilities.
+Configuration management for LLM providers using environment variables.
 """
 
 import os
-import json
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from pathlib import Path
 from logging import getLogger
 
 from .errors import ConfigurationError
-
-# Try to import toml, but make it optional
-try:
-    import toml
-    HAS_TOML = True
-except ImportError:
-    HAS_TOML = False
 
 # Try to import python-dotenv for .env file support
 try:
@@ -78,18 +69,11 @@ class ProviderConfig:
 
 
 class ConfigurationManager:
-    """Manages configuration loading and validation for LLM providers."""
+    """Manages environment-driven configuration for LLM providers."""
 
-    def __init__(self, config_path: Optional[str] = None):
-        """Initialize configuration manager.
-
-        Args:
-            config_path: Path to configuration file (optional)
-        """
-        # Load .env file if available
+    def __init__(self) -> None:
+        """Initialize configuration manager and load environment variables."""
         self._load_dotenv()
-
-        self.config_path = config_path or self._find_config_file()
         self._config_cache: Dict[str, Any] = {}
         self._provider_configs: Dict[str, ProviderConfig] = {}
         self._load_config()
@@ -110,57 +94,9 @@ class ConfigurationManager:
         else:
             logger.debug("python-dotenv not available, skipping .env file loading")
 
-    def _find_config_file(self) -> Optional[str]:
-        """Find configuration file in common locations.
-
-        Returns:
-            Optional[str]: Path to configuration file if found
-        """
-        possible_paths = [
-            "config.json",
-            "config/config.json",
-            "config.toml",
-            "config/config.toml",
-            os.path.expanduser("~/.spoon/config.json"),
-            os.path.expanduser("~/.spoon/config.toml")
-        ]
-
-        for path in possible_paths:
-            if os.path.exists(path):
-                logger.info(f"Found configuration file: {path}")
-                return path
-
-        logger.warning("No configuration file found, using environment variables only")
-        return None
-
     def _load_config(self) -> None:
-        """Load configuration from file."""
-        if not self.config_path or not os.path.exists(self.config_path):
-            logger.info("No configuration file available, using environment variables")
-            self._config_cache = {}
-            return
-
-        try:
-            if self.config_path.endswith('.json'):
-                with open(self.config_path, 'r') as f:
-                    self._config_cache = json.load(f)
-            elif self.config_path.endswith('.toml'):
-                if not HAS_TOML:
-                    raise ConfigurationError(
-                        "TOML configuration file found but 'toml' package not installed. "
-                        "Please install it with: pip install toml"
-                    )
-                self._config_cache = toml.load(self.config_path)
-            else:
-                raise ConfigurationError(f"Unsupported configuration file format: {self.config_path}")
-
-            logger.info(f"Loaded configuration from {self.config_path}")
-
-        except Exception as e:
-            raise ConfigurationError(
-                f"Failed to load configuration from {self.config_path}: {str(e)}",
-                context={"config_path": self.config_path, "error": str(e)}
-            )
+        """Initialize in-memory configuration cache (environment only)."""
+        self._config_cache = {}
 
     def load_provider_config(self, provider_name: str) -> ProviderConfig:
         """Load and validate provider configuration.
@@ -244,7 +180,7 @@ class ConfigurationManager:
                         config['api_key'] = api_key
                         logger.debug(f"Using API key from api_keys section for {provider_name}")
 
-            # Try global LLM config (lowest priority from config file)
+            # Try global LLM config (lowest priority from injected configuration)
             if 'llm' in self._config_cache:
                 llm_config = self._config_cache['llm']
                 if llm_config.get('provider') == provider_name:
@@ -383,20 +319,20 @@ class ConfigurationManager:
         Returns:
             str: Default provider name
         """
-        # 1. Check explicit configuration file setting
+        # 1. Check injected configuration data first
         if self._config_cache:
             # Check llm_settings.default_provider first (new format)
             if 'llm_settings' in self._config_cache:
                 provider = self._config_cache['llm_settings'].get('default_provider')
                 if provider:
-                    logger.info(f"Using provider from config file llm_settings: {provider}")
+                    logger.info(f"Using provider from injected configuration llm_settings: {provider}")
                     return provider
 
             # Check legacy llm.provider format
             if 'llm' in self._config_cache:
                 provider = self._config_cache['llm'].get('provider')
                 if provider:
-                    logger.info(f"Using provider from config file llm: {provider}")
+                    logger.info(f"Using provider from injected configuration llm: {provider}")
                     return provider
 
         # 2. Check environment variable for explicit preference
@@ -435,11 +371,19 @@ class ConfigurationManager:
         Returns:
             List[str]: List of provider names in fallback order
         """
-        # Check llm_settings.fallback_chain in config file
+        # Check environment variable override first
+        env_chain = os.getenv("LLM_FALLBACK_CHAIN")
+        if env_chain:
+            chain = [provider.strip() for provider in env_chain.split(",") if provider.strip()]
+            if chain:
+                logger.info(f"Using fallback chain from environment: {chain}")
+                return chain
+
+        # Support programmatic cache injections (used by higher-level tooling)
         if self._config_cache and 'llm_settings' in self._config_cache:
             fallback_chain = self._config_cache['llm_settings'].get('fallback_chain')
-            if fallback_chain:
-                logger.info(f"Using fallback chain from config file: {fallback_chain}")
+            if isinstance(fallback_chain, list) and fallback_chain:
+                logger.info(f"Using fallback chain from injected configuration: {fallback_chain}")
                 return fallback_chain
 
         # Fallback to intelligent selection based on available providers
@@ -460,7 +404,7 @@ class ConfigurationManager:
         """
         providers = set()
 
-        # From configuration file
+        # From injected configuration data
         if self._config_cache:
             if 'providers' in self._config_cache:
                 providers.update(self._config_cache['providers'].keys())
@@ -526,4 +470,4 @@ class ConfigurationManager:
         self._config_cache.clear()
         self._provider_configs.clear()
         self._load_config()
-        logger.info("Configuration reloaded")
+        logger.debug("Configuration cache refreshed from environment")

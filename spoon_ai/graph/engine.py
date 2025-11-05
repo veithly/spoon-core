@@ -8,7 +8,7 @@ import inspect
 import time
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal, Iterable
 from abc import ABC, abstractmethod
 
@@ -191,7 +191,7 @@ class RunningSummary:
     """Rolling conversation summary used by the summarisation node."""
 
     summary: str = ""
-    last_updated: datetime = field(default_factory=datetime.utcnow)
+    last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -211,7 +211,7 @@ class RunningSummary:
             elif isinstance(last_updated_val, str):
                 last_updated = datetime.fromisoformat(last_updated_val)
             else:
-                last_updated = datetime.utcnow()
+                last_updated = datetime.now(timezone.utc)
             return cls(summary=summary, last_updated=last_updated)
         return cls()
 
@@ -267,7 +267,7 @@ class SummarizationNode(BaseNode[Dict[str, Any]]):
 
         if summary_text:
             running_summary.summary = summary_text
-            running_summary.last_updated = datetime.utcnow()
+            running_summary.last_updated = datetime.now(timezone.utc)
             updates[self.summary_key] = running_summary.to_dict()
 
         if removals:

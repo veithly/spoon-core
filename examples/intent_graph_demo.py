@@ -153,6 +153,8 @@ TIMEFRAME_CONFIG: Dict[str, Dict[str, Any]] = {
 SHORT_TIMEFRAMES = {"15m", "30m", "1h"}
 MACRO_TIMEFRAMES = {"4h", "1d", "1w"}
 
+CURRENT_DIR = Path(__file__).parent
+
 MEMORY_FILE = CURRENT_DIR / "intent_graph_memory_new.json"
 
 
