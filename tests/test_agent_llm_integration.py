@@ -54,7 +54,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="test_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Test agent run
@@ -93,7 +93,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="test_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Test agent run
@@ -152,7 +152,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="legacy_agent",
             llm=mock_chatbot_legacy,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Test agent run
@@ -172,7 +172,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="error_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Test that error is handled appropriately
@@ -199,7 +199,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="streaming_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Test streaming functionality
@@ -222,7 +222,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="memory_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Run agent multiple times
@@ -255,7 +255,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="state_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Verify initial state
@@ -285,7 +285,7 @@ class TestAgentLLMIntegration:
         agent = ToolCallAgent(
             name="perf_agent",
             llm=mock_chatbot_manager,
-            avaliable_tools=tool_manager
+            available_tools=tool_manager
         )
         
         # Measure execution time

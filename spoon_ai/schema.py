@@ -81,12 +81,15 @@ ROLE_TYPE = Literal[ROLE_VALUES]  # type: ignore
 class Message(BaseModel):
     """Represents a chat message in the conversation"""
 
+    id: Optional[str] = Field(default=None)
     role: ROLE_TYPE = Field(...) # type: ignore
     content: Optional[str] = Field(default=None)
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     name: Optional[str] = Field(default=None)
     tool_call_id: Optional[str] = Field(default=None)
 
+class SystemMessage(Message):
+    role: ROLE_TYPE = Field(default=Role.SYSTEM.value)  # type: ignore
 
 TOOL_CHOICE_VALUES = tuple(choice.value for choice in ToolChoice)
 TOOL_CHOICE_TYPE = Literal[TOOL_CHOICE_VALUES] # type: ignore

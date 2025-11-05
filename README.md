@@ -41,7 +41,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 - **🔧 Custom Tool Ecosystem** - Modular tool system for easily extending agent capabilities
 - **💬 Multi-Model Support** - Compatible with major large language models including OpenAI, Anthropic, DeepSeek, and more Web3 fine-tuned LLM
 - **🏗️ Unified LLM Architecture** - Extensible provider system with automatic fallback, load balancing, and comprehensive monitoring
-- **📊 Enhanced Graph System** - LangGraph-inspired workflow orchestration with state management, multi-agent coordination, and human-in-the-loop patterns
+- **📊 Enhanced Graph System** - Workflow orchestration with state management, multi-agent coordination, and human-in-the-loop patterns
 - **⚡ Prompt Caching** - Intelligent caching for Anthropic models to reduce token costs and improve response times
 - **🌐 Web3-Native Interoperability** - Enables AI agents to communicate and coordinate across ecosystems via DID and ZKML-powered interoperability protocols.
 - **🔌 MCP (Model Context Protocol)** – Dynamic, protocol-driven tool invocation system. Agents can discover and execute tools at runtime over `stdio`, `http`, or `websocket` transports — without hardcoding or restarts.
@@ -344,7 +344,7 @@ result = client.sign_evm_transaction(
 
 # Sign a message
 result = client.sign_message(
-    sign_with="0x_your_wallet_address", 
+    sign_with="0x_your_wallet_address",
     message="Hello Turnkey!"
 )
 ```
@@ -468,9 +468,9 @@ openrouter_agent = SpoonReactAI(
 )
 ```
 
-## 📊 Enhanced Graph System
+## 📊 Graph System
 
-SpoonOS includes a powerful graph-based workflow orchestration system inspired by LangGraph, designed for building complex AI agent workflows with state management, multi-agent coordination, and human-in-the-loop patterns.
+SpoonOS includes a powerful graph-based workflow orchestration system, designed for building complex AI agent workflows with state management, multi-agent coordination, and human-in-the-loop patterns.
 
 ### Key Features
 

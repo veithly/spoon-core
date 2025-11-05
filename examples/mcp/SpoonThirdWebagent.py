@@ -58,7 +58,7 @@ class SpoonThirdWebMCP(SpoonReactAI, MCPClientMixin):
         Do not call any tool not listed here.
     """
 
-    avaliable_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
+    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         MCPClientMixin.__init__(self, mcp_transport=kwargs.get('mcp_transport', SSETransport("http://127.0.0.1:8765/sse")))

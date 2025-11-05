@@ -1,18 +1,67 @@
 from logging import getLogger
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any, Tuple
 import asyncio
 
 from spoon_ai.schema import Message, LLMResponse
 from spoon_ai.llm.manager import get_llm_manager
 from spoon_ai.llm.errors import ConfigurationError
+from spoon_ai.memory.short_term_manager import (
+    ShortTermMemoryManager,
+    TrimStrategy,
+    MessageTokenCounter,
+)
+from spoon_ai.memory.remove_message import (
+    RemoveMessage,
+    REMOVE_ALL_MESSAGES,
+)
 from pydantic import BaseModel, Field
 
 logger = getLogger(__name__)
 
 
+class ShortTermMemoryConfig(BaseModel):
+    """Configuration for short-term memory management."""
+    
+    enabled: bool = True
+    """Enable automatic short-term memory management."""
+    
+    max_tokens: int = 8000
+    """Maximum token count before triggering trimming/summarization."""
+    
+    strategy: str = "summarize"  # "summarize" or "trim"
+    """Strategy to use when exceeding max_tokens: 'summarize' or 'trim'."""
+    
+    messages_to_keep: int = 5
+    """Number of recent messages to keep when summarizing."""
+    
+    trim_strategy: TrimStrategy = TrimStrategy.FROM_END
+    """Trimming strategy when using 'trim' mode."""
+    
+    keep_system_messages: bool = True
+    """Always keep system messages during trimming."""
+    
+    auto_checkpoint: bool = False
+    """Automatically save checkpoints before trimming/summarization."""
+    
+    checkpoint_thread_id: Optional[str] = None
+    """Thread ID for checkpoint management."""
+    
+    summary_model: Optional[str] = None
+    """Model to use for summarization (defaults to ChatBot's model)."""
+
+
 class Memory(BaseModel):
+
     messages: List[Message] = Field(default_factory=list)
     max_messages: int = 100
+
+    model_config = {"arbitrary_types_allowed": True,}
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Enforce max messages limit when adding new messages
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages:]
 
     def add_message(self, message: Message) -> None:
         self.messages.append(message)
@@ -20,11 +69,10 @@ class Memory(BaseModel):
             self.messages.pop(0)
 
     def get_messages(self) -> List[Message]:
-        return self.messages
+        return self.messages.copy()
 
     def clear(self) -> None:
         self.messages.clear()
-
 
 def to_dict(message: Message) -> dict:
     messages = {"role": message.role}
@@ -40,7 +88,7 @@ def to_dict(message: Message) -> dict:
 
 
 class ChatBot:
-    def __init__(self, use_llm_manager: bool = True, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, **kwargs):
+    def __init__(self, use_llm_manager: bool = True, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_short_term_memory: bool = True,short_term_memory_config: Optional[Union[Dict[str, Any], ShortTermMemoryConfig]] = None,token_counter: Optional[MessageTokenCounter] = None, **kwargs):
         """Initialize ChatBot with hierarchical configuration priority system.
 
         Configuration Priority System:
@@ -54,6 +102,9 @@ class ChatBot:
             llm_provider: Provider name override
             api_key: API key override
             base_url: Base URL override
+            enable_short_term_memory: Enable short-term memory management (default: True)
+            short_term_memory_config: Configuration dict or ShortTermMemoryConfig instance
+            token_counter: Optional custom token counter instance
             **kwargs: Additional parameters
         """
         self.use_llm_manager = use_llm_manager
@@ -62,6 +113,8 @@ class ChatBot:
         self.api_key = api_key
         self.base_url = base_url
         self.llm_manager = None
+        self._latest_summary_text: Optional[str] = None
+        self._latest_removals: List[RemoveMessage] = []
 
         # Store original parameters for priority mode detection
         self._original_llm_provider = llm_provider
@@ -74,6 +127,32 @@ class ChatBot:
 
         # Initialize based on configuration priority
         self._initialize_with_priority()
+
+        # Initialize short-term memory configuration
+        self.short_term_memory_enabled = enable_short_term_memory
+        self.short_term_memory_manager = None
+        self.short_term_memory_config = None
+        
+        if enable_short_term_memory:
+            # Parse configuration
+            if isinstance(short_term_memory_config, ShortTermMemoryConfig):
+                self.short_term_memory_config = short_term_memory_config
+            elif isinstance(short_term_memory_config, dict):
+                self.short_term_memory_config = ShortTermMemoryConfig(**short_term_memory_config)
+            else:
+                self.short_term_memory_config = ShortTermMemoryConfig()
+            
+            # Initialize manager
+            self.short_term_memory_manager = ShortTermMemoryManager(
+                token_counter=token_counter
+            )
+            
+            logger.info(
+                f"Short-term memory manager enabled with config: "
+                f"max_tokens={self.short_term_memory_config.max_tokens}, "
+                f"strategy={self.short_term_memory_config.strategy}, "
+                f"messages_to_keep={self.short_term_memory_config.messages_to_keep}"
+            )
 
         logger.info(f"ChatBot initialized with LLM Manager architecture (priority mode: {self._get_priority_mode()})")
 
@@ -303,8 +382,95 @@ class ChatBot:
 
         return is_match
 
+    async def _apply_short_term_memory_strategy(
+        self,
+        messages: List[Message],
+        model: Optional[str] = None,
+    ) -> List[Message]:
+        """Apply short-term memory strategy before sending to LLM.
+        
+        This method is automatically called by ask() and ask_tool() when
+        short-term memory is enabled. It ensures messages stay within token limits.
+        
+        Args:
+            messages: Messages to process
+            model: Model name for token counting
+            
+        Returns:
+            List[Message]: Processed messages within token limits
+        """
+        if not self.short_term_memory_enabled or not self.short_term_memory_manager:
+            return messages
+        
+        config = self.short_term_memory_config
+        if not config or not config.enabled:
+            return messages
+        
+        # Use specified model or fall back to ChatBot's model
+        token_model = config.summary_model or model or self.model_name
+        
+        # Save checkpoint if enabled
+        if config.auto_checkpoint and config.checkpoint_thread_id:
+            try:
+                self.short_term_memory_manager.save_checkpoint(
+                    thread_id=config.checkpoint_thread_id,
+                    messages=messages,
+                    metadata={"pre_strategy": True}
+                )
+                logger.debug(f"Auto-checkpoint saved for thread {config.checkpoint_thread_id}")
+            except Exception as e:
+                logger.warning(f"Failed to save auto-checkpoint: {e}")
+        
+        # Apply strategy based on configuration
+        try:
+            if config.strategy == "summarize":
+                llm_ready_messages, removals, summary = await self.short_term_memory_manager.summarize_messages(
+                    messages=messages,
+                    max_tokens_before_summary=config.max_tokens,
+                    messages_to_keep=config.messages_to_keep,
+                    summary_model=token_model,
+                    llm_manager=self.llm_manager,
+                    existing_summary=self._latest_summary_text or "",
+                )
+
+                if summary:
+                    logger.info("Short-term memory: Generated summary of conversation history")
+                    self._latest_summary_text = summary
+                if removals:
+                    logger.info("Short-term memory: Emitted %d removal directives", len(removals))
+                    self._latest_removals = removals
+                else:
+                    self._latest_removals = []
+
+                processed_messages = llm_ready_messages or messages
+
+            elif config.strategy == "trim":
+                processed_messages = await self.short_term_memory_manager.trim_messages(
+                    messages=messages,
+                    max_tokens=config.max_tokens,
+                    strategy=config.trim_strategy,
+                    keep_system=config.keep_system_messages,
+                    model=token_model
+                )
+                logger.info(
+                    f"Short-term memory: Trimmed {len(messages)} -> {len(processed_messages)} messages"
+                )
+            else:
+                logger.warning(f"Unknown short-term memory strategy: {config.strategy}")
+                processed_messages = messages
+
+            return processed_messages
+
+        except Exception as e:
+            logger.error(f"Failed to apply short-term memory strategy: {e}", exc_info=True)
+            # Return original messages on error to avoid breaking the flow
+            return messages
+
     async def ask(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None) -> str:
-        """Ask method using the LLM manager architecture."""
+        """Ask method using the LLM manager architecture.
+        
+        Automatically applies short-term memory strategy if enabled.
+        """
         # Convert messages to the expected format
         formatted_messages = []
         if system_msg:
@@ -317,17 +483,26 @@ class ChatBot:
                 formatted_messages.append(message)
             else:
                 raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Apply short-term memory strategy before sending to LLM
+        processed_messages = await self._apply_short_term_memory_strategy(
+            formatted_messages,
+            model=self.model_name
+        )
 
         # Use LLM manager for the request
         response = await self.llm_manager.chat(
-            messages=formatted_messages,
+            messages=processed_messages,
             provider=self.llm_provider
         )
 
         return response.content
 
     async def ask_tool(self, messages: List[Union[dict, Message]], system_msg: Optional[str] = None, tools: Optional[List[dict]] = None, tool_choice: Optional[str] = None, output_queue: Optional[asyncio.Queue] = None, **kwargs) -> LLMResponse:
-        """Ask tool method using the LLM manager architecture."""
+        """Ask tool method using the LLM manager architecture.
+        
+        Automatically applies short-term memory strategy if enabled.
+        """
         # Convert messages to the expected format
         formatted_messages = []
         if system_msg:
@@ -340,13 +515,168 @@ class ChatBot:
                 formatted_messages.append(message)
             else:
                 raise ValueError(f"Invalid message type: {type(message)}")
+        
+        # Apply short-term memory strategy before sending to LLM
+        processed_messages = await self._apply_short_term_memory_strategy(
+            formatted_messages,
+            model=self.model_name
+        )
 
         # Use LLM manager for the tool request
         response = await self.llm_manager.chat_with_tools(
-            messages=formatted_messages,
+            messages=processed_messages,
             tools=tools or [],
             provider=self.llm_provider,
             **kwargs
         )
 
         return response
+
+    # Short-term memory management convenience methods
+
+    async def trim_messages(
+        self,
+        messages: List[Message],
+        max_tokens: int,
+        strategy: TrimStrategy = TrimStrategy.FROM_END,
+        keep_system: bool = True,
+        model: Optional[str] = None,
+    ) -> List[Message]:
+        """Trim messages to stay within the token budget.
+
+        Args:
+            messages: List of messages to trim
+            max_tokens: Maximum token count to retain
+            strategy: Trimming strategy (from_start or from_end)
+            keep_system: Whether to always keep the leading system message
+            model: Model name for token counting
+
+        Returns:
+            List[Message]: Trimmed messages list
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        return await self.short_term_memory_manager.trim_messages(
+            messages, max_tokens, strategy, keep_system, model
+        )
+
+    def remove_message(self, message_id: str, **kwargs: Any) -> "RemoveMessage":
+        """Construct a removal instruction for the message with the given ID."""
+        if not message_id:
+            raise ValueError("message_id must be provided for removal.")
+        return RemoveMessage(id=message_id, **kwargs)
+
+    def remove_all_messages(self) -> "RemoveMessage":
+        """Construct a removal instruction that clears the entire history."""
+        return RemoveMessage(id=REMOVE_ALL_MESSAGES)
+
+    async def summarize_messages(
+        self,
+        messages: List[Message],
+        max_tokens_before_summary: int,
+        messages_to_keep: int = 5,
+        summary_model: Optional[str] = None,
+        existing_summary: str = "",
+    ) -> Tuple[List[Message], List[RemoveMessage], Optional[str]]:
+        """Summarize earlier messages and emit removal directives.
+
+        Returns a tuple ``(messages_for_llm, removals, summary_text)`` where
+        ``messages_for_llm`` are the messages that should be sent to the language
+        model for the next turn, ``removals`` contains ``RemoveMessage``
+        directives that should be applied to the stored history, and
+        ``summary_text`` is the newly generated summary (if any).
+
+        Args:
+            messages: List of messages to process
+            max_tokens_before_summary: Token threshold for triggering summary
+            messages_to_keep: Number of recent messages to keep uncompressed
+            summary_model: Model to use for summarization
+            existing_summary: Previously stored summary text
+
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        return await self.short_term_memory_manager.summarize_messages(
+            messages=messages,
+            max_tokens_before_summary=max_tokens_before_summary,
+            messages_to_keep=messages_to_keep,
+            summary_model=summary_model,
+            llm_manager=self.llm_manager,
+            existing_summary=existing_summary,
+        )
+
+    @property
+    def latest_summary(self) -> Optional[str]:
+        """Return the most recent summary generated by short-term memory."""
+        return self._latest_summary_text
+
+    @property
+    def latest_removals(self) -> List[RemoveMessage]:
+        """Return the most recent removal directives emitted by summarization."""
+        return list(self._latest_removals)
+    def save_checkpoint(
+        self,
+        thread_id: str,
+        messages: List[Message],
+        metadata: Optional[dict] = None,
+    ) -> str:
+        """Save current message state to checkpoint.
+
+        Args:
+            thread_id: Thread identifier
+            messages: Messages to save
+            metadata: Optional metadata to store
+
+        Returns:
+            str: Checkpoint ID
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        return self.short_term_memory_manager.save_checkpoint(thread_id, messages, metadata)
+
+    def restore_checkpoint(
+        self,
+        thread_id: str,
+        checkpoint_id: Optional[str] = None,
+    ) -> Optional[List[Message]]:
+        """Restore messages from checkpoint.
+
+        Args:
+            thread_id: Thread identifier
+            checkpoint_id: Optional specific checkpoint ID
+
+        Returns:
+            Optional[List[Message]]: Restored messages, or None if checkpoint not found
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        return self.short_term_memory_manager.restore_checkpoint(thread_id, checkpoint_id)
+
+    def list_checkpoints(self, thread_id: str) -> List[dict]:
+        """List all checkpoints for a thread.
+
+        Args:
+            thread_id: Thread identifier
+
+        Returns:
+            List[dict]: List of checkpoint metadata
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        return self.short_term_memory_manager.list_checkpoints(thread_id)
+
+    def clear_checkpoints(self, thread_id: str) -> None:
+        """Clear all checkpoints for a thread.
+
+        Args:
+            thread_id: Thread identifier
+        """
+        if not self.short_term_memory_manager:
+            raise RuntimeError("Short-term memory manager not enabled")
+
+        self.short_term_memory_manager.clear_checkpoints(thread_id)

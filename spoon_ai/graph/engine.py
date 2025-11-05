@@ -1,5 +1,5 @@
 """
-Graph engine: StateGraph, CompiledGraph, and interrupt API - LangGraph style implementation.
+Graph engine: StateGraph, CompiledGraph, and interrupt API implementation.
 """
 import asyncio
 import logging
@@ -7,8 +7,9 @@ import uuid
 import inspect
 import time
 import re
-from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Union, Pattern, TypeVar, Generic, TypedDict, Literal, Iterable
 from abc import ABC, abstractmethod
 
 from .exceptions import (
@@ -17,6 +18,7 @@ from .exceptions import (
     GraphConfigurationError,
     EdgeRoutingError,
     InterruptError,
+    CheckpointError,
 )
 from .types import (
     NodeContext,
@@ -28,9 +30,11 @@ from .types import (
 )
 from .reducers import (
     merge_dicts,
+    add_messages,
 )
 from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
+from spoon_ai.schema import Message
 from .config import GraphConfig, ParallelGroupConfig, ParallelRetryPolicy, RouterConfig
 
 logger = logging.getLogger(__name__)
@@ -39,13 +43,11 @@ logger = logging.getLogger(__name__)
 State = TypeVar('State')
 ConfigurableFieldSpec = Dict[str, Any]
 
-# Special nodes in LangGraph style
 START = "__start__"
 END = "__end__"
 
-
 class BaseNode(ABC, Generic[State]):
-    """Base class for all graph nodes - LangGraph style"""
+    """Base class for all graph nodes"""
 
     def __init__(self, name: str):
         self.name = name
@@ -60,7 +62,7 @@ class BaseNode(ABC, Generic[State]):
 
 
 class RunnableNode(BaseNode[State]):
-    """Runnable node that wraps a function - LangGraph style"""
+    """Runnable node that wraps a function"""
 
     def __init__(self, name: str, func: Callable[[State], Any]):
         super().__init__(name)
@@ -90,7 +92,7 @@ class RunnableNode(BaseNode[State]):
 
 
 class ToolNode(BaseNode[State]):
-    """Tool node for executing tools - LangGraph style"""
+    """Tool node for executing tools"""
 
     def __init__(self, name: str, tools: List[Any]):
         super().__init__(name)
@@ -138,7 +140,7 @@ class ToolNode(BaseNode[State]):
 
 
 class ConditionNode(BaseNode[State]):
-    """Conditional node for routing decisions - LangGraph style"""
+    """Conditional node for routing decisions"""
 
     def __init__(self, name: str, condition_func: Callable[[State], str]):
         super().__init__(name)
@@ -184,20 +186,108 @@ class RouteRule:
         return False
 
 
-class StateGraph(Generic[State]):
-    """StateGraph implementation following LangGraph patterns"""
+@dataclass
+class RunningSummary:
+    """Rolling conversation summary used by the summarisation node."""
 
+    summary: str = ""
+    last_updated: datetime = field(default_factory=datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "summary": self.summary,
+            "last_updated": self.last_updated.isoformat(),
+        }
+
+    @classmethod
+    def from_value(cls, value: Any) -> "RunningSummary":
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            summary = value.get("summary", "")
+            last_updated_val = value.get("last_updated")
+            if isinstance(last_updated_val, datetime):
+                last_updated = last_updated_val
+            elif isinstance(last_updated_val, str):
+                last_updated = datetime.fromisoformat(last_updated_val)
+            else:
+                last_updated = datetime.utcnow()
+            return cls(summary=summary, last_updated=last_updated)
+        return cls()
+
+
+class SummarizationNode(BaseNode[Dict[str, Any]]):
+    """Node that summarises conversation history before model invocation."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        llm_manager,
+        max_tokens: int,
+        messages_to_keep: int = 5,
+        summary_model: Optional[str] = None,
+        summary_key: str = "summary_context",
+        output_messages_key: str = "llm_messages",
+        manager: Optional["ShortTermMemoryManager"] = None,
+    ) -> None:
+        super().__init__(name)
+        self.llm_manager = llm_manager
+        self.max_tokens = max_tokens
+        self.messages_to_keep = messages_to_keep
+        self.summary_model = summary_model
+        self.summary_key = summary_key
+        self.output_messages_key = output_messages_key
+        if manager is None:
+            from spoon_ai.memory.short_term_manager import (
+                ShortTermMemoryManager,
+                MessageTokenCounter,
+            )
+
+            manager = ShortTermMemoryManager(token_counter=MessageTokenCounter())
+        self.manager = manager
+
+    async def __call__(self, state: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        messages: List[Message] = state.get("messages", [])
+        if not messages:
+            return {self.output_messages_key: []}
+
+        running_summary = RunningSummary.from_value(state.get(self.summary_key))
+
+        llm_messages, removals, summary_text = await self.manager.summarize_messages(
+            messages=messages,
+            max_tokens_before_summary=self.max_tokens,
+            messages_to_keep=self.messages_to_keep,
+            summary_model=self.summary_model,
+            llm_manager=self.llm_manager,
+            existing_summary=running_summary.summary,
+        )
+
+        updates: Dict[str, Any] = {self.output_messages_key: llm_messages}
+
+        if summary_text:
+            running_summary.summary = summary_text
+            running_summary.last_updated = datetime.utcnow()
+            updates[self.summary_key] = running_summary.to_dict()
+
+        if removals:
+            updates.setdefault("messages", removals)
+
+        return updates
+
+
+class StateGraph(Generic[State]):
     def __init__(self, state_schema: type, checkpointer: Optional[Any] = None, config_schema: Optional[type] = None):
         self.state_schema = state_schema
         self.config_schema = config_schema
         # Default to in-memory checkpointer if none provided
         self.checkpointer = checkpointer or InMemoryCheckpointer()
 
-        # Node storage - LangGraph style
+        # Node storage
         self.nodes: Dict[str, BaseNode[State]] = {}
         self.node_functions: Dict[str, Callable] = {}  # For backward compatibility
 
-        # Edge management - LangGraph style
+        # Edge management
         self.edges: Dict[str, List[tuple]] = {}  # (end_node, condition_func)
         self.conditional_edges: Dict[str, Dict[str, Callable[[State], bool]]] = {}
 
@@ -245,7 +335,7 @@ class StateGraph(Generic[State]):
         return self
 
     def add_node(self, node_name: str, node: Union[BaseNode[State], Callable[[State], Any]]) -> "StateGraph":
-        """Add a node to the graph - LangGraph style"""
+        """Add a node to the graph"""
         if node_name in [START, END]:
             raise GraphConfigurationError(f"Node name '{node_name}' is reserved", component="node")
 
@@ -277,7 +367,7 @@ class StateGraph(Generic[State]):
 
     def add_conditional_edges(self, start_node: str, condition: Callable[[State], str],
                              path_map: Dict[str, str]) -> "StateGraph":
-        """Add conditional edges - LangGraph style"""
+        """Add conditional edges"""
         if start_node not in self.nodes and start_node != START:
             raise GraphConfigurationError(f"Start node '{start_node}' does not exist", component="conditional_edge")
 
@@ -292,19 +382,19 @@ class StateGraph(Generic[State]):
         return self
 
     def set_entry_point(self, node_name: str) -> "StateGraph":
-        """Set the entry point - LangGraph style"""
+        """Set the entry point"""
         if node_name not in self.nodes and node_name != START:
             raise GraphConfigurationError(f"Entry point node '{node_name}' does not exist", component="entry_point")
         self._entry_point = node_name
         return self
 
     def add_tool_node(self, tools: List[Any], name: str = "tools") -> "StateGraph":
-        """Add a tool node - LangGraph style"""
+        """Add a tool node"""
         tool_node = ToolNode(name, tools)
         return self.add_node(name, tool_node)
 
     def add_conditional_node(self, condition_func: Callable[[State], str], name: str = "condition") -> "StateGraph":
-        """Add a conditional node - LangGraph style"""
+        """Add a conditional node"""
         condition_node = ConditionNode(name, condition_func)
         return self.add_node(name, condition_node)
 
@@ -354,6 +444,35 @@ class StateGraph(Generic[State]):
         self.routing_rules[source_node].sort(key=lambda r: r.priority, reverse=True)
 
         return self
+
+    def get_state(self, config: Optional[Dict[str, Any]] = None) -> Optional[StateSnapshot]:
+        """Fetch the latest (or specified) checkpoint snapshot for a thread."""
+        if not self.checkpointer:
+            raise CheckpointError("No checkpointer configured for this graph", operation="get_state")
+
+        config = config or {}
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+        checkpoint_id = configurable.get("checkpoint_id")
+
+        if not thread_id:
+            raise CheckpointError("thread_id is required to fetch state", operation="get_state")
+
+        return self.checkpointer.get_checkpoint(thread_id, checkpoint_id)
+
+    def get_state_history(self, config: Optional[Dict[str, Any]] = None) -> Iterable[StateSnapshot]:
+        """Return all checkpoints for the given thread, ordered by creation time."""
+        if not self.checkpointer:
+            raise CheckpointError("No checkpointer configured for this graph", operation="state_history")
+
+        config = config or {}
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+
+        if not thread_id:
+            raise CheckpointError("thread_id is required to fetch state history", operation="state_history")
+
+        return list(self.checkpointer.list_checkpoints(thread_id))
 
     def add_pattern_routing(self, source_node: str, pattern: str, target_node: str,
                            priority: int = 0) -> "StateGraph":
@@ -477,7 +596,7 @@ class StateGraph(Generic[State]):
         return self
 
     def compile(self, checkpointer: Optional[Any] = None) -> "CompiledGraph":
-        """Compile the graph - LangGraph style"""
+        """Compile the graph"""
         errors: List[str] = []
 
         if not self._entry_point:
@@ -509,7 +628,7 @@ class StateGraph(Generic[State]):
 
 
 class CompiledGraph(Generic[State]):
-    """Compiled graph for execution - LangGraph style"""
+    """Compiled graph for execution"""
 
     def __init__(self, graph: StateGraph[State], checkpointer: Optional[Any] = None):
         self.graph = graph
@@ -577,7 +696,7 @@ class CompiledGraph(Generic[State]):
         graph_cfg = self.graph.config if isinstance(self.graph.config, GraphConfig) else GraphConfig()
         router_cfg: RouterConfig = graph_cfg.router
 
-        # Priority 1: Explicit edges (LangGraph-style)
+        # Priority 1: Explicit edges
         logger.info("Checking explicit edges...")
         explicit_target = self._find_edge_target(current_node, state)
         if explicit_target:
@@ -768,6 +887,9 @@ class CompiledGraph(Generic[State]):
         for key, value in updates.items():
             if key not in state:
                 state[key] = value
+            elif key == "messages" and isinstance(value, list):
+                existing = state.get(key) or []
+                state[key] = add_messages(existing, value)
             elif isinstance(state[key], dict) and isinstance(value, dict):
                 # Deep merge for dicts
                 self._deep_merge(state[key], value)
@@ -795,7 +917,7 @@ class CompiledGraph(Generic[State]):
                 if edge_condition is None and isinstance(edge_target, str):
                     return edge_target
 
-                # Case B: LangGraph-style conditional edges stored as (condition_func, path_map)
+                # Case B: conditional edges stored as (condition_func, path_map)
                 if callable(edge_target) and isinstance(edge_condition, dict):
                     try:
                         condition_key = edge_target(state)
@@ -1072,6 +1194,9 @@ class CompiledGraph(Generic[State]):
             # merge dicts deeply, else replace
             if isinstance(state[key], dict) and isinstance(value, dict):
                 state[key] = merge_dicts(state[key], value)
+            elif key == "messages" and isinstance(value, list):
+                existing = state.get(key) or []
+                state[key] = add_messages(existing, value)
             elif isinstance(state[key], list) and isinstance(value, list):
                 # Cap list growth to avoid MemoryError
                 combined = state[key] + value
@@ -1079,4 +1204,3 @@ class CompiledGraph(Generic[State]):
                 state[key] = combined[-100:]
             else:
                 state[key] = value
-
