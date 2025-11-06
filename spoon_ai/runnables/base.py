@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import queue
 import threading
 from abc import ABC, abstractmethod
@@ -10,6 +11,8 @@ from uuid import uuid4
 from spoon_ai.callbacks.base import BaseCallbackHandler
 from spoon_ai.callbacks.manager import CallbackManager
 from spoon_ai.runnables.events import StreamEventBuilder
+
+logger = logging.getLogger(__name__)
 
 Input = TypeVar("Input")
 Output = TypeVar("Output")
