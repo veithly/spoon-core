@@ -27,13 +27,61 @@ class X402ClientConfig(BaseModel):
 
     private_key: Optional[str] = Field(default=None, description="0x-prefixed hex private key")
     private_key_env: str = Field(default="X402_AGENT_PRIVATE_KEY")
+    use_turnkey: bool = Field(default=False, description="Whether to use Turnkey for signing instead of a local private key")
+    turnkey_sign_with: Optional[str] = Field(default=None, description="Turnkey signing identity (address, wallet ID, or key ID)")
+    turnkey_address: Optional[str] = Field(default=None, description="Address that should appear as the payer when signing via Turnkey")
 
     @classmethod
     def from_raw(cls, raw: Optional[Dict[str, Any]] = None) -> "X402ClientConfig":
         raw = raw or {}
+
         private_key_env = raw.get("private_key_env") or "X402_AGENT_PRIVATE_KEY"
-        private_key = raw.get("private_key") or os.getenv(private_key_env) or os.getenv("X402_AGENT_PRIVATE_KEY")
-        return cls(private_key=private_key, private_key_env=private_key_env)
+        env_private_key = os.getenv(private_key_env)
+        if env_private_key in (None, ""):
+            env_private_key = os.getenv("X402_AGENT_PRIVATE_KEY")
+        if env_private_key in (None, ""):
+            env_private_key = os.getenv("PRIVATE_KEY")
+
+        private_key = raw.get("private_key") or env_private_key
+        if isinstance(private_key, str) and not private_key.strip():
+            private_key = None
+
+        def _to_bool(value: Any) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "on"}
+            return False
+        raw_toggle = raw.get("use_turnkey")
+        env_toggle = os.getenv("X402_USE_TURNKEY")
+        if env_toggle in (None, ""):
+            env_toggle = os.getenv("TURNKEY_ENABLED")
+        if raw_toggle is not None:
+            use_turnkey = _to_bool(raw_toggle)
+        else:
+            use_turnkey = _to_bool(env_toggle)
+        turnkey_sign_with = (
+            raw.get("turnkey_sign_with")
+            or os.getenv("X402_TURNKEY_SIGN_WITH")
+            or os.getenv("TURNKEY_SIGN_WITH")
+        )
+        turnkey_address = (
+            raw.get("turnkey_address")
+            or os.getenv("X402_TURNKEY_ADDRESS")
+            or os.getenv("TURNKEY_ADDRESS")
+            or turnkey_sign_with
+        )
+
+        if not use_turnkey and not private_key and (turnkey_sign_with or os.getenv("TURNKEY_SIGN_WITH")):
+            use_turnkey = True
+
+        return cls(
+            private_key=private_key,
+            private_key_env=private_key_env,
+            use_turnkey=use_turnkey,
+            turnkey_sign_with=turnkey_sign_with,
+            turnkey_address=turnkey_address,
+        )
 
 
 class X402Settings(BaseModel):

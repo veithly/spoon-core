@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal, ROUND_DOWN
+import secrets
+import time
 from typing import Any, Dict, Optional
 
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
-from x402.clients.base import decode_x_payment_response, x402Client
+from x402.chains import get_chain_id
+from x402.clients.base import decode_x_payment_response
 from x402.common import x402_VERSION
 from x402.encoding import safe_base64_decode
+from x402.exact import encode_payment, prepare_payment_header, sign_payment_header
 from x402.paywall import get_paywall_html, is_browser_request
 from x402.types import (
     ListDiscoveryResourcesRequest,
     ListDiscoveryResourcesResponse,
     PaymentPayload,
     PaymentRequirements,
-    VerifyResponse,
     SettleResponse,
+    VerifyResponse,
     x402PaymentRequiredResponse,
 )
 
@@ -48,6 +52,7 @@ class X402PaymentService:
         self.settings = settings or X402Settings.load()
         self.facilitator = facilitator or X402FacilitatorClient(self.settings.facilitator_url)
         self._client_account: Optional[LocalAccount] = None
+        self._turnkey_client = None
 
     # ------------------------------------------------------------------ #
     # Configuration helpers
@@ -230,11 +235,15 @@ class X402PaymentService:
     # Client-side helpers
     # ------------------------------------------------------------------ #
     def _get_client_account(self) -> LocalAccount:
+        if self.settings.client.use_turnkey:
+            raise X402ConfigurationError(
+                "Turnkey signing is enabled; local account access is not available."
+            )
         if self._client_account:
             return self._client_account
         if not self.settings.client.private_key:
             raise X402ConfigurationError(
-                "X402 client private key not configured. Set X402_AGENT_PRIVATE_KEY or configure x402.client.private_key."
+                "X402 client private key not configured. Set PRIVATE_KEY, X402_AGENT_PRIVATE_KEY, or configure x402.client.private_key."
             )
         self._client_account = Account.from_key(self.settings.client.private_key)  # type: ignore[arg-type]
         return self._client_account
@@ -252,9 +261,179 @@ class X402PaymentService:
                 raise X402PaymentError(
                     f"Payment requirement exceeds allowed maximum: required {required_value}, max_value {max_value}."
                 )
+
+        if self.settings.client.use_turnkey:
+            return self._build_turnkey_payment_header(requirements)
+
         account = self._get_client_account()
-        client = x402Client(account=account, max_value=max_value)
-        return client.create_payment_header(requirements)
+        return self._build_local_payment_header(account, requirements)
+
+    # ------------------------------------------------------------------ #
+    # Turnkey helpers
+    # ------------------------------------------------------------------ #
+    def _get_turnkey_client(self):
+        if not self.settings.client.use_turnkey:
+            raise X402ConfigurationError("Turnkey mode is disabled.")
+        if self._turnkey_client is None:
+            try:
+                from spoon_ai.turnkey import Turnkey
+            except ImportError as exc:  # pragma: no cover - optional dependency
+                raise X402ConfigurationError(f"Turnkey support requires spoon_ai.turnkey: {exc}") from exc
+            try:
+                self._turnkey_client = Turnkey()
+            except Exception as exc:
+                raise X402ConfigurationError(f"Failed to initialize Turnkey client: {exc}") from exc
+        return self._turnkey_client
+
+    def _build_turnkey_payment_header(self, requirements: PaymentRequirements) -> str:
+        if not self.settings.client.turnkey_sign_with:
+            raise X402ConfigurationError(
+                "Turnkey signing identity missing. Set X402_TURNKEY_SIGN_WITH or TURNKEY_SIGN_WITH."
+            )
+        if not self.settings.client.turnkey_address:
+            raise X402ConfigurationError(
+                "Turnkey payer address missing. Set X402_TURNKEY_ADDRESS or TURNKEY_ADDRESS."
+            )
+
+        header, nonce_bytes = self._prepare_unsigned_header(self.settings.client.turnkey_address, requirements)
+        typed_data = self._build_typed_data(requirements, header, nonce_bytes)
+
+        response = self._get_turnkey_client().sign_typed_data(
+            sign_with=self.settings.client.turnkey_sign_with,
+            typed_data=typed_data,
+        )
+        signature = self._extract_turnkey_signature(response)
+        if not signature:
+            raise X402PaymentError("Turnkey did not return a usable signature payload.")
+
+        header["payload"]["signature"] = signature
+        header["payload"]["authorization"]["nonce"] = "0x" + nonce_bytes.hex()
+        return encode_payment(header)
+
+    def _build_local_payment_header(
+        self,
+        account: LocalAccount,
+        requirements: PaymentRequirements,
+    ) -> str:
+        pay_to = requirements.pay_to or self.settings.pay_to
+        if not pay_to:
+            raise X402PaymentError("Payment requirements do not include a pay_to address.")
+
+        unsigned_header = {
+            "x402Version": x402_VERSION,
+            "scheme": requirements.scheme,
+            "network": requirements.network,
+            "payload": {
+                "signature": None,
+                "authorization": {
+                    "from": account.address,
+                    "to": pay_to,
+                    "value": requirements.max_amount_required,
+                    "validAfter": str(int(time.time()) - 60),
+                    "validBefore": str(int(time.time()) + requirements.max_timeout_seconds),
+                    "nonce": secrets.token_hex(32),
+                },
+            },
+        }
+
+        return sign_payment_header(account, requirements, unsigned_header)
+
+    def _prepare_unsigned_header(
+        self,
+        from_address: str,
+        requirements: PaymentRequirements,
+    ) -> tuple[dict[str, Any], bytes]:
+        header = prepare_payment_header(from_address, x402_VERSION, requirements)
+        auth = header["payload"]["authorization"]
+        nonce_value = auth.get("nonce")
+        if isinstance(nonce_value, bytes):
+            nonce_bytes = nonce_value
+        elif isinstance(nonce_value, str):
+            cleaned = nonce_value[2:] if nonce_value.startswith("0x") else nonce_value
+            nonce_bytes = bytes.fromhex(cleaned)
+        else:
+            raise X402PaymentError("Unsupported nonce format in unsigned header.")
+        return header, nonce_bytes
+
+    def _build_typed_data(
+        self,
+        requirements: PaymentRequirements,
+        header: dict[str, Any],
+        nonce_bytes: bytes,
+    ) -> Dict[str, Any]:
+        auth = header["payload"]["authorization"]
+        extras = requirements.extra or {}
+        chain_extra = extras.get("chainId")
+        if chain_extra is not None:
+            chain_id = int(chain_extra, 0) if isinstance(chain_extra, str) else int(chain_extra)
+        else:
+            chain_id = int(get_chain_id(requirements.network))
+
+        domain = {
+            "name": extras.get("name") or self.settings.asset_name,
+            "version": extras.get("version") or self.settings.asset_version,
+            "chainId": chain_id,
+            "verifyingContract": requirements.asset,
+        }
+
+        message = {
+            "from": auth["from"],
+            "to": auth["to"],
+            "value": int(auth["value"]),
+            "validAfter": int(auth["validAfter"]),
+            "validBefore": int(auth["validBefore"]),
+            "nonce": "0x" + nonce_bytes.hex(),
+        }
+
+        return {
+            "types": {
+                "TransferWithAuthorization": [
+                    {"name": "from", "type": "address"},
+                    {"name": "to", "type": "address"},
+                    {"name": "value", "type": "uint256"},
+                    {"name": "validAfter", "type": "uint256"},
+                    {"name": "validBefore", "type": "uint256"},
+                    {"name": "nonce", "type": "bytes32"},
+                ]
+            },
+            "primaryType": "TransferWithAuthorization",
+            "domain": domain,
+            "message": message,
+        }
+
+    def _extract_turnkey_signature(self, response: Dict[str, Any]) -> Optional[str]:
+        activity = response.get("activity", {})
+        result = activity.get("result", {})
+        payload = result.get("signRawPayloadResult") or result.get("signTransactionResult") or {}
+        signatures = payload.get("signatures")
+        if not signatures:
+            return None
+        signature_info = signatures[0]
+        signature = signature_info.get("signature")
+        if signature:
+            return signature if signature.startswith("0x") else f"0x{signature}"
+
+        r = signature_info.get("r")
+        s = signature_info.get("s")
+        v = signature_info.get("v")
+        if not all([r, s, v]):
+            return None
+
+        def _normalize(component: str) -> str:
+            return component[2:] if isinstance(component, str) and component.startswith("0x") else str(component)
+
+        r_hex = _normalize(r).zfill(64)
+        s_hex = _normalize(s).zfill(64)
+        if isinstance(v, str):
+            v_hex = _normalize(v).zfill(2)
+        else:
+            v_hex = f"{int(v):02x}"
+
+        return f"0x{r_hex}{s_hex}{v_hex}"
+
+    # ------------------------------------------------------------------ #
+    # Receipt helpers
+    # ------------------------------------------------------------------ #
 
     def decode_payment_response(self, header_value: str) -> X402PaymentReceipt:
         """Decode an X-PAYMENT-RESPONSE header into a structured receipt."""

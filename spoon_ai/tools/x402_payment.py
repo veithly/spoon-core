@@ -7,6 +7,10 @@ import httpx
 from pydantic import Field
 
 from x402.types import PaymentRequirements, x402PaymentRequiredResponse
+from x402.common import x402_VERSION
+from x402.chains import get_chain_id
+from x402.exact import prepare_payment_header, encode_payment
+from eth_account.messages import encode_typed_data
 
 from spoon_ai.tools.base import BaseTool, ToolResult
 from spoon_ai.payments import (
@@ -179,8 +183,25 @@ class X402PaywalledRequestTool(BaseTool):
             except Exception as exc:
                 return ToolResult(error=f"Failed to parse x402 payment requirements: {exc}")
 
-            requirements = self._select_requirements(paywall, scheme or self.service.settings.default_scheme, network or self.service.settings.default_network)
-            if any(
+            selected_requirements = self._select_requirements(
+                paywall,
+                scheme or self.service.settings.default_scheme,
+                network or self.service.settings.default_network,
+            )
+            req_payload = selected_requirements.model_dump(by_alias=True)
+            requirements = PaymentRequirements.model_validate(req_payload)
+            candidate_pay_to = None
+            if paywall.accepts:
+                for candidate_requirement in paywall.accepts:
+                    if candidate_requirement.pay_to:
+                        candidate_pay_to = candidate_requirement.pay_to
+                        break
+            if candidate_pay_to:
+                requirements.pay_to = candidate_pay_to
+            if not requirements.pay_to:
+                requirements.pay_to = self.service.settings.pay_to
+            pay_to_override = requirements.pay_to
+            override_requested = any(
                 value is not None
                 for value in (
                     amount_usdc,
@@ -193,7 +214,19 @@ class X402PaywalledRequestTool(BaseTool):
                     metadata,
                     output_schema,
                 )
-            ):
+            )
+            if override_requested:
+                paywall_defaults = {
+                    "asset": requirements.asset,
+                    "pay_to": requirements.pay_to,
+                    "resource": requirements.resource,
+                    "description": requirements.description,
+                    "mime_type": requirements.mime_type,
+                    "output_schema": requirements.output_schema,
+                    "extra": requirements.extra or {},
+                    "max_timeout_seconds": requirements.max_timeout_seconds,
+                }
+
                 request_override = X402PaymentRequest(
                     amount_usdc=amount_usdc,
                     amount_atomic=amount_atomic,
@@ -209,8 +242,27 @@ class X402PaywalledRequestTool(BaseTool):
                 )
                 requirements = self.service.build_payment_requirements(request_override)
 
+                requirements.asset = paywall_defaults["asset"]
+                requirements.pay_to = pay_to or paywall_defaults["pay_to"]
+                requirements.resource = paywall_defaults["resource"]
+                if paywall_defaults["description"]:
+                    requirements.description = paywall_defaults["description"]
+                if paywall_defaults["mime_type"]:
+                    requirements.mime_type = paywall_defaults["mime_type"]
+                if paywall_defaults["output_schema"] and requirements.output_schema is None:
+                    requirements.output_schema = paywall_defaults["output_schema"]
+                requirements.max_timeout_seconds = (
+                    timeout_seconds if timeout_seconds is not None else paywall_defaults["max_timeout_seconds"]
+                )
+                merged_extra: Dict[str, Any] = {**paywall_defaults["extra"], **(requirements.extra or {})}
+                requirements.extra = merged_extra or None
+                pay_to_override = requirements.pay_to
+
             try:
-                header = self.service.build_payment_header(requirements, max_value=max_value)
+                if self.service.settings.client.use_turnkey:
+                    header = self.service.build_payment_header(requirements, max_value=max_value)
+                else:
+                    header = self._build_local_payment_header(requirements, pay_to_override, max_value=max_value)
             except X402ConfigurationError as exc:
                 return ToolResult(error=f"x402 configuration error: {exc}")
             except X402PaymentError as exc:
@@ -241,6 +293,88 @@ class X402PaywalledRequestTool(BaseTool):
                     output["paymentResponse"] = {"error": str(exc), "raw": payment_response_header}
 
             return ToolResult(output=output)
+
+    def _build_local_payment_header(
+        self,
+        requirements: PaymentRequirements,
+        pay_to_override: str,
+        max_value: Optional[int] = None,
+    ) -> str:
+        account = self.service._get_client_account()
+
+        required_value = int(requirements.max_amount_required)
+        if max_value is not None and required_value > max_value:
+            raise X402PaymentError(
+                f"Payment requirement exceeds allowed maximum: required {required_value}, max_value {max_value}."
+            )
+
+        pay_to = pay_to_override or requirements.pay_to
+        if not pay_to:
+            raise X402PaymentError("Paywalled resource did not specify a pay_to address.")
+
+        requirements_copy = PaymentRequirements.model_validate(requirements.model_dump())
+        requirements_copy.pay_to = pay_to
+
+        unsigned_header = prepare_payment_header(account.address, x402_VERSION, requirements_copy)
+        nonce_bytes = unsigned_header["payload"]["authorization"]["nonce"]
+        unsigned_header["payload"]["authorization"]["nonce"] = "0x" + nonce_bytes.hex()
+
+        signature = self._sign_eip712_authorization(
+            account,
+            requirements_copy,
+            unsigned_header["payload"]["authorization"],
+        )
+        unsigned_header["payload"]["signature"] = signature
+
+        return encode_payment(unsigned_header)
+
+    def _sign_eip712_authorization(
+        self,
+        account: "LocalAccount",
+        requirements: PaymentRequirements,
+        authorization: Dict[str, Any],
+    ) -> str:
+        extra = requirements.extra or {}
+        domain: Dict[str, Any] = {
+            "name": extra.get("name") or self.service.settings.asset_name,
+            "version": extra.get("version") or "2",
+            "chainId": int(get_chain_id(requirements.network)),
+            "verifyingContract": requirements.asset,
+        }
+        if extra.get("salt"):
+            domain["salt"] = extra["salt"]
+
+        message_types = {
+            "TransferWithAuthorization": [
+                {"name": "from", "type": "address"},
+                {"name": "to", "type": "address"},
+                {"name": "value", "type": "uint256"},
+                {"name": "validAfter", "type": "uint256"},
+                {"name": "validBefore", "type": "uint256"},
+                {"name": "nonce", "type": "bytes32"},
+            ]
+        }
+
+        message_data = {
+            "from": authorization["from"],
+            "to": authorization["to"],
+            "value": int(authorization["value"]),
+            "validAfter": int(authorization["validAfter"]),
+            "validBefore": int(authorization["validBefore"]),
+            "nonce": bytes.fromhex(authorization["nonce"][2:]),
+        }
+
+        signable = encode_typed_data(domain, message_types, message_data)
+        signature = account.sign_message(signable).signature.hex()
+        print(
+            "[x402-debug] signing typed data",
+            {
+                "domain": domain,
+                "message": message_data,
+                "signature": signature,
+            },
+        )
+        return signature if signature.startswith("0x") else f"0x{signature}"
 
     def _select_requirements(
         self,

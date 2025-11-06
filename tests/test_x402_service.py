@@ -1,10 +1,10 @@
 import json
 import os
-from typing import Any
+from typing import Any, Dict
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient, ASGITransport
+from httpx import AsyncClient, ASGITransport, Response, Request
 
 from eth_account import Account
 
@@ -17,9 +17,12 @@ from spoon_ai.payments import (
     X402PaymentError,
     X402VerifyResult,
 )
+from spoon_ai.payments.config import X402ClientConfig
 from spoon_ai.payments.server import create_paywalled_router
+from spoon_ai.tools import x402_payment
 
-from x402.encoding import safe_base64_encode
+from x402.encoding import safe_base64_decode, safe_base64_encode
+from x402.chains import get_chain_id
 from x402.types import (
     ListDiscoveryResourcesResponse,
     SettleResponse,
@@ -59,9 +62,22 @@ def x402_private_key(monkeypatch):
     key = Account.create().key.hex()
     if not key.startswith("0x"):
         key = "0x" + key
-    monkeypatch.setenv("X402_AGENT_PRIVATE_KEY", key)
+    monkeypatch.delenv("X402_AGENT_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("PRIVATE_KEY", key)
     monkeypatch.setenv("X402_RECEIVER_ADDRESS", "0x1234567890abcdef1234567890abcdef12345678")
     return key
+
+
+def test_client_config_turnkey_auto(monkeypatch):
+    monkeypatch.delenv("PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("X402_AGENT_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("TURNKEY_SIGN_WITH", "wallet:auto")
+    monkeypatch.setenv("TURNKEY_ADDRESS", "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    config = X402ClientConfig.from_raw({})
+    assert config.private_key is None
+    assert config.use_turnkey is True
+    assert config.turnkey_sign_with == "wallet:auto"
+    assert config.turnkey_address == "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_settings_loads_from_env(monkeypatch):
@@ -71,12 +87,18 @@ def test_settings_loads_from_env(monkeypatch):
     monkeypatch.setenv("X402_DEFAULT_NETWORK", "base-sepolia")
     monkeypatch.setenv("X402_DEFAULT_ASSET", "0xa063B8d5ada3bE64A24Df594F96aB75F0fb78160")
     monkeypatch.setenv("X402_RECEIVER_ADDRESS", "0x1234567890abcdef1234567890abcdef12345678")
+    monkeypatch.setenv("TURNKEY_SIGN_WITH", "wallet:prefer")
+    monkeypatch.setenv("TURNKEY_ADDRESS", "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     settings = X402Settings.load()
     assert settings.facilitator_url == "https://www.x402.org/facilitator"
     assert settings.resource.startswith("https://")
     assert settings.default_network == "base-sepolia"
     assert settings.amount_in_atomic_units == str(int(0.01 * 10**settings.asset_decimals))
     assert settings.pay_to == "0x1234567890abcdef1234567890abcdef12345678"
+    assert settings.client.private_key == os.getenv("PRIVATE_KEY")
+    assert settings.client.use_turnkey is False
+    assert settings.client.private_key == os.getenv("PRIVATE_KEY")
+    assert settings.client.use_turnkey is False
 
 
 def test_build_payment_requirements_amount_conversion():
@@ -222,3 +244,135 @@ async def test_paywall_router_processes_valid_payment(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["result"] == "echo:hello"
     assert "X-PAYMENT-RESPONSE" in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_paywalled_request_override_preserves_paywall_asset(monkeypatch):
+    service = X402PaymentService(facilitator=StubFacilitator())
+    tool = x402_payment.X402PaywalledRequestTool(service=service)
+    url = "https://www.x402.org/protected"
+    paywall_body = {
+        "x402Version": 1,
+        "error": "X-PAYMENT header is required",
+        "accepts": [
+            {
+                "scheme": "exact",
+                "network": "base-sepolia",
+                "maxAmountRequired": "10000",
+                "resource": url,
+                "description": "Protected content",
+                "mimeType": "application/json",
+                "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+                "maxTimeoutSeconds": 300,
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "extra": {"name": "USDC", "version": "2"},
+            }
+        ],
+    }
+
+    responses = [
+        Response(
+            402,
+            request=Request("GET", url),
+            json=paywall_body,
+            headers={"content-type": "application/json"},
+        ),
+        Response(
+            200,
+            request=Request("GET", url),
+            json={"ok": True},
+            headers={"content-type": "application/json"},
+        ),
+    ]
+
+    captured: dict[str, Any] = {}
+    original_sign = x402_payment.X402PaywalledRequestTool._sign_eip712_authorization
+
+    def capture_signature(self, account, requirements, authorization):
+        captured["asset"] = requirements.asset
+        captured["extra"] = requirements.extra
+        return original_sign(self, account, requirements, authorization)
+
+    monkeypatch.setattr(
+        x402_payment.X402PaywalledRequestTool,
+        "_sign_eip712_authorization",
+        capture_signature,
+    )
+
+    class StubAsyncClient:
+        def __init__(self, responses_list, **kwargs):
+            self._responses = list(responses_list)
+            self.requests = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def request(self, method, request_url, headers=None, json=None, content=None):
+            self.requests.append({"method": method, "url": request_url, "headers": headers})
+            if not self._responses:
+                raise AssertionError("No more responses configured for StubAsyncClient")
+            return self._responses.pop(0)
+
+    monkeypatch.setattr(
+        x402_payment.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: StubAsyncClient(responses, **kwargs),
+    )
+
+    result = await tool.execute(url=url, amount_usdc=0.01)
+
+    assert result.error is None
+    assert captured["asset"] == "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+    assert captured["extra"]["name"] == "USDC"
+    assert captured["extra"]["version"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_build_payment_header_with_turnkey(monkeypatch):
+    settings = X402Settings(
+        pay_to="0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed",
+        client=X402ClientConfig(
+            use_turnkey=True,
+            turnkey_sign_with="wallet:abc123",
+            turnkey_address="0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed",
+            private_key=None,
+        ),
+    )
+    service = X402PaymentService(settings=settings, facilitator=StubFacilitator())
+
+    stub_signature = "0x" + "ab" * 65
+    captured: dict[str, Any] = {}
+
+    class StubTurnkey:
+        def sign_typed_data(self, sign_with: str, typed_data: Dict[str, Any]):
+            captured["sign_with"] = sign_with
+            captured["typed_data"] = typed_data
+            return {
+                "activity": {
+                    "result": {
+                        "signRawPayloadResult": {
+                            "signatures": [
+                                {"signature": stub_signature}
+                            ]
+                        }
+                    }
+                }
+            }
+
+    stub_client = StubTurnkey()
+    monkeypatch.setattr(service, "_turnkey_client", stub_client)
+    monkeypatch.setattr(service, "_get_turnkey_client", lambda: stub_client)
+
+    requirements = service.build_payment_requirements(X402PaymentRequest(amount_usdc=0.01))
+    header_b64 = service.build_payment_header(requirements)
+    payload = json.loads(safe_base64_decode(header_b64))
+
+    assert payload["payload"]["signature"] == stub_signature
+    assert payload["payload"]["authorization"]["from"] == settings.client.turnkey_address
+    assert payload["payload"]["authorization"]["nonce"].startswith("0x")
+    assert captured["sign_with"] == "wallet:abc123"
+    assert captured["typed_data"]["domain"]["chainId"] == int(get_chain_id(requirements.network))
+    assert captured["typed_data"]["message"]["nonce"].startswith("0x")
