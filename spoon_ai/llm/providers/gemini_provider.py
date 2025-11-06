@@ -7,13 +7,15 @@ import json
 import os
 import time
 import uuid
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncIterator
 from logging import getLogger
+from uuid import uuid4
 
 from google import genai
 from google.genai import types
 
-from spoon_ai.schema import Message, ToolCall, Function
+from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
+from spoon_ai.callbacks.manager import CallbackManager
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
 from ..registry import register_provider
@@ -244,10 +246,17 @@ class GeminiProvider(LLMProviderInterface):
         except Exception as e:
             await self._handle_error(e)
     
-    async def chat_stream(self, messages: List[Message], **kwargs) -> AsyncGenerator[str, None]:
-        """Send streaming chat request to Gemini."""
+    async def chat_stream(self, messages: List[Message],callbacks: Optional[List] = None, **kwargs) -> AsyncIterator[LLMResponseChunk]:
+        """Send streaming chat request to Gemini with callback support. 
+        Yields:
+            LLMResponseChunk: Structured streaming response chunks
+        """
         if not self.client:
             raise ProviderError("gemini", "Provider not initialized")
+
+        # Create callback manager
+        callback_manager = CallbackManager.from_callbacks(callbacks)
+        run_id = uuid4()
         
         try:
             system_content, user_message = self._convert_messages(messages)
@@ -256,6 +265,9 @@ class GeminiProvider(LLMProviderInterface):
             model = kwargs.get('model', self.model)
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
+            
+            # Trigger on_llm_start callback
+            await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider="gemini")
             
             # Build request content
             if isinstance(user_message, str):
@@ -272,20 +284,82 @@ class GeminiProvider(LLMProviderInterface):
             if system_content:
                 generate_config.system_instruction = system_content
             
+            # Process streaming response
+            full_content = ""
+            chunk_index = 0
+            finish_reason = None
+            usage_data = None
+            
             # Send streaming request
             stream = self.client.models.generate_content_stream(
                 model=model,
                 contents=contents,
-                config=generate_config
+                config=generate_config,
+                **{k: v for k, v in kwargs.items() 
+                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks']}
             )
             
             for part_response in stream:
                 if part_response.candidates and part_response.candidates[0].content.parts:
                     chunk = part_response.candidates[0].content.parts[0].text
                     if chunk:
-                        yield chunk
+                        full_content += chunk
                         
+                        # Trigger on_llm_new_token callback
+                        await callback_manager.on_llm_new_token(
+                            token=chunk,
+                            run_id=run_id
+                        )
+                        
+                        # Extract finish reason
+                        if (part_response.candidates and 
+                            part_response.candidates[0].finish_reason):
+                            finish_reason = str(part_response.candidates[0].finish_reason)
+                        
+                        # Extract usage stats if available
+                        if hasattr(part_response, 'usage_metadata') and part_response.usage_metadata:
+                            usage_data = {
+                                "prompt_tokens": part_response.usage_metadata.prompt_token_count,
+                                "completion_tokens": part_response.usage_metadata.candidates_token_count,
+                                "total_tokens": part_response.usage_metadata.total_token_count
+                            }
+                        
+                        # Build response chunk
+                        response_chunk = LLMResponseChunk(
+                            content=full_content,
+                            delta=chunk,
+                            provider="gemini",
+                            model=model,
+                            finish_reason=finish_reason,
+                            tool_calls=[],
+                            usage=usage_data,
+                            metadata={
+                                "chunk_index": chunk_index,
+                                "finish_reason": finish_reason
+                            },
+                            chunk_index=chunk_index
+                        )
+                        chunk_index += 1
+                        yield response_chunk
+            
+            # Trigger on_llm_end callback
+            await callback_manager.on_llm_end(
+                response=LLMResponseChunk(
+                    content=full_content,
+                    provider="gemini",
+                    model=model,
+                    finish_reason=finish_reason,
+                    tool_calls=[],
+                    usage=usage_data
+                ),
+                run_id=run_id
+            )
+                            
         except Exception as e:
+            await callback_manager.on_llm_error(
+                error=e,
+                run_id=run_id
+            )
             await self._handle_error(e)
     
     async def completion(self, prompt: str, **kwargs) -> LLMResponse:

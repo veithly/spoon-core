@@ -4,15 +4,19 @@ This includes OpenAI, OpenRouter, DeepSeek, and other providers with similar int
 """
 
 import asyncio
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncGenerator, AsyncIterator
 from logging import getLogger
+from uuid import uuid4
+from datetime import datetime
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-from spoon_ai.schema import Message, ToolCall, Function
+from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
+from spoon_ai.callbacks.base import BaseCallbackHandler
+from spoon_ai.callbacks.manager import CallbackManager
 
 logger = getLogger(__name__)
 
@@ -269,11 +273,18 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         except Exception as e:
             await self._handle_error(e)
 
-    async def chat_stream(self, messages: List[Message], **kwargs) -> AsyncGenerator[str, None]:
-        """Send streaming chat request to the provider."""
+    async def chat_stream(self,messages: List[Message],callbacks: Optional[List[BaseCallbackHandler]] = None,**kwargs) -> AsyncIterator[LLMResponseChunk]:
+        """Send streaming chat request with full callback support.
+        Yields:
+            LLMResponseChunk: Structured streaming response chunks
+        """
         if not self.client:
             raise ProviderError(self.get_provider_name(), "Provider not initialized")
 
+        # Create callback manager
+        callback_manager = CallbackManager.from_callbacks(callbacks)
+        run_id = uuid4()
+        
         try:
             openai_messages = self._convert_messages(messages)
 
@@ -282,20 +293,146 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
 
+            # Trigger on_llm_start callback
+            await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider=self.get_provider_name())
+
             stream = await self.client.chat.completions.create(
                 model=model,
                 messages=openai_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True,
-                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
+                stream_options={"include_usage": True},  # Request usage stats
+                **{k: v for k, v in kwargs.items() 
+                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks']}
+            )
+            # Process streaming response
+            full_content = ""
+            chunk_index = 0
+            tool_call_accumulator = {}  # For accumulating tool calls
+            finish_reason = None  # Initialize finish_reason outside loop
+            
+            async for chunk in stream:
+
+                choice = chunk.choices[0]
+                delta = choice.delta
+                
+                # Extract token/content
+                token = delta.content or ""
+                if token:
+                    full_content += token
+                
+                # Extract finish_reason (preserve once set, don't let None overwrite it)
+                if choice.finish_reason is not None:
+                    finish_reason = choice.finish_reason
+                
+                # Handle tool calls (OpenAI streams them incrementally)
+                tool_calls = []
+                tool_call_chunks = None
+                
+                if delta.tool_calls:
+                    tool_call_chunks = []
+                    for tc_chunk in delta.tool_calls:
+                        tc_id = tc_chunk.id or f"call_{tc_chunk.index}"
+                        
+                        # Initialize accumulator if needed
+                        if tc_id not in tool_call_accumulator:
+                            tool_call_accumulator[tc_id] = {
+                                "id": tc_id,
+                                "type": tc_chunk.type or "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": ""
+                                }
+                            }
+                        
+                        # Accumulate function name and arguments
+                        if tc_chunk.function:
+                            if tc_chunk.function.name:
+                                tool_call_accumulator[tc_id]["function"]["name"] += tc_chunk.function.name
+                            if tc_chunk.function.arguments:
+                                tool_call_accumulator[tc_id]["function"]["arguments"] += tc_chunk.function.arguments
+                        
+                        tool_call_chunks.append({
+                            "index": tc_chunk.index,
+                            "id": tc_chunk.id,
+                            "type": tc_chunk.type,
+                            "function": tc_chunk.function.model_dump() if tc_chunk.function else None
+                        })
+                    
+                    # Convert accumulated tool calls to ToolCall objects
+                    tool_calls = [
+                        ToolCall(
+                            id=tc["id"],
+                            type=tc["type"],
+                            function=Function(
+                                name=tc["function"]["name"],
+                                arguments=tc["function"]["arguments"]
+                            )
+                        )
+                        for tc in tool_call_accumulator.values()
+                    ]
+                
+                # Extract usage stats (typically in final chunk)
+                usage = None
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                        "total_tokens": chunk.usage.total_tokens
+                    }
+                
+                # Build response chunk
+                response_chunk = LLMResponseChunk(
+                    content=full_content,
+                    delta=token,
+                    provider=self.get_provider_name(),
+                    model=model,
+                    finish_reason=finish_reason,
+                    tool_calls=tool_calls,
+                    tool_call_chunks=tool_call_chunks,
+                    usage=usage,
+                    metadata={
+                        "chunk_id": chunk.id if hasattr(chunk, 'id') else None,
+                        "created": chunk.created if hasattr(chunk, 'created') else None
+                    },
+                    chunk_index=chunk_index,
+                    timestamp=datetime.now().isoformat()
+                )
+                
+                # Trigger on_llm_new_token callback
+                if token:  # Only trigger if there's actual content
+                    await callback_manager.on_llm_new_token(
+                        token=token,
+                        chunk=response_chunk,
+                        run_id=run_id
+                    )
+                
+                # Yield chunk
+                yield response_chunk
+                chunk_index += 1
+            
+            # Trigger on_llm_end callback
+            final_response = LLMResponse(
+                content=full_content,
+                provider=self.get_provider_name(),
+                model=model,
+                finish_reason=finish_reason or "stop",
+                native_finish_reason=finish_reason or "stop",
+                tool_calls=tool_calls,
+                usage=usage,
+                metadata={}
+            )
+            await callback_manager.on_llm_end(
+                response=final_response,
+                run_id=run_id
             )
 
-            async for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-
         except Exception as e:
+            await callback_manager.on_llm_error(
+                error=e,
+                run_id=run_id
+            )
             await self._handle_error(e)
 
     async def completion(self, prompt: str, **kwargs) -> LLMResponse:

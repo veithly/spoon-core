@@ -61,10 +61,16 @@ def _resolve_version() -> str:
 
 __version__: str = _resolve_version()
 
+from spoon_ai.chat import ChatBot 
+from spoon_ai.schema import LLMResponse, LLMResponseChunk, Message 
+
 __all__ = [
     "__version__",
+    "ChatBot",
+    "Message", 
+    "LLMResponse",
+    "LLMResponseChunk",
 ]
-
 
 
 

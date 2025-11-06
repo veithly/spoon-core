@@ -1,8 +1,10 @@
 from logging import getLogger
-from typing import List, Optional, Union, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Any, Tuple, AsyncIterator, Iterator
 import asyncio
+from datetime import datetime
+from uuid import uuid4
 
-from spoon_ai.schema import Message, LLMResponse
+from spoon_ai.schema import Message, LLMResponse, LLMResponseChunk, ToolCall
 from spoon_ai.llm.manager import get_llm_manager
 from spoon_ai.llm.errors import ConfigurationError
 from spoon_ai.memory.short_term_manager import (
@@ -14,7 +16,15 @@ from spoon_ai.memory.remove_message import (
     RemoveMessage,
     REMOVE_ALL_MESSAGES,
 )
+from spoon_ai.callbacks.base import BaseCallbackHandler
+from spoon_ai.callbacks.manager import CallbackManager
 from pydantic import BaseModel, Field
+from spoon_ai.utils.streaming import (
+    StreamOutcome,
+    message_to_dict,
+    sanitize_stream_kwargs,
+)
+from spoon_ai.runnables import RunLogPatch, log_patches_from_events
 
 logger = getLogger(__name__)
 
@@ -88,7 +98,7 @@ def to_dict(message: Message) -> dict:
 
 
 class ChatBot:
-    def __init__(self, use_llm_manager: bool = True, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_short_term_memory: bool = True,short_term_memory_config: Optional[Union[Dict[str, Any], ShortTermMemoryConfig]] = None,token_counter: Optional[MessageTokenCounter] = None, **kwargs):
+    def __init__(self, use_llm_manager: bool = True, model_name: str = None, llm_provider: str = None, api_key: str = None, base_url: str = None, enable_short_term_memory: bool = True,short_term_memory_config: Optional[Union[Dict[str, Any], ShortTermMemoryConfig]] = None,token_counter: Optional[MessageTokenCounter] = None, callbacks: Optional[List[BaseCallbackHandler]] = None, **kwargs):
         """Initialize ChatBot with hierarchical configuration priority system.
 
         Configuration Priority System:
@@ -105,6 +115,7 @@ class ChatBot:
             enable_short_term_memory: Enable short-term memory management (default: True)
             short_term_memory_config: Configuration dict or ShortTermMemoryConfig instance
             token_counter: Optional custom token counter instance
+            callbacks: Optional list of callback handlers for monitoring
             **kwargs: Additional parameters
         """
         self.use_llm_manager = use_llm_manager
@@ -113,6 +124,7 @@ class ChatBot:
         self.api_key = api_key
         self.base_url = base_url
         self.llm_manager = None
+        self.callbacks = callbacks or []
         self._latest_summary_text: Optional[str] = None
         self._latest_removals: List[RemoveMessage] = []
 
@@ -680,3 +692,307 @@ class ChatBot:
             raise RuntimeError("Short-term memory manager not enabled")
 
         self.short_term_memory_manager.clear_checkpoints(thread_id)
+
+    async def astream(
+        self,
+        messages: List[Union[dict, Message]],
+        system_msg: Optional[str] = None,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMResponseChunk]:
+        """Stream LLM responses chunk by chunk."""
+        prepared_messages, all_callbacks = await self._prepare_run(
+            messages, system_msg, callbacks
+        )
+        stream_kwargs = sanitize_stream_kwargs(kwargs)
+
+        async for chunk in self._stream_chat(
+            prepared_messages, all_callbacks, stream_kwargs
+        ):
+            yield chunk
+    
+    def stream(self,messages: List[Union[dict, Message]],system_msg: Optional[str] = None,callbacks: Optional[List[BaseCallbackHandler]] = None,**kwargs) -> Iterator[LLMResponseChunk]:
+        # Check if there's a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop - create one
+            loop = None
+        
+        if loop is not None:
+            # We're in an async context - raise error
+            raise RuntimeError(
+                "ChatBot.stream() cannot be called from an async context. "
+                "Use ChatBot.astream() instead."
+            )
+        
+        # Run in a new event loop
+        async def _async_stream():
+            results = []
+            async for chunk in self.astream(
+                messages=messages,
+                system_msg=system_msg,
+                callbacks=callbacks,
+                **kwargs
+            ):
+                results.append(chunk)
+                yield chunk
+    
+        # Use asyncio.run to execute the async generator
+        async_gen = _async_stream()
+        
+        # Manually iterate the async generator in a sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            while True:
+                try:
+                    chunk = loop.run_until_complete(async_gen.__anext__())
+                    yield chunk
+                except StopAsyncIteration:
+                    break
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
+    
+    async def astream_events(
+        self,
+        messages: List[Union[dict, Message]],
+        system_msg: Optional[str] = None,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
+        **kwargs
+    ) -> AsyncIterator[dict]:
+        """Stream structured events during LLM execution.
+        
+        This method yields detailed events tracking the execution flow,
+        useful for monitoring and debugging.
+        
+        Args:
+            messages: List of messages or dicts
+            system_msg: Optional system message
+            callbacks: Optional callback handlers
+            **kwargs: Additional provider parameters
+            
+        Yields:
+            Event dictionaries with structure:
+            {
+                "event": event_type,
+                "run_id": str,
+                "timestamp": ISO datetime string,
+                "data": {event-specific data}
+            }
+        """
+        from spoon_ai.runnables.events import StreamEventBuilder, StreamEventType
+        
+        chain_run_id = uuid4()
+        llm_run_id = uuid4()
+        component_name = self.__class__.__name__
+        llm_name = self.llm_provider or "llm"
+        
+        raw_messages_dump = [message_to_dict(m) for m in messages]
+
+        processed_messages, all_callbacks = await self._prepare_run(
+            messages, system_msg, callbacks
+        )
+        stream_kwargs = sanitize_stream_kwargs(kwargs)
+        
+        # Chain start event
+        yield StreamEventBuilder.chain_start(
+            chain_run_id,
+            component_name,
+            inputs={"messages": [msg.model_dump() for msg in processed_messages]},
+            metadata={"provider": self.llm_provider, "model": self.model_name},
+        )
+
+        prompt_run_id = uuid4()
+        yield StreamEventBuilder.prompt_start(
+            prompt_run_id,
+            f"{component_name}.prompt",
+            inputs={"messages": raw_messages_dump, "system": system_msg},
+            parent_ids=[str(chain_run_id)],
+            metadata={"model": self.model_name},
+        )
+
+        yield StreamEventBuilder.prompt_end(
+            prompt_run_id,
+            f"{component_name}.prompt",
+            output={"messages": [msg.model_dump() for msg in processed_messages]},
+            parent_ids=[str(chain_run_id)],
+            metadata={"model": self.model_name},
+        )
+
+        retriever_run_id = None
+        if self.short_term_memory_manager:
+            retriever_run_id = uuid4()
+            yield StreamEventBuilder.retriever_start(
+                retriever_run_id,
+                self.short_term_memory_manager.__class__.__name__,
+                query={"messages": raw_messages_dump},
+                parent_ids=[str(chain_run_id)],
+            )
+            yield StreamEventBuilder.retriever_end(
+                retriever_run_id,
+                self.short_term_memory_manager.__class__.__name__,
+                documents={"messages": [msg.model_dump() for msg in processed_messages]},
+                parent_ids=[str(chain_run_id)],
+            )
+        
+        # LLM start event
+        yield StreamEventBuilder.llm_start(
+            llm_run_id,
+            llm_name,
+            messages=[msg.model_dump() for msg in processed_messages],
+            model=self.model_name,
+            provider=self.llm_provider,
+            parent_ids=[str(chain_run_id)],
+        )
+        
+        outcome = StreamOutcome()
+
+        emitted_tool_ids: set[str] = set()
+
+        try:
+            async for chunk in self._stream_chat(
+                processed_messages,
+                all_callbacks,
+                stream_kwargs,
+            ):
+                outcome.update_from_chunk(chunk)
+
+                if chunk.delta:
+                    yield StreamEventBuilder.llm_stream(
+                        llm_run_id,
+                        llm_name,
+                        token=chunk.delta,
+                        chunk=chunk.model_dump(),
+                        parent_ids=[str(chain_run_id)],
+                    )
+
+                    yield StreamEventBuilder.chain_stream(
+                        chain_run_id,
+                        component_name,
+                        chunk=chunk.model_dump(),
+                    )
+
+                for tool_call in chunk.tool_calls or []:
+                    if tool_call.id in emitted_tool_ids:
+                        continue
+                    emitted_tool_ids.add(tool_call.id)
+                    tool_run_id = uuid4()
+                    tool_payload = {
+                        "id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments,
+                    }
+                    yield StreamEventBuilder.tool_start(
+                        tool_run_id,
+                        tool_call.function.name or "tool",
+                        tool_payload,
+                        parent_ids=[str(chain_run_id)],
+                    )
+                    yield StreamEventBuilder.tool_end(
+                        tool_run_id,
+                        tool_call.function.name or "tool",
+                        tool_payload,
+                        parent_ids=[str(chain_run_id)],
+                    )
+        
+        except Exception as error:
+            yield StreamEventBuilder.error(
+                StreamEventType.ON_LLM_ERROR,
+                llm_run_id,
+                llm_name,
+                error,
+                parent_ids=[str(chain_run_id)],
+            )
+            yield StreamEventBuilder.chain_error(
+                chain_run_id,
+                component_name,
+                error,
+            )
+            raise
+
+        final_response = outcome.build_response()
+
+        yield StreamEventBuilder.llm_end(
+            llm_run_id,
+            llm_name,
+            response={
+                "content": final_response.content,
+                "finish_reason": final_response.finish_reason,
+                "usage": outcome.usage,
+                "tool_calls": [tc.model_dump() for tc in outcome.tool_calls] if outcome.tool_calls else [],
+            },
+            parent_ids=[str(chain_run_id)],
+        )
+        
+        yield StreamEventBuilder.chain_end(
+            chain_run_id,
+            component_name,
+            output={
+                "response": final_response.model_dump(),
+                "usage": outcome.usage,
+            },
+        )
+
+    async def astream_log(
+        self,
+        messages: List[Union[dict, Message]],
+        system_msg: Optional[str] = None,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
+        *,
+        diff: bool = True,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunLogPatch]:
+        """Stream run log patches describing ChatBot execution."""
+        event_iter = self.astream_events(
+            messages=messages,
+            system_msg=system_msg,
+            callbacks=callbacks,
+            **kwargs,
+        )
+        async for patch in log_patches_from_events(event_iter, diff=diff):
+            yield patch
+
+    async def _prepare_run(
+        self,
+        messages: List[Union[dict, Message]],
+        system_msg: Optional[str],
+        callbacks: Optional[List[BaseCallbackHandler]],
+    ) -> Tuple[List[Message], List[BaseCallbackHandler]]:
+        """Normalize messages and merge callbacks for streaming."""
+        formatted: List[Message] = []
+        if system_msg:
+            formatted.append(Message(role="system", content=system_msg))
+        for message in messages:
+            if isinstance(message, dict):
+                formatted.append(Message(**message))
+            elif isinstance(message, Message):
+                formatted.append(message)
+            else:
+                raise ValueError(f"Invalid message type: {type(message)}")
+        
+        processed = await self._apply_short_term_memory_strategy(
+            formatted,
+            model=self.model_name,
+        )
+        
+        merged_callbacks = list(callbacks) if callbacks else []
+        if self.callbacks:
+            merged_callbacks.extend(self.callbacks)
+        return processed, merged_callbacks
+
+    async def _stream_chat(
+        self,
+        messages: List[Message],
+        callbacks: List[BaseCallbackHandler],
+        stream_kwargs: Dict[str, Any],
+    ) -> AsyncIterator[LLMResponseChunk]:
+        async for chunk in self.llm_manager.chat_stream(
+            messages=messages,
+            provider=self.llm_provider,
+            callbacks=callbacks,
+            **stream_kwargs,
+        ):
+            yield chunk

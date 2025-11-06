@@ -3,12 +3,13 @@ LLM Provider Interface - Abstract base class defining the unified interface for 
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, AsyncGenerator
+from typing import List, Optional, Dict, Any, AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 
-from spoon_ai.schema import Message, ToolCall
+from spoon_ai.schema import Message, ToolCall, LLMResponseChunk
+from spoon_ai.callbacks.base import BaseCallbackHandler
 
 
 class ProviderCapability(Enum):
@@ -66,7 +67,7 @@ class LLMProviderInterface(ABC):
     @abstractmethod
     async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
         """Send chat request to the provider.
-        
+
         Args:
             messages: List of conversation messages
             **kwargs: Additional provider-specific parameters
@@ -80,15 +81,16 @@ class LLMProviderInterface(ABC):
         pass
     
     @abstractmethod
-    async def chat_stream(self, messages: List[Message], **kwargs) -> AsyncGenerator[str, None]:
-        """Send streaming chat request to the provider.
+    async def chat_stream(self, messages: List[Message],callbacks: Optional[List[BaseCallbackHandler]] = None, **kwargs) -> AsyncIterator[LLMResponseChunk]:
+        """Send streaming chat request to the provider with callback support.
         
         Args:
             messages: List of conversation messages
+            callbacks: Optional list of callback handlers for real-time events
             **kwargs: Additional provider-specific parameters
             
         Yields:
-            str: Streaming response chunks
+            LLMResponseChunk: Structured streaming response chunks
             
         Raises:
             ProviderError: If the request fails
@@ -114,7 +116,7 @@ class LLMProviderInterface(ABC):
     @abstractmethod
     async def chat_with_tools(self, messages: List[Message], tools: List[Dict], **kwargs) -> LLMResponse:
         """Send chat request with tool support.
-        
+
         Args:
             messages: List of conversation messages
             tools: List of available tools
@@ -131,7 +133,7 @@ class LLMProviderInterface(ABC):
     @abstractmethod
     def get_metadata(self) -> ProviderMetadata:
         """Get provider metadata and capabilities.
-        
+
         Returns:
             ProviderMetadata: Provider information and capabilities
         """
@@ -140,7 +142,7 @@ class LLMProviderInterface(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         """Check if provider is healthy and available.
-        
+
         Returns:
             bool: True if provider is healthy, False otherwise
         """
