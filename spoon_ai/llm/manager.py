@@ -537,7 +537,8 @@ class LLMManager:
 
             # Set fallback chain from configuration
             if not self.fallback_chain:
-                self.fallback_chain = self.config_manager.get_fallback_chain()
+                configured_chain = self.config_manager.get_fallback_chain()
+                self.fallback_chain = self._sanitize_provider_chain(configured_chain)
 
             logger.info(f"LLM Manager initialized with providers: {configured_providers}")
             logger.info(f"Default provider: {self.default_provider}")
@@ -716,6 +717,58 @@ class LLMManager:
         # Normalize and return response
         return self.response_normalizer.normalize_response(response)
 
+    def _sanitize_provider_chain(self, providers: Optional[List[str]]) -> List[str]:
+        """Remove duplicates and unknown providers while preserving order."""
+        sanitized: List[str] = []
+        if not providers:
+            return sanitized
+
+        for provider in providers:
+            if not provider:
+                continue
+            if not self.registry.is_registered(provider):
+                logger.warning(f"Provider '{provider}' referenced in fallback chain is not registered; skipping")
+                continue
+            if provider not in sanitized:
+                sanitized.append(provider)
+        return sanitized
+
+    def _resolve_fallback_candidates(self) -> List[str]:
+        """Determine fallback candidates from config or available providers."""
+        if self.fallback_chain:
+            return self.fallback_chain.copy()
+
+        dynamic_chain = self.config_manager.get_available_providers_by_priority()
+        if dynamic_chain:
+            return self._sanitize_provider_chain(dynamic_chain)
+
+        return []
+
+    def _build_provider_chain(self) -> List[str]:
+        """Construct ordered provider chain starting with the default provider."""
+        providers: List[str] = []
+
+        if self.default_provider:
+            if self.registry.is_registered(self.default_provider):
+                providers.append(self.default_provider)
+            else:
+                logger.warning(f"Default provider '{self.default_provider}' is not registered; ignoring")
+
+        for candidate in self._resolve_fallback_candidates():
+            if candidate not in providers:
+                if not self.registry.is_registered(candidate):
+                    logger.warning(f"Provider '{candidate}' is not registered; skipping")
+                    continue
+                providers.append(candidate)
+
+        if not providers:
+            available = self.registry.list_providers()
+            if not available:
+                raise ConfigurationError("No providers available")
+            providers.append(available[0])
+
+        return providers
+
     def _get_providers_for_request(self, requested_provider: Optional[str]) -> List[str]:
         """Get list of providers to use for a request.
 
@@ -731,26 +784,17 @@ class LLMManager:
                 raise ConfigurationError(f"Provider '{requested_provider}' not registered")
             return [requested_provider]
 
+        providers = self._build_provider_chain()
+
         # Use load balancing if enabled and multiple providers available
-        if self.load_balancing_enabled and len(self.fallback_chain) > 1:
+        if self.load_balancing_enabled and len(providers) > 1:
             primary_provider = self.load_balancer.select_provider(
-                self.fallback_chain, self.load_balancing_strategy
+                providers, self.load_balancing_strategy
             )
-            # Return primary provider first, then rest of fallback chain
-            fallback_providers = [p for p in self.fallback_chain if p != primary_provider]
+            fallback_providers = [p for p in providers if p != primary_provider]
             return [primary_provider] + fallback_providers
 
-        # Use fallback chain or default provider
-        if self.fallback_chain:
-            return self.fallback_chain.copy()
-        elif self.default_provider:
-            return [self.default_provider]
-        else:
-            # Use any available provider
-            available = self.registry.list_providers()
-            if not available:
-                raise ConfigurationError("No providers available")
-            return available[:1]
+        return providers
 
     def set_fallback_chain(self, providers: List[str]) -> None:
         """Set fallback provider chain.
@@ -759,11 +803,14 @@ class LLMManager:
             providers: List of provider names in fallback order
         """
         # Validate providers
+        sanitized: List[str] = []
         for provider in providers:
             if not self.registry.is_registered(provider):
                 raise ConfigurationError(f"Provider '{provider}' not registered")
+            if provider not in sanitized:
+                sanitized.append(provider)
 
-        self.fallback_chain = providers.copy()
+        self.fallback_chain = sanitized
         logger.info(f"Set fallback chain: {self.fallback_chain}")
 
     def enable_load_balancing(self, strategy: str = "round_robin") -> None:

@@ -3,6 +3,7 @@ Configuration management for LLM providers using environment variables.
 """
 
 import os
+import re
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -17,6 +18,19 @@ except ImportError:
     HAS_DOTENV = False
 
 logger = getLogger(__name__)
+
+PLACEHOLDER_LITERALS = {
+    "your_api_key",
+    "api_key_here",
+    "insert_api_key_here",
+    "your_base_url_here",
+    "your-base-url-here",
+}
+
+PLACEHOLDER_REGEXES = [
+    re.compile(r"^your[-_a-z0-9]*here$"),
+    re.compile(r"^sk[-_a-z0-9]*your[-_a-z0-9]*$"),
+]
 
 
 @dataclass
@@ -201,27 +215,45 @@ class ConfigurationManager:
 
         for config_key, env_key in env_mappings.items():
             env_value = os.getenv(env_key)
-            if env_value:
-                # Convert string values to appropriate types
-                if config_key in ['max_tokens', 'timeout']:
-                    try:
-                        config[config_key] = int(env_value)
-                    except ValueError:
-                        logger.warning(f"Invalid integer value for {env_key}: {env_value}")
-                elif config_key == 'temperature':
-                    try:
-                        config[config_key] = float(env_value)
-                    except ValueError:
-                        logger.warning(f"Invalid float value for {env_key}: {env_value}")
-                else:
-                    config[config_key] = env_value
+            if not env_value:
+                continue
+
+            if config_key in ['api_key', 'base_url', 'model'] and self._is_placeholder_value(env_value):
+                message = f"Ignoring placeholder value provided via {env_key}"
+                if config_key == 'base_url':
+                    raise ConfigurationError(
+                        provider_name,
+                        f"{env_key} is set to a placeholder value. Please provide a valid URL."
+                    )
+                logger.debug(message)
+                continue
+
+            # Convert string values to appropriate types
+            if config_key in ['max_tokens', 'timeout']:
+                try:
+                    config[config_key] = int(env_value)
+                except ValueError:
+                    logger.warning(f"Invalid integer value for {env_key}: {env_value}")
+            elif config_key == 'temperature':
+                try:
+                    config[config_key] = float(env_value)
+                except ValueError:
+                    logger.warning(f"Invalid float value for {env_key}: {env_value}")
+            else:
+                config[config_key] = env_value.strip()
 
         # 2.1. Fallback to generic environment variables for backward compatibility
         if 'base_url' not in config:
             generic_base_url = os.getenv('BASE_URL')
             if generic_base_url:
-                config['base_url'] = generic_base_url
-                logger.info(f"Using generic BASE_URL for {provider_name}: {generic_base_url}")
+                if self._is_placeholder_value(generic_base_url):
+                    raise ConfigurationError(
+                        provider_name,
+                        "BASE_URL is set to the placeholder value 'your_base_url_here'. "
+                        "Remove it or replace it with a valid HTTPS endpoint."
+                    )
+                config['base_url'] = generic_base_url.strip()
+                logger.info(f"Using generic BASE_URL for {provider_name}: {config['base_url']}")
 
         # 3. Apply provider-specific defaults
         defaults = self._get_provider_defaults(provider_name)
@@ -230,6 +262,31 @@ class ConfigurationManager:
                 config[key] = value
 
         return config
+
+    @staticmethod
+    def _is_placeholder_value(value: Optional[str]) -> bool:
+        """Detect whether a configuration value still uses template placeholders."""
+        if value is None:
+            return True
+
+        normalized = value.strip().lower()
+        if not normalized:
+            return True
+
+        if normalized in PLACEHOLDER_LITERALS:
+            return True
+
+        for regex in PLACEHOLDER_REGEXES:
+            if regex.match(normalized):
+                return True
+
+        # Common delimiters for documented placeholders
+        if (normalized.startswith("<") and normalized.endswith(">")) or \
+           (normalized.startswith("[") and normalized.endswith("]")) or \
+           (normalized.startswith("{") and normalized.endswith("}")):
+            return True
+
+        return False
 
     def _get_provider_defaults(self, provider_name: str) -> Dict[str, Any]:
         """Get comprehensive default configuration for a provider.

@@ -2,6 +2,11 @@ import os
 import re
 from typing import Any, Dict, Optional
 
+PLACEHOLDER_BASE_URL_VALUES = {
+    "your_base_url_here",
+    "your-base-url-here",
+}
+
 
 class ConfigManager:
     """Environment-based configuration helper for core usage."""
@@ -13,9 +18,17 @@ class ConfigManager:
 
     def refresh(self) -> None:
         """Reload configuration snapshot from environment variables."""
+        raw_base_url = os.getenv("BASE_URL", "")
+        sanitized_base_url = raw_base_url.strip()
+        if sanitized_base_url and sanitized_base_url.lower() in PLACEHOLDER_BASE_URL_VALUES:
+            raise ValueError(
+                "BASE_URL is set to the placeholder value 'your_base_url_here'. "
+                "Remove the variable or provide a valid URL."
+            )
+
         self.config = {
             "api_keys": self._load_api_keys(),
-            "base_url": os.getenv("BASE_URL", ""),
+            "base_url": sanitized_base_url,
             "default_agent": os.getenv("DEFAULT_AGENT", "react"),
         }
 

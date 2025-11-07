@@ -13,6 +13,7 @@ from spoon_ai.llm.response_normalizer import ResponseNormalizer
 from spoon_ai.llm.interface import LLMProviderInterface, LLMResponse, ProviderCapability
 from spoon_ai.llm.errors import ProviderError, ConfigurationError
 from spoon_ai.schema import Message
+from spoon_ai.utils.config_manager import ConfigManager as EnvConfigManager
 
 
 class MockProvider(LLMProviderInterface):
@@ -96,6 +97,10 @@ class TestLLMManagerIntegration:
         config_manager = Mock(spec=ConfigurationManager)
         config_manager.list_configured_providers.return_value = ["openai", "anthropic"]
         config_manager.get_default_provider.return_value = "openai"
+        config_manager.get_fallback_chain.return_value = []
+        config_manager.get_available_providers_by_priority.return_value = [
+            "openai", "anthropic"
+        ]
         config_manager.load_provider_config.return_value = Mock(model_dump=Mock(return_value={}))
         return config_manager
     
@@ -105,9 +110,12 @@ class TestLLMManagerIntegration:
         registry = LLMProviderRegistry()
         
         # Register mock providers
-        registry.register("openai", MockProvider)
-        registry.register("anthropic", MockProvider)
-        registry.register("failing_provider", MockProvider)
+        for provider in ["openai", "anthropic", "failing_provider", "gemini", "deepseek", "openrouter"]:
+            registry.register(provider, MockProvider)
+
+        # Pre-seed default instances
+        registry._instances["openai"] = MockProvider("openai")
+        registry._instances["anthropic"] = MockProvider("anthropic")
         
         return registry
     
@@ -223,8 +231,28 @@ class TestLLMManagerIntegration:
         """Test setting fallback chain."""
         providers = ["openai", "anthropic"]
         llm_manager.set_fallback_chain(providers)
-        
+
         assert llm_manager.fallback_chain == providers
+
+    def test_default_provider_leads_fallback_chain(self, llm_manager):
+        """Ensure default provider is always attempted before fallback chain."""
+        llm_manager.set_fallback_chain(["gemini", "deepseek", "openrouter", "openai"])
+
+        providers = llm_manager._get_providers_for_request(requested_provider=None)
+
+        assert providers == ["openai", "gemini", "deepseek", "openrouter"]
+
+    def test_automatic_fallback_when_chain_unset(self, llm_manager, mock_config_manager):
+        """Auto-build fallback chain from available providers when env is unset."""
+        llm_manager.fallback_chain = []
+        mock_config_manager.get_available_providers_by_priority.return_value = [
+            "openai", "anthropic", "gemini"
+        ]
+        llm_manager.registry._instances["gemini"] = MockProvider("gemini")
+
+        providers = llm_manager._get_providers_for_request(requested_provider=None)
+
+        assert providers == ["openai", "anthropic", "gemini"]
     
     def test_set_invalid_fallback_chain(self, llm_manager):
         """Test setting invalid fallback chain."""
@@ -377,6 +405,28 @@ class TestLoadBalancer:
         # Should not select unhealthy provider
         assert "provider2" not in selections
         assert all(s in ["provider1", "provider3"] for s in selections)
+
+
+class TestConfigurationPlaceholders:
+    """Ensure placeholder values are surfaced as configuration errors."""
+
+    def test_llm_configuration_rejects_placeholder_base_url(self, monkeypatch):
+        """BASE_URL placeholders should raise a configuration error."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-real-openai-key")
+        monkeypatch.setenv("BASE_URL", "your_base_url_here")
+        monkeypatch.setattr("spoon_ai.llm.config.HAS_DOTENV", False, raising=False)
+
+        config = ConfigurationManager()
+
+        with pytest.raises(ConfigurationError):
+            config.load_provider_config("openai")
+
+    def test_env_config_manager_rejects_placeholder_base_url(self, monkeypatch):
+        """Generic ConfigManager should not accept placeholder BASE_URL values."""
+        monkeypatch.setenv("BASE_URL", "your_base_url_here")
+
+        with pytest.raises(ValueError):
+            EnvConfigManager()
 
 
 if __name__ == "__main__":
