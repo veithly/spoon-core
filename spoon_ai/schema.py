@@ -1,6 +1,8 @@
 import json
 from enum import Enum
 from typing import Any, List, Literal, Optional, Union
+from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -112,3 +114,50 @@ class LLMResponse(BaseModel):
     tool_calls: List[ToolCall] = Field(default_factory=list)
     finish_reason: Optional[str] = Field(default=None)
     native_finish_reason: Optional[str] = Field(default=None)
+
+class LLMResponseChunk(BaseModel):
+    """Enhanced LLM streaming response chunk."""
+    
+    # Core content
+    content: str = Field(..., description="Accumulated content so far")
+    delta: str = Field(..., description="Incremental content in this chunk")
+    
+    # Provider information
+    provider: str = Field(..., description="Provider name")
+    model: str = Field(..., description="Model name")
+    
+    # Completion information
+    finish_reason: Optional[str] = Field(
+        default=None,
+        description="Reason for completion: 'stop', 'length', 'tool_calls', or None if ongoing"
+    )
+    
+    # Tool calls
+    tool_calls: List[ToolCall] = Field(
+        default_factory=list,
+        description="Accumulated tool calls"
+    )
+    tool_call_chunks: Optional[List[dict]] = Field(
+        default=None,
+        description="Incremental tool call data (provider-specific)"
+    )
+    
+    # Usage statistics (usually in final chunk)
+    usage: Optional[dict] = Field(
+        default=None,
+        description="Token usage: {prompt_tokens, completion_tokens, total_tokens}"
+    )
+    
+    # Additional metadata
+    metadata: dict = Field(
+        default_factory=dict,
+        description="Provider-specific metadata"
+    )
+    chunk_index: int = Field(
+        default=0,
+        description="Index of this chunk (0-based)"
+    )
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="ISO format timestamp"
+    )

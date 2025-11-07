@@ -12,13 +12,15 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from spoon_ai.schema import Message
+from spoon_ai.schema import Message, LLMResponseChunk
 from .interface import LLMProviderInterface, LLMResponse, ProviderCapability
 from .registry import LLMProviderRegistry, get_global_registry
 from .config import ConfigurationManager
 from .monitoring import DebugLogger, MetricsCollector, get_debug_logger, get_metrics_collector
 from .response_normalizer import ResponseNormalizer, get_response_normalizer
 from .errors import ProviderError, ConfigurationError, ProviderUnavailableError
+from spoon_ai.callbacks.base import BaseCallbackHandler
+from spoon_ai.callbacks.manager import CallbackManager
 
 logger = getLogger(__name__)
 
@@ -502,40 +504,6 @@ class LLMManager:
                 
                 # Try to reinitialize
                 return await self._ensure_provider_initialized(provider_name)
-    """Central orchestrator for LLM providers with fallback and load balancing."""
-
-    def __init__(self,
-                 config_manager: Optional[ConfigurationManager] = None,
-                 debug_logger: Optional[DebugLogger] = None,
-                 metrics_collector: Optional[MetricsCollector] = None,
-                 response_normalizer: Optional[ResponseNormalizer] = None,
-                 registry: Optional[LLMProviderRegistry] = None):
-        """Initialize LLM Manager.
-
-        Args:
-            config_manager: Configuration manager instance
-            debug_logger: Debug logger instance
-            metrics_collector: Metrics collector instance
-            response_normalizer: Response normalizer instance
-            registry: Provider registry instance
-        """
-        self.config_manager = config_manager or ConfigurationManager()
-        self.debug_logger = debug_logger or get_debug_logger()
-        self.metrics_collector = metrics_collector or get_metrics_collector()
-        self.response_normalizer = response_normalizer or get_response_normalizer()
-        self.registry = registry or get_global_registry()
-
-        self.fallback_strategy = FallbackStrategy(self.debug_logger)
-        self.load_balancer = LoadBalancer()
-
-        self.fallback_chain: List[str] = []
-        self.default_provider: Optional[str] = None
-        self.load_balancing_enabled: bool = False
-        self.load_balancing_strategy: str = "round_robin"
-
-        # Initialize providers from configuration
-        self._initialize_providers()
-
     def _initialize_providers(self) -> None:
         """Initialize providers from configuration."""
         try:
@@ -610,30 +578,37 @@ class LLMManager:
         # Normalize and return response
         return self.response_normalizer.normalize_response(response)
 
-    async def chat_stream(self, messages: List[Message], provider: Optional[str] = None, **kwargs) -> AsyncGenerator[str, None]:
-        """Send streaming chat request.
-
+    async def chat_stream(self,messages: List[Message],provider: Optional[str] = None,callbacks: Optional[List[BaseCallbackHandler]] = None,**kwargs) -> AsyncGenerator[LLMResponseChunk, None]:
+        """Send streaming chat request with callback support.              
         Args:
             messages: List of conversation messages
             provider: Specific provider to use (optional)
+            callbacks: Optional callback handlers for monitoring
             **kwargs: Additional parameters
 
         Yields:
-            str: Streaming response chunks
+            LLMResponseChunk: Structured streaming response chunks
         """
         # Determine provider to use (no fallback for streaming)
         providers = self._get_providers_for_request(provider)
         provider_name = providers[0]
-
+        await self._ensure_provider_initialized(provider_name)
+        
         # Get provider instance
         provider_instance = self.registry.get_provider(provider_name)
+
+        # Create callback manager with internal monitoring callbacks
+        internal_callbacks = self._get_internal_callbacks()
+        all_callbacks = internal_callbacks + (callbacks or [])
+        callback_manager = CallbackManager.from_callbacks(all_callbacks)
 
         # Log request
         request_id = self.debug_logger.log_request(provider_name, 'chat_stream', kwargs)
         start_time = asyncio.get_event_loop().time()
 
         try:
-            async for chunk in provider_instance.chat_stream(messages, **kwargs):
+            # Stream from provider with callbacks
+            async for chunk in provider_instance.chat_stream(messages,callbacks=all_callbacks,**kwargs):
                 yield chunk
 
             # Log successful completion
@@ -650,6 +625,11 @@ class LLMManager:
                 provider_name, 'chat_stream', duration, False, error=str(e)
             )
             raise
+    
+    def _get_internal_callbacks(self) -> List[BaseCallbackHandler]:
+        """Get internal monitoring callbacks."""
+        # For now, return empty list
+        return []
 
     async def completion(self, prompt: str, provider: Optional[str] = None, **kwargs) -> LLMResponse:
         """Send completion request.
@@ -735,73 +715,6 @@ class LLMManager:
 
         # Normalize and return response
         return self.response_normalizer.normalize_response(response)
-
-    async def _execute_provider_operation(self, provider_name: str, method: str, *args, **kwargs) -> LLMResponse:
-        """Execute an operation on a specific provider with monitoring.
-
-        Args:
-            provider_name: Name of the provider
-            method: Method to call on the provider
-            *args, **kwargs: Arguments for the method
-
-        Returns:
-            LLMResponse: Provider response
-        """
-        # Get provider instance with configuration
-        config = self.config_manager.load_provider_config(provider_name)
-        provider_instance = self.registry.get_provider(provider_name, config.model_dump())
-
-        # Ensure provider is initialized (lazy initialization)
-        if not hasattr(provider_instance, '_initialized') or not provider_instance._initialized:
-            try:
-                await provider_instance.initialize(config.model_dump())
-                provider_instance._initialized = True
-                logger.info(f"Lazy initialized provider: {provider_name}")
-            except Exception as e:
-                logger.error(f"Failed to initialize provider {provider_name}: {e}")
-                raise ProviderError(provider_name, f"Provider initialization failed: {str(e)}", original_error=e)
-
-        # Log request
-        request_id = self.debug_logger.log_request(provider_name, method, kwargs)
-        start_time = asyncio.get_event_loop().time()
-
-        try:
-            # Execute the operation
-            operation = getattr(provider_instance, method)
-            response = await operation(*args, **kwargs)
-
-            # Calculate duration
-            duration = asyncio.get_event_loop().time() - start_time
-            response.duration = duration
-            response.request_id = request_id
-
-            # Log successful response
-            self.debug_logger.log_response(request_id, response, duration)
-
-            # Record metrics
-            tokens = response.usage.get('total_tokens', 0) if response.usage else 0
-            self.metrics_collector.record_request(
-                provider_name, method, duration, True, tokens, response.model
-            )
-
-            return response
-
-        except Exception as e:
-            # Calculate duration
-            duration = asyncio.get_event_loop().time() - start_time
-
-            # Log error
-            self.debug_logger.log_error(request_id, e, {"provider": provider_name, "method": method})
-
-            # Record metrics
-            self.metrics_collector.record_request(
-                provider_name, method, duration, False, error=str(e)
-            )
-
-            # Update load balancer health
-            self.load_balancer.update_provider_health(provider_name, False)
-
-            raise
 
     def _get_providers_for_request(self, requested_provider: Optional[str]) -> List[str]:
         """Get list of providers to use for a request.

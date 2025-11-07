@@ -4,13 +4,15 @@ Anthropic Provider implementation for the unified LLM interface.
 
 import asyncio
 import json
-from typing import List, Dict, Any, Optional, AsyncGenerator
+from typing import List, Dict, Any, Optional, AsyncIterator
 from logging import getLogger
+from uuid import uuid4
 
 from anthropic import AsyncAnthropic
 from httpx import AsyncClient
 
-from spoon_ai.schema import Message, ToolCall, Function
+from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
+from spoon_ai.callbacks.manager import CallbackManager
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
 from ..registry import register_provider
@@ -229,10 +231,17 @@ class AnthropicProvider(LLMProviderInterface):
         except Exception as e:
             await self._handle_error(e)
     
-    async def chat_stream(self, messages: List[Message], **kwargs) -> AsyncGenerator[str, None]:
-        """Send streaming chat request to Anthropic."""
+    async def chat_stream(self, messages: List[Message],callbacks: Optional[List] = None, **kwargs) -> AsyncIterator[LLMResponseChunk]:
+        """Send streaming chat request to Anthropic with callback support.
+        Yields:
+            LLMResponseChunk: Structured streaming response chunks
+        """
         if not self.client:
             raise ProviderError("anthropic", "Provider not initialized")
+
+        # Create callback manager
+        callback_manager = CallbackManager.from_callbacks(callbacks)
+        run_id = uuid4()
         
         try:
             system_content, anthropic_messages = self._convert_messages(messages)
@@ -242,29 +251,102 @@ class AnthropicProvider(LLMProviderInterface):
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
             
+            # Trigger on_llm_start callback
+            await callback_manager.on_llm_start(
+                run_id=run_id,
+                messages=messages,
+                model=model,
+                provider="anthropic"
+            )
+            
             # Prepare request parameters
             request_params = {
                 'model': model,
                 'max_tokens': max_tokens,
                 'temperature': temperature,
                 'messages': anthropic_messages,
-                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
+                **{k: v for k, v in kwargs.items() 
+                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks']}
             }
             
             # Only add system parameter if we have system content
             if system_content is not None:
                 request_params['system'] = system_content
             
+            # Process streaming response
+            full_content = ""
+            chunk_index = 0
+            finish_reason = None
+            usage_data = None
+            
             async with self.client.messages.stream(**request_params) as stream:
                 async for chunk in stream:
+                    # Handle different chunk types
                     if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
-                        yield chunk.delta.text
+                        token = chunk.delta.text
+                        full_content += token
+                        
+                        # Trigger on_llm_new_token callback
+                        await callback_manager.on_llm_new_token(
+                            token=token,
+                            run_id=run_id
+                        )
+                        
+                        # Build response chunk
+                        response_chunk = LLMResponseChunk(
+                            content=full_content,
+                            delta=token,
+                            provider="anthropic",
+                            model=model,
+                            finish_reason=finish_reason,
+                            tool_calls=[],
+                            usage=usage_data,
+                            metadata={
+                                "chunk_index": chunk_index,
+                                "chunk_type": chunk.type
+                            },
+                            chunk_index=chunk_index
+                        )
+                        chunk_index += 1
+                        yield response_chunk
+                        
                     elif chunk.type == "message_start":
-                        # Log cache metrics from streaming message_start event
                         if hasattr(chunk, 'message') and hasattr(chunk.message, 'usage'):
                             self._log_cache_metrics(chunk.message.usage)
                             
+                    elif chunk.type == "message_delta":
+                        # Extract finish_reason
+                        if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'stop_reason'):
+                            finish_reason = chunk.delta.stop_reason
+                        # Extract final usage stats
+                        if hasattr(chunk, 'usage'):
+                            usage_data = {
+                                "input_tokens": chunk.usage.input_tokens,
+                                "output_tokens": chunk.usage.output_tokens
+                            }
+                            if hasattr(chunk.usage, 'cache_creation_input_tokens'):
+                                usage_data["cache_creation_input_tokens"] = chunk.usage.cache_creation_input_tokens
+                            if hasattr(chunk.usage, 'cache_read_input_tokens'):
+                                usage_data["cache_read_input_tokens"] = chunk.usage.cache_read_input_tokens
+                
+            # Trigger on_llm_end callback
+            await callback_manager.on_llm_end(
+                response=LLMResponseChunk(
+                    content=full_content,
+                    provider="anthropic",
+                    model=model,
+                    finish_reason=finish_reason,
+                    tool_calls=[],
+                    usage=usage_data
+                ),
+                run_id=run_id
+            )
+                            
         except Exception as e:
+            await callback_manager.on_llm_error(
+                error=e,
+                run_id=run_id
+            )
             await self._handle_error(e)
     
     async def completion(self, prompt: str, **kwargs) -> LLMResponse:

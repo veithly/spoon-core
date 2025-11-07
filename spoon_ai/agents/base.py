@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 from spoon_ai.chat import ChatBot, Memory
 from spoon_ai.schema import AgentState, ToolCall
+from spoon_ai.callbacks.base import BaseCallbackHandler
+from spoon_ai.callbacks.manager import CallbackManager
 
 logger = logging.getLogger(__name__)
 DEBUG = False
@@ -80,6 +82,9 @@ class BaseAgent(BaseModel, ABC):
     # Thread-safe replacements
     output_queue: ThreadSafeOutputQueue = Field(default_factory=ThreadSafeOutputQueue, description="Thread-safe output queue")
     task_done: asyncio.Event = Field(default_factory=asyncio.Event, description="The signal of agent run done")
+    
+    # Callback system
+    callbacks: List[BaseCallbackHandler] = Field(default_factory=list, description="Callback handlers for monitoring")
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -108,6 +113,9 @@ class BaseAgent(BaseModel, ABC):
         # Concurrency control
         self._active_operations = set()
         self._shutdown_event = asyncio.Event()
+        
+        # Initialize callback manager
+        self._callback_manager = CallbackManager.from_callbacks(self.callbacks)
 
     async def add_message(
         self,
@@ -262,8 +270,9 @@ class BaseAgent(BaseModel, ABC):
             self._state_transition_history.pop(0)
 
     async def run(self, request: Optional[str] = None, timeout: Optional[float] = None) -> str:
-        """Thread-safe run method with proper concurrency control"""
+        """Thread-safe run method with proper concurrency control and callback support."""
         timeout = timeout or self._default_timeout
+        run_id = uuid.uuid4()
 
         # Use run lock to prevent multiple concurrent run() calls
         try:
@@ -303,7 +312,7 @@ class BaseAgent(BaseModel, ABC):
                         # Execute step with timeout protection
                         try:
                             step_result = await asyncio.wait_for(
-                                self.step(),
+                                self.step(run_id=run_id),  # Pass run_id to step
                                 timeout=min(timeout / self.max_steps, 30.0)
                             )
                         except asyncio.TimeoutError:
@@ -319,13 +328,17 @@ class BaseAgent(BaseModel, ABC):
                     if self.current_step >= self.max_steps:
                         results.append(f"Step {self.current_step}: Reached maximum steps. Stopping.")
 
-            return "\n".join(results) if results else "No results"
+            final_output = "\n".join(results) if results else "No results"
+            return final_output
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.error(f"Agent {self.name} run() timed out after {timeout}s")
+            
             raise RuntimeError(f"Agent run timed out after {timeout}s")
+            
         except Exception as e:
             logger.error(f"Error during agent run: {e}")
+            
             raise
         finally:
             self._active_operations.discard(operation_id)
@@ -337,8 +350,8 @@ class BaseAgent(BaseModel, ABC):
                     self.state = AgentState.IDLE
                     self.current_step = 0
 
-    async def step(self) -> str:
-        """Override this method in subclasses - now with step-level locking"""
+    async def step(self, run_id: Optional[uuid.UUID] = None) -> str:
+        """Override this method in subclasses - now with step-level locking and callback support."""
         async with self._step_lock:
             # Subclasses should implement this
             raise NotImplementedError("Subclasses must implement this method")
@@ -376,7 +389,6 @@ class BaseAgent(BaseModel, ABC):
             self.next_step_prompt = stuck_prompt
 
         logger.warning(f"Added stuck prompt: {stuck_prompt}")
-
     # Basic retrieval compatibility: allow loading documents even if agent doesn't use RAG
     def add_documents(self, documents) -> None:
         """Store documents on the agent so CLI load-docs works without RAG mixin.
