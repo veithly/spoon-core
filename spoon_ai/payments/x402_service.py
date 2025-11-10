@@ -406,9 +406,11 @@ class X402PaymentService:
         result = activity.get("result", {})
         payload = result.get("signRawPayloadResult") or result.get("signTransactionResult") or {}
         signatures = payload.get("signatures")
-        if not signatures:
-            return None
-        signature_info = signatures[0]
+        if signatures:
+            signature_info = signatures[0]
+        else:
+            signature_info = payload
+
         signature = signature_info.get("signature")
         if signature:
             return signature if signature.startswith("0x") else f"0x{signature}"
@@ -425,9 +427,18 @@ class X402PaymentService:
         r_hex = _normalize(r).zfill(64)
         s_hex = _normalize(s).zfill(64)
         if isinstance(v, str):
-            v_hex = _normalize(v).zfill(2)
+            try:
+                v_value = int(v, 16) if v.startswith(("0x", "0X")) else int(v)
+            except ValueError:
+                return None
         else:
-            v_hex = f"{int(v):02x}"
+            v_value = int(v)
+
+        # Turnkey returns parity 0/1; EVM signatures expect 27/28.
+        if v_value in {0, 1}:
+            v_value += 27
+
+        v_hex = f"{v_value:02x}"
 
         return f"0x{r_hex}{s_hex}{v_hex}"
 
