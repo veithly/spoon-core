@@ -311,8 +311,38 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             chunk_index = 0
             tool_call_accumulator = {}  # For accumulating tool calls
             finish_reason = None  # Initialize finish_reason outside loop
+            tool_calls = []  # Initialize tool_calls outside loop
             
             async for chunk in stream:
+                # Skip chunks without choices (e.g., final chunk with only usage stats)
+                if not hasattr(chunk, 'choices') or not chunk.choices:
+                    # Extract usage stats from chunks without choices
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage = {
+                            "prompt_tokens": chunk.usage.prompt_tokens,
+                            "completion_tokens": chunk.usage.completion_tokens,
+                            "total_tokens": chunk.usage.total_tokens
+                        }
+                        # Yield a final chunk with usage info
+                        response_chunk = LLMResponseChunk(
+                            content=full_content,
+                            delta="",
+                            provider=self.get_provider_name(),
+                            model=model,
+                            finish_reason=finish_reason,
+                            tool_calls=tool_calls,
+                            tool_call_chunks=None,
+                            usage=usage,
+                            metadata={
+                                "chunk_id": chunk.id if hasattr(chunk, 'id') else None,
+                                "created": chunk.created if hasattr(chunk, 'created') else None
+                            },
+                            chunk_index=chunk_index,
+                            timestamp=datetime.now().isoformat()
+                        )
+                        yield response_chunk
+                        chunk_index += 1
+                    continue
 
                 choice = chunk.choices[0]
                 delta = choice.delta
@@ -327,7 +357,6 @@ class OpenAICompatibleProvider(LLMProviderInterface):
                     finish_reason = choice.finish_reason
                 
                 # Handle tool calls (OpenAI streams them incrementally)
-                tool_calls = []
                 tool_call_chunks = None
                 
                 if delta.tool_calls:
@@ -359,19 +388,19 @@ class OpenAICompatibleProvider(LLMProviderInterface):
                             "type": tc_chunk.type,
                             "function": tc_chunk.function.model_dump() if tc_chunk.function else None
                         })
-                    
-                    # Convert accumulated tool calls to ToolCall objects
-                    tool_calls = [
-                        ToolCall(
-                            id=tc["id"],
-                            type=tc["type"],
-                            function=Function(
-                                name=tc["function"]["name"],
-                                arguments=tc["function"]["arguments"]
-                            )
+                
+                # Convert accumulated tool calls to ToolCall objects (build from accumulator each time)
+                tool_calls = [
+                    ToolCall(
+                        id=tc["id"],
+                        type=tc["type"],
+                        function=Function(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"]["arguments"]
                         )
-                        for tc in tool_call_accumulator.values()
-                    ]
+                    )
+                    for tc in tool_call_accumulator.values()
+                ]
                 
                 # Extract usage stats (typically in final chunk)
                 usage = None
