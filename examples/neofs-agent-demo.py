@@ -21,6 +21,8 @@ Usage:
 """
 
 import asyncio
+import base64
+import os
 from typing import List
 from dotenv import load_dotenv
 
@@ -863,6 +865,53 @@ Use the container_id and object_id from previous steps.
 No bearer token needed for delete operation.""")
         print(f"✅ Response: {response11}")
 
+    async def demo_image_upload(self, image_path: str = None):
+        """Demonstrate image upload to specific container
+        
+        Args:
+            image_path: Optional path to image file. If None, uses sample image data.
+                       Note: The image will be read as binary and passed directly to the tool.
+        """
+        self.print_section_header("7. Image Upload to Container")
+        
+        # Target container ID
+        target_container_id = "GAi2JaAnrf1jdvyEChn8sSMrkh5Tgq7GPKLcikLMnCFh"
+        
+        # Use object storage agent
+        agent = self.agents['object']
+        
+        # Prepare image data
+        if image_path and os.path.exists(image_path):
+            # Read image file as binary
+            with open(image_path, 'rb') as f:
+                image_bytes = f.read()
+            file_name = os.path.basename(image_path)
+            # Convert binary to base64 for passing as string to the tool
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            content_type = f"image/{os.path.splitext(file_name)[1][1:].lower()}" if os.path.splitext(file_name)[1] else "image/png"
+        else:
+            # Use sample image data (base64 encoded PNG - 1x1 pixel red dot)
+            image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            file_name = "demo-image.png"
+            content_type = "image/png"
+        
+        print(f"\n{'-'*60}")
+        print(f" Agent: {agent.agent_name}")
+        print(f" Scenario: Upload Image to Container")
+        print(f" Container ID: {target_container_id}")
+        print(f" Image: {file_name} ({len(image_base64)} chars base64)")
+        print(f"{'-'*60}")
+        
+        response = await agent.run(f"""Upload an image file to container {target_container_id}:
+
+Use upload_object_to_neofs tool with these parameters:
+- container_id: "{target_container_id}"
+- content: "{image_base64}"
+- attributes_json: "{{\\"FileName\\": \\"{file_name}\\", \\"ContentType\\": \\"{content_type}\\", \\"Type\\": \\"Image\\", \\"UploadedBy\\": \\"Agent\\"}}"
+
+Important: The content parameter contains base64-encoded image data. After upload, show me the object ID and confirm success.""")
+        print(f"✅ Response: {response}")
+
     async def run_comprehensive_demo(self):
         """Run the complete agent-based demonstration"""
         print("🚀 NeoFS Storage - AI Agent Comprehensive Demonstration")
@@ -888,7 +937,8 @@ No bearer token needed for delete operation.""")
             # await self.demo_public_container_workflow()
             # await self.demo_eacl_container_workflow()
             # await self.demo_access_control()
-            await self.demo_advanced_scenarios()
+            # await self.demo_advanced_scenarios()
+            await self.demo_image_upload()
 
             # Final summary
             self.print_section_header("Demo Completed Successfully")
