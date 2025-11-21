@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-try:  # Python 3.11+
+try:  # Python 3.12+
     from importlib.metadata import PackageNotFoundError, version as _dist_version
 except Exception:  # pragma: no cover - fallback for older environments
     try:
@@ -26,7 +26,7 @@ def _read_local_pyproject_version() -> str | None:
 
     try:
         try:
-            import tomllib  # Python 3.11+
+            import tomllib  # Python 3.12+
         except Exception:  # pragma: no cover
             import tomli as tomllib  # type: ignore
 
@@ -61,13 +61,13 @@ def _resolve_version() -> str:
 
 __version__: str = _resolve_version()
 
-from spoon_ai.chat import ChatBot 
-from spoon_ai.schema import LLMResponse, LLMResponseChunk, Message 
+from spoon_ai.chat import ChatBot
+from spoon_ai.schema import LLMResponse, LLMResponseChunk, Message
 
 __all__ = [
     "__version__",
     "ChatBot",
-    "Message", 
+    "Message",
     "LLMResponse",
     "LLMResponseChunk",
 ]

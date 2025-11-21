@@ -569,6 +569,7 @@ class GeminiProvider(LLMProviderInterface):
                 ProviderCapability.IMAGE_GENERATION,
                 ProviderCapability.VISION
             ],
+            max_tokens=self.max_tokens,
             supports_system_messages=True,
             rate_limits={
                 "requests_per_minute": 60,
