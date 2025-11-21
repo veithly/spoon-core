@@ -539,6 +539,7 @@ class ChatBot:
             messages=processed_messages,
             tools=tools or [],
             provider=self.llm_provider,
+            tool_choice=tool_choice,
             **kwargs
         )
 

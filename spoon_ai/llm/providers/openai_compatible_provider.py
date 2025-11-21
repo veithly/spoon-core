@@ -258,13 +258,18 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
 
+            tools = kwargs.get('tools')
+            tool_choice = kwargs.get('tool_choice', 'auto')
+
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=openai_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                tools=tools,
+                tool_choice=tool_choice,
                 stream=False,
-                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
+                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature', 'tools', 'tool_choice']}
             )
 
             duration = asyncio.get_event_loop().time() - start_time
@@ -296,15 +301,20 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             # Trigger on_llm_start callback
             await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider=self.get_provider_name())
 
+            tools = kwargs.get('tools')
+            tool_choice = kwargs.get('tool_choice', 'auto')
+
             stream = await self.client.chat.completions.create(
                 model=model,
                 messages=openai_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                tools=tools,
+                tool_choice=tool_choice,
                 stream=True,
                 stream_options={"include_usage": True},  # Request usage stats
                 **{k: v for k, v in kwargs.items() 
-                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks']}
+                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks', 'tools', 'tool_choice']}
             )
             # Process streaming response
             full_content = ""

@@ -56,7 +56,7 @@ SpoonOS is a living, evolving agentic operating system. Its SCDF is purpose-buil
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - pip package manager (or uv as a faster alternative)
 
 ```bash
@@ -75,6 +75,8 @@ $ pip install -r requirements.txt
 Prefer faster install? See docs/installation.md for uv-based setup.
 
 ## 🔐 Configuration Setup
+
+> **Note (Nov 2025):** When you import `spoon_ai` directly in Python, configuration is read from environment variables (including `.env`). The interactive CLI / `spoon-cli` tooling is what reads `config.json` and exports those values into the environment for you.
 
 SpoonOS uses a unified configuration system that supports multiple setup methods. Choose the one that works best for your workflow:
 
@@ -185,9 +187,9 @@ python main.py
 > config
 ```
 
-### Method 3: Direct config.json
+### Method 3: CLI `config.json` (optional)
 
-Create or edit `config.json` directly for advanced configurations:
+For CLI workflows (including `python main.py` and `spoon-cli`), you can create or edit a `config.json` file that the CLI layer reads and then exports into environment variables. Core Python code still uses environment variables only.
 
 ```json
 {
@@ -231,10 +233,10 @@ Create or edit `config.json` directly for advanced configurations:
 
 ### Configuration Priority
 
-SpoonOS uses a hybrid configuration system:
+SpoonOS uses a split configuration model:
 
-1. **`config.json`** (Highest Priority) - Runtime configuration, can be modified via CLI
-2. **`.env` file** (Fallback) - Initial setup, used to generate `config.json` if it doesn't exist
+- **Core SDK (Python imports of `spoon_ai`)**: reads only environment variables (including `.env`).
+- **CLI layer (main.py / spoon-cli)**: reads `config.json`, then materializes values into environment variables before invoking the SDK.
 
 ### Tool Configuration
 
@@ -353,7 +355,7 @@ See `examples/turnkey/` for complete usage examples.
 
 ### Provider Configuration
 
-Configure providers in your `config.json`:
+In CLI workflows you can configure providers in the CLI `config.json` (the CLI will export these values into environment variables before invoking the SDK). For pure SDK usage, set the corresponding environment variables instead of relying on `config.json`:
 
 ```json
 {
