@@ -4,11 +4,11 @@ from fastmcp.client.transports import (FastMCPTransport, PythonStdioTransport,
                                        SSETransport, WSTransport, NpxStdioTransport,
                                        FastMCPStdioTransport, UvxStdioTransport, StdioTransport)
 from fastmcp.client import Client as MCPClient
-from pydantic import Field
+from pydantic import Field, AliasChoices, model_validator
 import logging
 
 from spoon_ai.chat import ChatBot
-from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT, SYSTEM_PROMPT
+from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT_TEMPLATE, SYSTEM_PROMPT
 from spoon_ai.tools import ToolManager
 
 
@@ -39,13 +39,16 @@ class SpoonReactAI(ToolCallAgent):
     name: str = "spoon_react"
     description: str = "A smart ai agent in neo blockchain"
 
-    system_prompt: str = SYSTEM_PROMPT
-    next_step_prompt: str = NEXT_STEP_PROMPT
+    system_prompt: Optional[str] = None
+    next_step_prompt: Optional[str] = None
 
     max_steps: int = 10
-    tool_choice: str = "auto"
+    tool_choice: str = "required"
 
-    available_tools: ToolManager = Field(default_factory=lambda: ToolManager([]))
+    available_tools: ToolManager = Field(
+        default_factory=lambda: ToolManager([]),
+        validation_alias=AliasChoices("available_tools", "avaliable_tools", "tools"),
+    )
     llm: ChatBot = Field(default_factory=create_configured_chatbot)
 
     mcp_transport: Union[str, WSTransport, SSETransport, PythonStdioTransport, NpxStdioTransport, FastMCPTransport, FastMCPStdioTransport, UvxStdioTransport, StdioTransport] = Field(default="mcp_server")
@@ -56,7 +59,52 @@ class SpoonReactAI(ToolCallAgent):
         """Initialize SpoonReactAI with both ToolCallAgent and MCPClientMixin initialization"""
         # Call parent class initializers
         ToolCallAgent.__init__(self, **kwargs)
+        # Normalize available_tools input (list -> ToolManager)
+        if isinstance(getattr(self, "available_tools", None), list):
+            self.available_tools = ToolManager(self.available_tools)
+        if self.available_tools is None:
+            self.available_tools = ToolManager([])
         self._x402_tools_initialized = False
+        self._refresh_prompts()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_tools(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """Allow passing `tools` or `available_tools` as a list; wrap into ToolManager."""
+        tools_input = values.get("tools", None)
+        avail_input = values.get("available_tools", None) or values.get("avaliable_tools", None)
+
+        def wrap(val):
+            if isinstance(val, ToolManager):
+                return val
+            if isinstance(val, list):
+                return ToolManager(val)
+            return val
+
+        if tools_input is not None:
+            values["available_tools"] = wrap(tools_input)
+        elif avail_input is not None:
+            values["available_tools"] = wrap(avail_input)
+
+        return values
+
+    def _build_tool_list(self) -> str:
+        """Return bullet list of available tools names and descriptions."""
+        if not getattr(self, "available_tools", None) or not getattr(self.available_tools, "tool_map", None):
+            return "- (no tools loaded)"
+        lines = []
+        for tool in self.available_tools.tool_map.values():
+            desc = getattr(tool, "description", "") or ""
+            lines.append(f"- {getattr(tool, 'name', 'unknown')}: {desc}")
+        return "\n".join(lines)
+
+    def _refresh_prompts(self) -> None:
+        """Refresh system and next-step prompts dynamically from current tools."""
+        tool_list = self._build_tool_list()
+        self.system_prompt = f"{SYSTEM_PROMPT}\n\nAvailable tools:\n{tool_list}"
+        self.next_step_prompt = NEXT_STEP_PROMPT_TEMPLATE.format(
+            tool_list=tool_list,
+        )
 
     async def initialize(self, __context: Any = None):
         """Initialize async components and subscribe to topics"""
@@ -109,3 +157,8 @@ class SpoonReactAI(ToolCallAgent):
             self.avaliable_tools.add_tool(X402PaywalledRequestTool(service=service))
 
         self._x402_tools_initialized = True
+
+    async def run(self, request: Optional[str] = None) -> str:
+        """Ensure prompts reflect current tools before running."""
+        self._refresh_prompts()
+        return await super().run(request)
