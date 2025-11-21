@@ -230,8 +230,21 @@ class UploadObjectTool(BaseTool):
         import json
         
         try:
+            import base64
             client = get_shared_neofs_client()
-            content_bytes = content.encode('utf-8')
+            
+            # Handle content encoding:
+            # - If content is base64-encoded (images, binary files), decode it
+            # - If content is plain text (not base64), encode as UTF-8
+            # This ensures backward compatibility: plain text files work as-is,
+            # while base64-encoded content (like images) is properly decoded
+            try:
+                # Attempt base64 decode - if it succeeds, use decoded bytes
+                content_bytes = base64.b64decode(content, validate=True)
+            except Exception:
+                # If base64 decode fails, treat as plain text and encode as UTF-8
+                # This handles regular text files without requiring base64 encoding
+                content_bytes = content.encode('utf-8')
             
             # Parse attributes from JSON string if provided, otherwise use dict
             if attributes_json:
