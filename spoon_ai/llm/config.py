@@ -341,7 +341,7 @@ class ConfigurationManager:
             },
             'gemini': {
                 'model': 'gemini-2.5-pro',
-                'max_tokens': 250000,
+                'max_tokens': 20000,
                 'base_url': 'https://generativelanguage.googleapis.com/v1beta',
                 'temperature': 0.1,   # Lower temperature for Gemini
                 **{k: v for k, v in common_defaults.items() if k != 'temperature'}
