@@ -21,6 +21,8 @@ Usage:
 """
 
 import asyncio
+import base64
+import os
 from typing import List
 from dotenv import load_dotenv
 
@@ -160,7 +162,7 @@ class NeoFSAgentDemo:
         "test_scenarios": {
             "existing_containers": [
                 {
-                    "id": "xxxxxx",
+                    "id": "GuZWKoBFg8GYCWdgHxZwVdBfdHTvNPJhvY1EHFQTCoXV",
                     "name": "demo-public-storage",
                     "type": "public",
                     "acl": "public-read-write"
@@ -249,6 +251,8 @@ class NeoFSAgentDemo:
 
     def create_agent(self, name: str, tools: List, description: str) -> ToolCallAgent:
         """Create a specialized agent with specific tools"""
+        # Capture variables for closure to avoid issues with lambda
+        agent_tools_list = tools
         
         class NeoFSSpecializedAgent(ToolCallAgent):
             agent_name: str = name
@@ -295,13 +299,14 @@ class NeoFSAgentDemo:
         Explain each step clearly.
         """
             max_steps: int = 20
-            available_tools: ToolManager = Field(default_factory=lambda: ToolManager(tools))
+            available_tools: ToolManager = Field(default_factory=lambda: ToolManager(agent_tools_list))
         
         agent = NeoFSSpecializedAgent(
             llm=ChatBot(
                 llm_provider="openrouter",
                 model_name="openai/gpt-4o"
-            )
+            ),
+            available_tools=ToolManager(agent_tools_list)
         )
         return agent
 
@@ -483,7 +488,7 @@ class NeoFSAgentDemo:
         self.print_section_header("3. PUBLIC Container Complete Workflow")
         
         # Use PUBLIC container ID
-        public_container_id = "xxxxxxxxx"
+        public_container_id = "xxxxxxxxxxxxxxx"
         
         # Use persistent agent to remember object_id
         agent = self.agents['object']
@@ -537,7 +542,7 @@ class NeoFSAgentDemo:
         self.print_section_header("4. eACL Container Complete Workflow")
         
         # Use existing eACL container
-        eacl_container_id = "xxxxxxxxx"
+        eacl_container_id = "xxxxxxxxxxxxxxx"
         
         # Use persistent agent
         agent = self.agents['access']
@@ -662,8 +667,8 @@ class NeoFSAgentDemo:
         self.print_section_header("6. Advanced Object Operations")
         
         # User-provided container IDs
-        public_container_id = "xxxxxxxxx"
-        eacl_container_id = "xxxxxxxxx"
+        public_container_id = "xxxxxxxxxxxxxxx"
+        eacl_container_id = "xxxxxxxxxxxxxxx"
         
         # Use persistent agent
         agent = self.agents['object']
@@ -863,6 +868,54 @@ Use the container_id and object_id from previous steps.
 No bearer token needed for delete operation.""")
         print(f"✅ Response: {response11}")
 
+    async def demo_upload_to_specific_container(self, image_path: str = None, file_name: str = None, attributes: dict = None):
+        """Upload image to a specific public container using agent
+        
+        Args:
+            image_path: Path to image file. If None, uses sample image data.
+            file_name: File name. If None, uses default or basename of image_path.
+            attributes: File attributes dict. If None, uses default.
+        """
+        self.print_section_header("7. Upload Image to Specific Public Container")
+        
+        # Fixed container ID
+        # Original: "754iyTDY8xUtZJZfheSYLUn7jvCkxr79RcbjMt81QykC" (does not exist - confirmed by tests)
+        # Using one of your public containers instead for testing:
+        TARGET_CONTAINER_ID = "xxxxxxxxxxxxxxx"  # agent-demo-public-1760869880 (ACL: 1fbfbfff = public-read-write)
+        
+        # Use object storage agent
+        agent = self.agents['object']
+        
+        # Prepare image data
+        if image_path and os.path.exists(image_path):
+            # Read image file and encode to base64
+            with open(image_path, 'rb') as f:
+                image_bytes = f.read()
+                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            if file_name is None:
+                file_name = os.path.basename(image_path)
+            ext = os.path.splitext(file_name)[1][1:].lower()
+            content_type = f"image/{ext}" if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] else "image/png"
+        else:
+            # Use sample image (1x1 pixel red PNG)
+            image_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            file_name = file_name or "demo-image.png"
+            content_type = "image/png"
+        
+        print(f"\n{'-'*60}")
+        print(f" Agent: {agent.agent_name}")
+        print(f" Scenario: Upload Image to Public Container")
+        print(f" Container ID: {TARGET_CONTAINER_ID}")
+        print(f" Image: {file_name}")
+        print(f" Content Type: {content_type}")
+        print(f"{'-'*60}")
+        
+        # Simplified natural language prompt - let agent handle details
+        response = await agent.run(f"""Upload an image file named "{file_name}" ({content_type}) to container {TARGET_CONTAINER_ID}. 
+The image data is: {image_base64}.
+This is a public container.""")
+        print(f"✅ Response: {response}")
+
     async def run_comprehensive_demo(self):
         """Run the complete agent-based demonstration"""
         print("🚀 NeoFS Storage - AI Agent Comprehensive Demonstration")
@@ -883,12 +936,19 @@ No bearer token needed for delete operation.""")
             print(f"✅ Created {len(self.agents)} specialized agents")
 
             # Run comprehensive demonstrations
-            # await self.demo_network_status()
-            # await self.demo_container_operations()
-            # await self.demo_public_container_workflow()
-            # await self.demo_eacl_container_workflow()
-            # await self.demo_access_control()
+            await self.demo_network_status()
+            await self.demo_container_operations()
+            await self.demo_public_container_workflow()
+            await self.demo_eacl_container_workflow()
+            await self.demo_access_control()
             await self.demo_advanced_scenarios()
+            # Test with sample image 
+            await self.demo_upload_to_specific_container()
+            
+            # Test with real image file if exists
+            test_image_path = "examples/test_image.png"
+            if os.path.exists(test_image_path):
+                await self.demo_upload_to_specific_container(image_path=test_image_path)
 
             # Final summary
             self.print_section_header("Demo Completed Successfully")
