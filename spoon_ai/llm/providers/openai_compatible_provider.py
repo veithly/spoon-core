@@ -35,9 +35,15 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         self.default_model: str = "gpt-4.1"
 
     def _uses_completion_token_param(self, model: str) -> bool:
-        """Whether this model expects max_completion_tokens instead of max_tokens."""
+        """Whether this model expects max_completion_tokens instead of max_tokens.
+
+        Only the new OpenAI `gpt-5*` and `o*` models use the completion-only
+        parameter. Namespaces like OpenRouter's `openai/gpt-3.5-turbo` should
+        still use `max_tokens`, so we check the final segment only.
+        """
         model_lower = (model or "").lower()
-        return model_lower.startswith("gpt-5") or model_lower.startswith("o")
+        tail = model_lower.split("/")[-1]  # strip any provider prefix like openrouter
+        return tail.startswith("gpt-5") or tail.startswith("o1") or tail.startswith("o3") or tail.startswith("o4")
 
     def _max_token_kwargs(self, model: str, max_tokens: int, overrides: Dict[str, Any]) -> Dict[str, Any]:
         """
