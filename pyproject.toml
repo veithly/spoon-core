@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [ # Complete dependencies from requirements.txt for out-of-the-box usage
     "aiohappyeyeballs>=2.4.4",
-    "aiohttp>=3.10.5",
+    "aiohttp>=3.13.2",
     "aiosignal>=1.3.2",
     "annotated-types>=0.7.0",
     "anyio>=4.8.0",
@@ -70,6 +70,7 @@ dependencies = [ # Complete dependencies from requirements.txt for out-of-the-bo
     "boto3==1.35.99",
     "botocore==1.35.99",
     "fastmcp>=2.12.0",
+    "mem0ai>=0.0.1",
     "googleapis-common-protos",
     "cryptography>=41.0.0",
     "eth-utils>=2.0.0",
