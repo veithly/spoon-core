@@ -420,18 +420,24 @@ class ChatBot:
 
     def _initialize_long_term_memory(self) -> None:
         """Initialize Mem0 client when configured."""
-        self.mem0_user_id = self.mem0_config.get("user_id") or self.mem0_config.get("agent_id")
-        self.mem0_client = SpoonMem0(self.mem0_config)
+        if not self.long_term_memory_enabled:
+            self.mem0_client = None
+            return
 
-        if self.mem0_client and self.mem0_client.is_ready():
+        self.mem0_user_id = self.mem0_config.get("user_id") or self.mem0_config.get("agent_id")
+        client = SpoonMem0(self.mem0_config)
+
+        if client and client.is_ready():
+            self.mem0_client = client
             logger.info(
                 "Long-term memory enabled via Mem0 (user/agent id=%s)",
                 self.mem0_user_id or "default",
             )
-        else:
-            if self.mem0_client:
-                logger.warning("Mem0 client not ready; disabling long-term memory.")
-            self.mem0_client = None
+            return
+
+        if client:
+            logger.warning("Mem0 client not ready; disabling long-term memory.")
+        self.mem0_client = None
 
     def update_mem0_config(self, config: Optional[Dict[str, Any]] = None, enable: Optional[bool] = None) -> None:
         """Update Mem0 configuration and re-initialize the client if needed."""
@@ -442,10 +448,11 @@ class ChatBot:
         else:
             self.long_term_memory_enabled = self.long_term_memory_enabled or bool(self.mem0_config)
 
-        if self.long_term_memory_enabled:
-            self._initialize_long_term_memory()
-        else:
+        if not self.long_term_memory_enabled:
             self.mem0_client = None
+            return
+
+        self._initialize_long_term_memory()
 
     async def _apply_short_term_memory_strategy(
         self,
@@ -550,16 +557,19 @@ class ChatBot:
         return formatted_messages
 
     def _extract_user_query(self, messages: List[Message]) -> Optional[str]:
-        for message in reversed(messages):
-            role_value = getattr(message, "role", None)
-            if role_value and str(role_value) == "user" and message.content:
-                return message.content
-        return None
+        return next(
+            (
+                message.content
+                for message in reversed(messages)
+                if getattr(message, "role", None) and str(getattr(message, "role")) == "user" and message.content
+            ),
+            None,
+        )
 
     async def _inject_long_term_context(
         self, messages: List[Message]
     ) -> Tuple[List[Message], Optional[str]]:
-        if not self.long_term_memory_enabled or not self.mem0_client:
+        if not self.mem0_client:
             return messages, None
 
         user_query = self._extract_user_query(messages)
@@ -592,17 +602,12 @@ class ChatBot:
     async def _store_long_term_memory(
         self, user_query: Optional[str], assistant_response: Optional[str]
     ) -> None:
-        if not self.long_term_memory_enabled or not self.mem0_client:
+        if not self.mem0_client or not user_query or not assistant_response:
             return
-
-        memory_payload: List[Message] = []
-        if user_query:
-            memory_payload.append(Message(role="user", content=user_query))
-        if assistant_response:
-            memory_payload.append(Message(role="assistant", content=assistant_response))
-
-        if not memory_payload:
-            return
+        memory_payload: List[Message] = [
+            Message(role="user", content=user_query),
+            Message(role="assistant", content=assistant_response),
+        ]
 
         try:
             await self.mem0_client.aadd_memory(memory_payload, user_id=self.mem0_user_id)
@@ -616,13 +621,11 @@ class ChatBot:
         """
         formatted_messages = self._format_messages(messages, system_msg)
         messages_with_long_term, user_query = await self._inject_long_term_context(formatted_messages)
-
         processed_messages = await self._apply_short_term_memory_strategy(
             messages_with_long_term,
             model=self.model_name,
         )
 
-        # Use LLM manager for the request
         response = await self.llm_manager.chat(
             messages=processed_messages,
             provider=self.llm_provider
@@ -639,13 +642,11 @@ class ChatBot:
         """
         formatted_messages = self._format_messages(messages, system_msg)
         messages_with_long_term, user_query = await self._inject_long_term_context(formatted_messages)
-
         processed_messages = await self._apply_short_term_memory_strategy(
             messages_with_long_term,
             model=self.model_name,
         )
 
-        # Use LLM manager for the tool request
         response = await self.llm_manager.chat_with_tools(
             messages=processed_messages,
             tools=tools or [],

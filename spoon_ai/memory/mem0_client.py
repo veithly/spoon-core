@@ -4,7 +4,11 @@ import os
 from typing import Any, Dict, List, Optional
 
 from spoon_ai.schema import Message
-from mem0 import MemoryClient
+
+try:
+    from mem0 import MemoryClient  # type: ignore
+except ImportError:
+    MemoryClient = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,11 @@ class SpoonMem0:
         self.limit = self.config.get("limit")
         self.filters = self.config.get("filters") or {}
         self.metadata = self._build_metadata()
-        self.client = self._initialize_client()
+        if MemoryClient is None:
+            logger.warning("mem0ai is not installed. Memory features will be disabled.")
+            self.client = None
+        else:
+            self.client = self._initialize_client()
 
     def _build_metadata(self) -> Dict[str, Any]:
         metadata = dict(self.config.get("metadata") or {})
