@@ -133,6 +133,25 @@ def decode_receipt(header_value: str) -> Dict[str, Any]:
     return payload.model_dump()
 
 
+def extract_music_url(content: str) -> Optional[str]:
+    """Extract SoundCloud (or other) music link from HTML/text."""
+    if not content:
+        return None
+    cleaned = html.unescape(content)
+    # Look for SoundCloud embed first
+    match = re.search(r"https?://w\.soundcloud\.com/player/\?[^\s\"'<>]+", cleaned)
+    if match:
+        return match.group(0)
+    match = re.search(r"https?://soundcloud\.com/[^\s\"'<>]+", cleaned)
+    if match:
+        return match.group(0)
+    # Fallback: first http(s) link
+    match = re.search(r"https?://[^\s\"'<>]+", cleaned)
+    if match:
+        return match.group(0)
+    return None
+
+
 def parse_tool_output(raw: str) -> Any:
     segment: Optional[str] = None
     if "Output:" in raw:
@@ -294,6 +313,7 @@ async def main() -> None:
     http_probe_result = extract_tool_payload(messages, "http_probe")
     payment_result = extract_tool_payload(messages, "x402_paywalled_request")
     assistant_summary = extract_last_assistant(messages)
+    music_url: Optional[str] = None
 
     if not assistant_summary and payment_result:
         body = payment_result.get("body")
@@ -301,6 +321,13 @@ async def main() -> None:
             assistant_summary = summarise_text(json.dumps(body, ensure_ascii=False))
         elif isinstance(body, str):
             assistant_summary = summarise_text(body)
+            music_url = extract_music_url(body)
+
+    # Attempt music URL extraction even if assistant summary already exists.
+    if music_url is None and payment_result:
+        body = payment_result.get("body")
+        if isinstance(body, str):
+            music_url = extract_music_url(body)
 
     if http_probe_result:
         preview_body = http_probe_result.get("body")
@@ -328,6 +355,9 @@ async def main() -> None:
     if assistant_summary:
         rprint("\n[bold green]Agent Final Summary[/]")
         rprint(assistant_summary)
+    if music_url:
+        rprint("\n[bold green]Music URL[/]")
+        rprint(music_url)
 
     if payment_header:
         rprint("\n[bold blue]Signed X-PAYMENT Header[/]")
