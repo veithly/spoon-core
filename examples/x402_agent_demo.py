@@ -25,6 +25,8 @@ from spoon_ai.agents.spoon_react import SpoonReactAI  # noqa: E402
 from spoon_ai.chat import ChatBot  # noqa: E402
 from spoon_ai.schema import Message, Role  # noqa: E402
 from spoon_ai.payments import X402PaymentReceipt, X402PaymentService  # noqa: E402
+from pydantic import Field  # noqa: E402
+from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT_TEMPLATE  # noqa: E402
 from spoon_ai.tools.base import BaseTool, ToolResult  # noqa: E402
 from spoon_ai.tools.tool_manager import ToolManager  # noqa: E402
 from spoon_ai.tools.x402_payment import X402PaywalledRequestTool  # noqa: E402
@@ -42,7 +44,11 @@ class HttpProbeTool(BaseTool):
     parameters: Dict[str, Any] = {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "Resource URL to fetch"},
+            "url": {
+                "type": "string",
+                "description": "Resource URL to fetch",
+                "default": PAYWALLED_URL,
+            },
             "timeout": {
                 "type": "number",
                 "description": "Timeout in seconds for the request",
@@ -60,12 +66,14 @@ class HttpProbeTool(BaseTool):
 
     async def execute(
         self,
-        url: str,
+        url: str = PAYWALLED_URL,
         timeout: float = 20.0,
         headers: Optional[Dict[str, str]] = None,
     ) -> ToolResult:
+        # Fall back to the demo URL so the agent never fails on a missing argument.
+        target = url or PAYWALLED_URL
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(target, headers=headers)
         try:
             body = response.json()
         except json.JSONDecodeError:
@@ -198,6 +206,8 @@ def print_conversation(messages: list[Message]) -> None:
 class X402ReactAgent(SpoonReactAI):
     name: str = "x402_react_agent"
     description: str = "ReAct agent that pays x402 invoices to reach protected resources"
+    target_url: str = PAYWALLED_URL
+    service: X402PaymentService = Field(default_factory=X402PaymentService, exclude=True)
 
     template_system_prompt: str = (
         "You are an autonomous ReAct agent with tool access."
@@ -213,23 +223,31 @@ class X402ReactAgent(SpoonReactAI):
     )
 
     def __init__(self, service: X402PaymentService, url: str, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.service = service
-        self.target_url = url
+        super().__init__(service=service, target_url=url, **kwargs)
         self.http_probe_tool = HttpProbeTool()
         self.payment_tool: Optional[X402PaywalledRequestTool] = None
-        self.system_prompt = self.template_system_prompt.format(
-            target_url=self.target_url,
-            amount=str(PAYMENT_USDC),
-        )
         self.max_steps = 6
         self.x402_enabled = False  # prevent base class from auto-attaching duplicate tools
         self.available_tools = ToolManager([])
+        self._refresh_prompts()
 
     async def initialize(self) -> None:
         ensure_wallet_configuration(self.service)
         self.payment_tool = X402PaywalledRequestTool(service=self.service)
         self.available_tools = ToolManager([self.http_probe_tool, self.payment_tool])
+        self._refresh_prompts()
+
+    def _refresh_prompts(self) -> None:
+        """Keep the customised x402 playbook while still listing current tools."""
+        tool_list = self._build_tool_list()
+        self.system_prompt = (
+            self.template_system_prompt.format(
+                target_url=self.target_url,
+                amount=str(PAYMENT_USDC),
+            )
+            + f"\n\nAvailable tools:\n{tool_list}"
+        )
+        self.next_step_prompt = NEXT_STEP_PROMPT_TEMPLATE.format(tool_list=tool_list)
 
 
 async def main() -> None:
