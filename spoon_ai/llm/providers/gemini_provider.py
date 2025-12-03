@@ -343,18 +343,15 @@ class GeminiProvider(LLMProviderInterface):
                         yield response_chunk
             
             # Trigger on_llm_end callback
-            final_response = LLMResponse(
-                content=full_content,
-                provider="gemini",
-                model=model,
-                finish_reason=finish_reason or "stop",
-                native_finish_reason=finish_reason or "stop",
-                tool_calls=[],
-                usage=usage_data,
-                metadata={}
-            )
             await callback_manager.on_llm_end(
-                response=final_response,
+                response=LLMResponseChunk(
+                    content=full_content,
+                    provider="gemini",
+                    model=model,
+                    finish_reason=finish_reason,
+                    tool_calls=[],
+                    usage=usage_data
+                ),
                 run_id=run_id
             )
                             
