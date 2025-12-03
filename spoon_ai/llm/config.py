@@ -335,7 +335,7 @@ class ConfigurationManager:
             'anthropic': {
                 'model': 'claude-sonnet-4-20250514',
                 'base_url': 'https://api.anthropic.com',
-                'max_tokens': 200000,
+                'max_tokens': 63000,  # Claude Sonnet-4 supports max_token of context <64000
                 'temperature': 0.1,   # Lower temperature for Claude
                 **{k: v for k, v in common_defaults.items() if k != 'temperature'}
             },
