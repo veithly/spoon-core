@@ -330,15 +330,18 @@ class AnthropicProvider(LLMProviderInterface):
                                 usage_data["cache_read_input_tokens"] = chunk.usage.cache_read_input_tokens
                 
             # Trigger on_llm_end callback
+            final_response = LLMResponse(
+                content=full_content,
+                provider="anthropic",
+                model=model,
+                finish_reason=finish_reason or "stop",
+                native_finish_reason=finish_reason or "stop",
+                tool_calls=[],
+                usage=usage_data,
+                metadata={}
+            )
             await callback_manager.on_llm_end(
-                response=LLMResponseChunk(
-                    content=full_content,
-                    provider="anthropic",
-                    model=model,
-                    finish_reason=finish_reason,
-                    tool_calls=[],
-                    usage=usage_data
-                ),
+                response=final_response,
                 run_id=run_id
             )
                             
