@@ -5,7 +5,7 @@ import math
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 
 from spoon_ai.schema import Message, SystemMessage
 from spoon_ai.graph.checkpointer import InMemoryCheckpointer
@@ -87,6 +87,68 @@ class ShortTermMemoryManager:
         self.token_counter = token_counter or MessageTokenCounter()
         self.default_trim_strategy = default_trim_strategy
 
+    @staticmethod
+    def _find_assistant_index_for_tool(messages: List[Message], tool_index: int) -> Optional[int]:
+        """Locate the assistant message that issued the tool call for the given tool message."""
+        if tool_index <= 0:
+            return None
+
+        tool_message = messages[tool_index]
+        tool_call_id = getattr(tool_message, "tool_call_id", None)
+        if not tool_call_id:
+            return None
+
+        for idx in range(tool_index - 1, -1, -1):
+            assistant = messages[idx]
+            if assistant.role == "assistant" and assistant.tool_calls:
+                if any(call.id == tool_call_id for call in assistant.tool_calls):
+                    return idx
+        return None
+
+    async def _apply_tool_call_dependencies(
+        self,
+        messages: List[Message],
+        keep_indices: Set[int],
+        max_tokens: Optional[int] = None,
+        model: Optional[str] = None,
+    ) -> Set[int]:
+        """
+        Ensure tool messages are only kept when their originating assistant messages are also kept.
+        If adding the assistant would violate the token budget, the tool message is dropped instead.
+        """
+        if not keep_indices:
+            return keep_indices
+
+        updated_indices = set(keep_indices)
+
+        for idx in sorted(list(keep_indices)):
+            message = messages[idx]
+            if message.role != "tool" or not message.tool_call_id:
+                continue
+
+            assistant_idx = self._find_assistant_index_for_tool(messages, idx)
+            if assistant_idx is None:
+                updated_indices.discard(idx)
+                continue
+
+            if assistant_idx in updated_indices:
+                continue
+
+            if max_tokens is None:
+                updated_indices.add(assistant_idx)
+                continue
+
+            proposed_indices = sorted(updated_indices | {assistant_idx})
+            proposed_messages = [messages[i] for i in proposed_indices]
+            token_cost = await self.token_counter.count_tokens(proposed_messages, model)
+
+            if token_cost <= max_tokens:
+                updated_indices.add(assistant_idx)
+            else:
+                updated_indices.discard(idx)
+
+        return updated_indices
+
     async def trim_messages(
         self,
         messages: List[Message],
@@ -147,6 +209,16 @@ class ShortTermMemoryManager:
             else:
                 trimmed = []
 
+        index_lookup = {id(msg): idx for idx, msg in enumerate(messages)}
+        trimmed_indices = {index_lookup[id(msg)] for msg in trimmed if id(msg) in index_lookup}
+        trimmed_indices = await self._apply_tool_call_dependencies(
+            messages,
+            trimmed_indices,
+            max_tokens=max_tokens,
+            model=model,
+        )
+        trimmed = [messages[i] for i in sorted(trimmed_indices)]
+
         logger.info(
             "Trimmed messages: %d -> %d (strategy=%s)",
             len(messages),
@@ -198,12 +270,17 @@ class ShortTermMemoryManager:
             return messages, [], existing_summary or None
 
         start_index = max(len(messages) - messages_to_keep, 0)
-        recent_messages = messages[start_index:]
-
-        indices_to_keep = set(range(start_index, len(messages)))
+        indices_to_keep: Set[int] = set(range(start_index, len(messages)))
         keep_system_message = messages and messages[0].role == "system"
         if keep_system_message:
             indices_to_keep.add(0)
+
+        indices_to_keep = await self._apply_tool_call_dependencies(
+            messages,
+            indices_to_keep,
+            max_tokens=None,
+            model=summary_model,
+        )
 
         removals: List[RemoveMessage] = []
         for idx, message in enumerate(messages):
@@ -215,11 +292,14 @@ class ShortTermMemoryManager:
             else:
                 logger.debug("Skipping removal for message at index %s; no id present", idx)
 
+        kept_messages = [messages[i] for i in sorted(indices_to_keep)]
+
         messages_for_llm: List[Message] = []
         if keep_system_message:
-            messages_for_llm.append(messages[0])
-            if recent_messages and recent_messages[0] is messages[0]:
-                recent_messages = recent_messages[1:]
+            system_msg = messages[0]
+            if kept_messages and kept_messages[0] is system_msg:
+                messages_for_llm.append(system_msg)
+                kept_messages = kept_messages[1:]
 
         if summary_text:
             summary_message = SystemMessage(
@@ -228,7 +308,7 @@ class ShortTermMemoryManager:
             )
             messages_for_llm.append(summary_message)
 
-        messages_for_llm.extend(recent_messages)
+        messages_for_llm.extend(kept_messages)
 
         if not messages_for_llm:
             messages_for_llm = list(messages)

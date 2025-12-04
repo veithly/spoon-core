@@ -204,6 +204,10 @@ class AnthropicProvider(LLMProviderInterface):
             model = kwargs.get('model', self.model)
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
+            tool_choice = kwargs.get('tool_choice')
+            # Guard against missing/None model overrides
+            if not model:
+                model = self.model or "claude-sonnet-4-20250514"
             
             # Prepare request parameters
             request_params = {
@@ -373,6 +377,10 @@ class AnthropicProvider(LLMProviderInterface):
             model = kwargs.get('model', self.model)
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
+            tool_choice = kwargs.get('tool_choice')
+            # Guard against missing/None model overrides
+            if not model:
+                model = self.model or "claude-sonnet-4-20250514"
             
             # Use streaming for tool calls to handle complex responses
             content = ""
@@ -390,8 +398,15 @@ class AnthropicProvider(LLMProviderInterface):
                 'temperature': temperature,
                 'messages': anthropic_messages,
                 'tools': anthropic_tools,
-                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature']}
+                **{k: v for k, v in kwargs.items() if k not in ['model', 'max_tokens', 'temperature', 'tool_choice']}
             }
+
+            # Anthropic expects tool_choice as an object, not a plain string/enum
+            if tool_choice:
+                if isinstance(tool_choice, str):
+                    request_params['tool_choice'] = {"type": tool_choice}
+                elif isinstance(tool_choice, dict):
+                    request_params['tool_choice'] = tool_choice
             
             # Only add system parameter if we have system content
             if system_content is not None:

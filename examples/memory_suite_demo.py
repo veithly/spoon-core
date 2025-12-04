@@ -1,17 +1,80 @@
-"""spoon_ai short-term memory demos."""
+"""
+Memory Suite Demo (with streaming output)
+
+Combines short-term memory patterns (trimming, summarization, checkpoints)
+and long-term Mem0 persistence (recall across agent restarts) in one file.
+Responses now stream token-by-token so you can watch replies arrive live.
+
+Usage:
+    python examples/memory_suite_demo.py --mode short-term
+    python examples/memory_suite_demo.py --mode mem0
+    python examples/memory_suite_demo.py --mode all  # default
+"""
+
+import argparse
 import asyncio
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+from spoon_ai.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from spoon_ai.chat import ChatBot
-from spoon_ai.schema import Message
-from spoon_ai.memory.short_term_manager import (
-    ShortTermMemoryManager,
-    TrimStrategy,
-)
-from spoon_ai.graph.engine import StateGraph, SummarizationNode, END
 from spoon_ai.graph.checkpointer import InMemoryCheckpointer
+from spoon_ai.graph.engine import StateGraph, SummarizationNode, END
 from spoon_ai.graph.reducers import add_messages
+from spoon_ai.llm.manager import get_llm_manager
+from spoon_ai.memory.short_term_manager import ShortTermMemoryManager, TrimStrategy
+from spoon_ai.schema import Message
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def print_divider(title: str) -> None:
+    bar = "=" * 70
+    print(f"\n{bar}\n{title}\n{bar}")
+
+
+async def stream_response(
+    chatbot: ChatBot,
+    messages: List[Union[dict, Message]],
+    *,
+    system_msg: Optional[str] = None,
+    heading: Optional[str] = None,
+    show_stream: bool = True,
+) -> str:
+    """Stream a response while preserving short/long-term memory behavior."""
+    if heading:
+        print(heading)
+    callbacks = [StreamingStdOutCallbackHandler()] if show_stream else []
+
+    formatted_messages = chatbot._format_messages(messages, system_msg)  # noqa: SLF001
+    prepared_messages, user_query = await chatbot._inject_long_term_context(  # noqa: SLF001
+        formatted_messages
+    )
+    processed_messages = await chatbot._apply_short_term_memory_strategy(  # noqa: SLF001
+        prepared_messages,
+        model=chatbot.model_name,
+    )
+
+    response_text = ""
+    async for chunk in chatbot.llm_manager.chat_stream(
+        messages=processed_messages,
+        provider=chatbot.llm_provider,
+        callbacks=callbacks,
+    ):
+        response_text += chunk.delta
+
+    await chatbot._store_long_term_memory(user_query, response_text)  # noqa: SLF001
+
+    if show_stream:
+        print()
+    return response_text
+
+
+# ---------------------------------------------------------------------------
+# Short-term memory demos (from short_term_memory_usage.py)
+# ---------------------------------------------------------------------------
 
 
 class ShortTermMemoryDemoAgent:
@@ -33,17 +96,21 @@ class ShortTermMemoryDemoAgent:
         # Configure a chatbot with short-term memory enabled so the demo reflects reality.
         self.chatbot = ChatBot(
             enable_short_term_memory=True,
-            llm_provider="openrouter",
-            model_name="anthropic/claude-3.5-sonnet",
         )
 
         history: List[Message] = []
         history.append(Message(id=str(uuid.uuid4()), role="system", content=self.system_prompt))
 
+        print_divider("Seeding conversation with streaming replies")
         for prompt in self.prompts:
             user_msg = Message(id=str(uuid.uuid4()), role="user", content=prompt)
             history.append(user_msg)
-            response_text = await self.chatbot.ask(list(history))
+            response_text = await stream_response(
+                self.chatbot,
+                list(history),
+                heading=f"Prompt: {prompt}",
+                show_stream=True,
+            )
             assistant_msg = Message(
                 id=str(uuid.uuid4()),
                 role="assistant",
@@ -66,7 +133,7 @@ DEMO_AGENT = ShortTermMemoryDemoAgent(
 
 
 async def example_trim_messages() -> None:
-    print("Example 1: Trim Messages")
+    print_divider("Example 1: Trim Messages")
     manager = ShortTermMemoryManager()
     messages = await DEMO_AGENT.get_history()
     print("Original messages")
@@ -91,7 +158,7 @@ async def example_trim_messages() -> None:
 
 
 async def example_remove_messages() -> None:
-    print("Example 2: RemoveMessage Directives")
+    print_divider("Example 2: RemoveMessage Directives")
     history = await DEMO_AGENT.get_history()
     chatbot = ChatBot(enable_short_term_memory=True)
     thread_id = "remove-demo"
@@ -114,7 +181,7 @@ async def example_remove_messages() -> None:
 
 
 async def example_summarise_messages() -> None:
-    print("Example 3: Summarise Messages")
+    print_divider("Example 3: Summarise Messages")
     history = await DEMO_AGENT.get_history()
 
     manager = DEMO_AGENT.chatbot.short_term_memory_manager
@@ -206,7 +273,7 @@ async def example_summarise_messages() -> None:
 
 
 async def example_graph_summarization_node() -> Tuple[StateGraph, Dict[str, Dict[str, str]]]:
-    print("Example 4: Summarise via StateGraph node")
+    print_divider("Example 4: Summarise via StateGraph node")
     history = await DEMO_AGENT.get_history()
     chatbot = DEMO_AGENT.chatbot
 
@@ -280,7 +347,7 @@ async def example_graph_summarization_node() -> Tuple[StateGraph, Dict[str, Dict
 
 
 async def example_view_graph_state(graph: StateGraph, config: Dict[str, Dict[str, str]]) -> None:
-    print("Example 5: Inspect Graph State & History")
+    print_divider("Example 5: Inspect Graph State & History")
 
     snapshot = graph.get_state(config)
     if snapshot:
@@ -320,7 +387,7 @@ async def example_view_graph_state(graph: StateGraph, config: Dict[str, Dict[str
 
 
 async def example_checkpoint_management() -> None:
-    print("Example 6: Checkpoint Management")
+    print_divider("Example 6: Checkpoint Management")
 
     chatbot = ChatBot(enable_short_term_memory=True)
 
@@ -357,13 +424,136 @@ async def example_checkpoint_management() -> None:
     print("All checkpoints cleared.")
 
 
-async def main() -> None:
+async def run_short_term_suite() -> None:
+    print_divider("Short-Term Memory Suite")
     await example_trim_messages()
     await example_remove_messages()
     await example_summarise_messages()
     graph, graph_config = await example_graph_summarization_node()
     await example_view_graph_state(graph, graph_config)
     await example_checkpoint_management()
+
+
+# ---------------------------------------------------------------------------
+# Long-term memory (Mem0) demo (from mem0_agent_demo.py)
+# ---------------------------------------------------------------------------
+
+USER_ID = "crypto_whale_001"
+SYSTEM_PROMPT = (
+    "You are the Intelligent Web3 Portfolio Assistant. "
+    "Remember user risk appetite, preferred chains, and asset types. "
+    "Recommend actionable strategies without re-asking for already stored preferences."
+)
+
+
+def new_mem0_llm(mem0_config: dict) -> ChatBot:
+    """Create a new ChatBot configured for long-term memory with Mem0."""
+    return ChatBot(
+        enable_long_term_memory=True,
+        mem0_config=mem0_config,
+    )
+
+
+def print_memories(memories: List[str], label: str) -> None:
+    print(f"[Mem0] {label}:")
+    if not memories:
+        print("  (none)")
+        return
+    for m in memories:
+        print(f"  - {m}")
+
+
+async def run_mem0_suite() -> None:
+    print_divider("Mem0 Long-Term Memory Suite")
+
+    mem0_config = {
+        "user_id": USER_ID,
+        "metadata": {"project": "web3-portfolio-assistant"},
+        "async_mode": False,  # synchronous writes so retrieval in the next turn works immediately
+    }
+
+    print(" Session 1: Capturing preferences")
+    llm = new_mem0_llm(mem0_config)
+    await stream_response(
+        llm,
+        [
+            {
+                "role": "user",
+                "content": (
+                    "I am a high-risk degen trader. I exclusively trade meme coins on the Solana blockchain. "
+                    "I hate Ethereum gas fees."
+                ),
+            }
+        ],
+        system_msg=SYSTEM_PROMPT,
+        heading="Streaming first reply:",
+    )
+
+    memories = llm.mem0_client.search_memory("Solana meme coins high risk")
+    print_memories(memories, "After Session 1")
+
+    print(" Session 2: Recall with a brand new agent instance")
+    llm_reloaded = new_mem0_llm(mem0_config)
+    await stream_response(
+        llm_reloaded,
+        [{"role": "user", "content": "Recommend a trading strategy for me today."}],
+        system_msg=SYSTEM_PROMPT,
+        heading="Streaming second reply (with recalled prefs):",
+    )
+
+    memories = llm_reloaded.mem0_client.search_memory("trading strategy solana meme")
+    print_memories(memories, "Retrieved for Session 2")
+
+    print(" Session 3: Updating preferences to safer Arbitrum yield")
+    await stream_response(
+        llm_reloaded,
+        [
+            {
+                "role": "user",
+                "content": "I lost too much money. I want to pivot to safe stablecoin yield farming on Arbitrum now.",
+            }
+        ],
+        system_msg=SYSTEM_PROMPT,
+        heading="Streaming third reply (new preference):",
+    )
+    await stream_response(
+        llm_reloaded,
+        [{"role": "user", "content": "What chain should I use?"}],
+        system_msg=SYSTEM_PROMPT,
+        heading="Streaming fourth reply (follow-up):",
+    )
+    memories = llm_reloaded.mem0_client.search_memory("stablecoin yield chain choice")
+    print_memories(memories, "Retrieved after update (Session 3)")
+
+    # Clean up shared managers to avoid lingering clients in long-running sessions
+    try:
+        await get_llm_manager().cleanup()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------------
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run short-term or long-term memory demos")
+    parser.add_argument(
+        "--mode",
+        choices=["short-term", "mem0", "all"],
+        default="all",
+        help="Which demo suite to run",
+    )
+    return parser.parse_args()
+
+
+async def main() -> None:
+    args = parse_args()
+    if args.mode in ("short-term", "all"):
+        await run_short_term_suite()
+    if args.mode in ("mem0", "all"):
+        await run_mem0_suite()
 
 
 if __name__ == "__main__":
