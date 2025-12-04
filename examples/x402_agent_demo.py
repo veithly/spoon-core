@@ -13,7 +13,6 @@ from decimal import Decimal
 from textwrap import shorten
 from typing import Any, Dict, Optional
 
-import httpx
 from eth_account import Account
 from rich import print as rprint
 
@@ -27,64 +26,13 @@ from spoon_ai.schema import Message, Role  # noqa: E402
 from spoon_ai.payments import X402PaymentReceipt, X402PaymentService  # noqa: E402
 from pydantic import Field  # noqa: E402
 from spoon_ai.prompts.spoon_react import NEXT_STEP_PROMPT_TEMPLATE  # noqa: E402
-from spoon_ai.tools.base import BaseTool, ToolResult  # noqa: E402
 from spoon_ai.tools.tool_manager import ToolManager  # noqa: E402
 from spoon_ai.tools.x402_payment import X402PaywalledRequestTool  # noqa: E402
 from x402.encoding import safe_base64_decode  # noqa: E402
+from spoon_toolkits.web.web_scraper import WebScraperTool  # noqa: E402
 
 PAYWALLED_URL = os.getenv("X402_DEMO_URL", "https://www.x402.org/protected")
 PAYMENT_USDC = Decimal("0.01")
-
-
-class HttpProbeTool(BaseTool):
-    """Simple HTTP GET that does not attach any payment headers."""
-
-    name: str = "http_probe"
-    description: str = "Fetch an HTTP resource without payment to observe 402 challenges."
-    parameters: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "Resource URL to fetch",
-                "default": PAYWALLED_URL,
-            },
-            "timeout": {
-                "type": "number",
-                "description": "Timeout in seconds for the request",
-                "default": 20.0,
-            },
-            "headers": {
-                "type": "object",
-                "description": "Optional headers to include in the probe",
-                "additionalProperties": {"type": "string"},
-            },
-        },
-        "required": ["url"],
-        "additionalProperties": False,
-    }
-
-    async def execute(
-        self,
-        url: str = PAYWALLED_URL,
-        timeout: float = 20.0,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> ToolResult:
-        # Fall back to the demo URL so the agent never fails on a missing argument.
-        target = url or PAYWALLED_URL
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(target, headers=headers)
-        try:
-            body = response.json()
-        except json.JSONDecodeError:
-            body = response.text
-        return ToolResult(
-            output={
-                "status": response.status_code,
-                "headers": dict(response.headers),
-                "body": body,
-            }
-        )
 
 
 def ensure_wallet_configuration(service: X402PaymentService) -> None:
@@ -176,11 +124,11 @@ def parse_tool_output(raw: str) -> Any:
             return segment
 
 
-def extract_tool_payload(messages: list[Message], tool_name: str) -> Optional[Dict[str, Any]]:
+def extract_tool_payload(messages: list[Message], tool_name: str) -> Optional[Any]:
     for message in reversed(messages):
         if message.role == Role.TOOL and message.name == tool_name and message.content:
             parsed = parse_tool_output(message.content)
-            if isinstance(parsed, dict):
+            if parsed is not None:
                 return parsed
     return None
 
@@ -232,7 +180,7 @@ class X402ReactAgent(SpoonReactAI):
         "You are an autonomous ReAct agent with tool access."
         " Your mission is to retrieve the protected content at {target_url}."
         " Follow this playbook:\n"
-        "1. Use `http_probe` to fetch the URL without payment so you can describe the 402 challenge."
+        "1. Use `web_scraper` (default format='markdown') to fetch the URL. If it returns 402, note the payment headers."
         "2. Use `x402_paywalled_request` with amount_usdc={amount} to settle the invoice and retry."
         "3. Summarise the protected body in clear English."
         "4. Return a final answer that includes: summary, HTTP status, signed X-PAYMENT header,"
@@ -243,7 +191,7 @@ class X402ReactAgent(SpoonReactAI):
 
     def __init__(self, service: X402PaymentService, url: str, **kwargs: Any) -> None:
         super().__init__(service=service, target_url=url, **kwargs)
-        self.http_probe_tool = HttpProbeTool()
+        self.web_scraper = WebScraperTool()
         self.payment_tool: Optional[X402PaywalledRequestTool] = None
         self.max_steps = 6
         self.x402_enabled = False  # prevent base class from auto-attaching duplicate tools
@@ -253,7 +201,7 @@ class X402ReactAgent(SpoonReactAI):
     async def initialize(self) -> None:
         ensure_wallet_configuration(self.service)
         self.payment_tool = X402PaywalledRequestTool(service=self.service)
-        self.available_tools = ToolManager([self.http_probe_tool, self.payment_tool])
+        self.available_tools = ToolManager([self.web_scraper, self.payment_tool])
         self._refresh_prompts()
 
     def _refresh_prompts(self) -> None:
@@ -278,7 +226,7 @@ async def main() -> None:
         "Ensure your PRIVATE_KEY (or Turnkey credentials) is funded. Base Sepolia USDC faucet: https://faucet.circle.com/"
     )
 
-    chatbot = ChatBot(llm_provider="openai")
+    chatbot = ChatBot()
     service = X402PaymentService()
     agent = X402ReactAgent(service=service, url=PAYWALLED_URL, llm=chatbot)
     await agent.initialize()
@@ -310,8 +258,12 @@ async def main() -> None:
 
     print_conversation(messages)
 
-    http_probe_result = extract_tool_payload(messages, "http_probe")
+    web_scraper_result = extract_tool_payload(messages, "web_scraper")
     payment_result = extract_tool_payload(messages, "x402_paywalled_request")
+
+    if payment_result is not None and not isinstance(payment_result, dict):
+        payment_result = None
+
     assistant_summary = extract_last_assistant(messages)
     music_url: Optional[str] = None
 
@@ -329,12 +281,18 @@ async def main() -> None:
         if isinstance(body, str):
             music_url = extract_music_url(body)
 
-    if http_probe_result:
-        preview_body = http_probe_result.get("body")
-        if isinstance(preview_body, dict):
-            preview_body = json.dumps(preview_body, indent=2, ensure_ascii=False)
+    if web_scraper_result:
         rprint("\n[bold magenta]Initial probe (no payment)[/]")
-        rprint(f"Status: {http_probe_result.get('status')}\n{preview_body}")
+        if isinstance(web_scraper_result, dict):
+            preview_body = web_scraper_result.get("body") or web_scraper_result
+            if isinstance(preview_body, dict):
+                preview_body = json.dumps(preview_body, indent=2, ensure_ascii=False)
+            status = web_scraper_result.get("status")
+            if status is not None:
+                rprint(f"Status: {status}")
+            rprint(preview_body)
+        else:
+            rprint(web_scraper_result)
 
     payment_header: Optional[str] = None
     payment_receipt: Optional[Dict[str, Any]] = None

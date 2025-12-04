@@ -378,38 +378,56 @@ Output in English, concise, bullet style."""
         if not token_reports:
             return {"final_summary": "No token analyses available"}
 
-        # Extract key recommendations for top tokens
-        recommendations = []
+        simplified_reports = {}
         for token, report in token_reports.items():
-            if "error" not in report:
-                rec = report.get("final_recommendation", "")
-                if rec:
-                    recommendations.append(f"**{token}**: {rec}")
+            if "error" in report:
+                simplified_reports[token] = {"error": report["error"]}
+                continue
+            
+            simplified_reports[token] = {
+                "price": report.get("current_price"),
+                "change_24h": report.get("price_change_24h"),
+                "technical_summary": report.get("technical_analysis"), 
+                "news_summary": report.get("news_analysis")           
+            }
 
-        summary_prompt = f"""You are a senior crypto analyst. Create a comprehensive market analysis report based on individual token analyses.
 
-TOKEN ANALYSES:
-{json.dumps(token_reports, indent=2)}
+        summary_prompt = f"""You are a senior crypto analyst. Create a comprehensive market analysis report based on the summarized analysis of the top tokens.
+
+TOKEN SUMMARIES:
+{json.dumps(simplified_reports, indent=2, ensure_ascii=False)}
 
 Create a structured report with:
-1) Market Overview (current sentiment, trends)
-2) Top Trading Opportunities (3-5 best picks with reasoning)
-3) Risk Warnings (key concerns)
-4) Portfolio Allocation Suggestions
-5) Overall Market Outlook
+1) Market Overview (current sentiment, trends based on the top tokens)
+2) Top Trading Opportunities (Pick the best 3 tokens based on the technical and news summaries)
+3) Risk Warnings (Common risks identified across tokens)
+4) Overall Market Outlook
 
 Keep it professional, actionable, and under 800 words."""
 
-        response = await self.llm.chat([Message(role="user", content=summary_prompt)])
-        final_summary = response.content.strip()
+        try:
+            
+            response = await self.llm.chat([Message(role="user", content=summary_prompt)])
+            final_summary = response.content.strip()
 
-        log = list(state.get("execution_log", []))
-        log.append("Final market analysis generated")
+            log = list(state.get("execution_log", []))
+            log.append("Final market analysis generated")
 
-        return {
-            "final_summary": final_summary,
-            "execution_log": log,
-        }
+            return {
+                "final_summary": final_summary,
+                "execution_log": log,
+            }
+        except Exception as e:
+            logger.error(f"LLM aggregation failed: {e}")
+            
+            fallback_summary = "Failed to generate AI summary due to error. Raw conclusions:\n"
+            for t, r in simplified_reports.items():
+                fallback_summary += f"\n{t}: {r.get('technical_summary', 'N/A')[:100]}..."
+            
+            return {
+                "final_summary": fallback_summary,
+                "execution_log": list(state.get("execution_log", [])) + [f"Aggregation failed: {str(e)}"]
+            }
 
 
 

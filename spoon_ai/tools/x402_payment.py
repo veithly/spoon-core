@@ -121,7 +121,7 @@ class X402PaywalledRequestTool(BaseTool):
                 "description": "Optional headers for the request",
                 "additionalProperties": {"type": "string"},
             },
-            "body": {"description": "JSON/body payload to send", "type": ["object", "string", "null"]},
+            "body": {"description": "JSON payload string or raw body content.", "type": "string"},
             "amount_usdc": {"type": "number", "description": "Optional override for the payment amount"},
             "amount_atomic": {"type": "integer", "description": "Atomic units override"},
             "scheme": {"type": "string", "description": "Preferred payment scheme"},
