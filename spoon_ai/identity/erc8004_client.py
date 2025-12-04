@@ -3,8 +3,6 @@ ERC-8004 Smart Contract Client
 Handles on-chain interactions with agent registries
 """
 
-import json
-import os
 from typing import List, Dict, Optional, Tuple, Union
 from web3 import Web3
 from web3.contract import Contract
@@ -12,6 +10,9 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 from eth_utils import keccak, to_checksum_address
 from eth_abi import encode as abi_encode
+from spoon_ai.identity.erc8004_abi import (
+    get_abi,
+)
 
 
 class ERC8004Client:
@@ -36,175 +37,17 @@ class ERC8004Client:
         else:
             self.account = None
 
-        # Load contract ABIs
+        # Load contract ABIs (centralized, artifact-free)
         self.agent_registry = self._load_contract(agent_registry_address, "SpoonAgentRegistry")
         self.identity_registry = self._load_contract(identity_registry_address, "ERC8004IdentityRegistry")
         self.reputation_registry = self._load_contract(reputation_registry_address, "ERC8004ReputationRegistry")
         self.validation_registry = self._load_contract(validation_registry_address, "ERC8004ValidationRegistry")
 
     def _load_contract(self, address: str, contract_name: str) -> Contract:
-        """Load contract from ABI file"""
-        abi_path = os.path.join(
-            os.path.dirname(__file__),
-            f"../../../contracts/erc8004/artifacts/contracts/erc8004/{contract_name}.sol/{contract_name}.json"
-        )
-
-        # If artifacts don't exist, use minimal ABI
-        if not os.path.exists(abi_path):
-            abi = self._get_minimal_abi(contract_name)
-        else:
-            with open(abi_path, 'r') as f:
-                contract_json = json.load(f)
-                abi = contract_json['abi']
-
-        return self.w3.eth.contract(
-            address=to_checksum_address(address),
-            abi=abi
-        )
-
-    def _get_minimal_abi(self, contract_name: str) -> List[Dict]:
-        """Minimal ABI for contract interaction (chaoschain-compatible)"""
-        if contract_name == "SpoonAgentRegistry":
-            return [
-                {
-                    "inputs": [{"type": "bytes32"}, {"type": "string"}, {"type": "string"}, {"type": "bytes"}],
-                    "name": "registerAgent",
-                    "outputs": [{"type": "bool"}],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [{"type": "bytes32"}],
-                    "name": "resolveAgent",
-                    "outputs": [{"components": [
-                        {"type": "address[]"}, {"type": "string"}, {"type": "string"},
-                        {"type": "string[]"}, {"type": "uint256"}, {"type": "bool"}
-                    ], "type": "tuple"}],
-                    "stateMutability": "view",
-                    "type": "function"
-                },
-                {
-                    "inputs": [{"type": "bytes32"}, {"type": "string[]"}],
-                    "name": "updateCapabilities",
-                    "outputs": [{"type": "bool"}],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                }
-            ]
-        if contract_name == "ERC8004IdentityRegistry":
-            return [
-                {
-                    "inputs": [{"type": "string"}, {"type": "tuple[]", "components": [{"type": "string"}, {"type": "bytes"}]}],
-                    "name": "register",
-                    "outputs": [{"type": "uint256"}],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [{"type": "string"}],
-                    "name": "register",
-                    "outputs": [{"type": "uint256"}],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [],
-                    "name": "register",
-                    "outputs": [{"type": "uint256"}],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [{"type": "uint256"}, {"type": "string"}, {"type": "bytes"}],
-                    "name": "setMetadata",
-                    "outputs": [],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                }
-            ]
-        if contract_name == "ERC8004ReputationRegistry":
-            return [
-                {
-                    "inputs": [
-                        {"type": "uint256"},
-                        {"type": "uint8"},
-                        {"type": "bytes32"},
-                        {"type": "bytes32"},
-                        {"type": "string"},
-                        {"type": "bytes32"},
-                        {"type": "bytes"}
-                    ],
-                    "name": "giveFeedback",
-                    "outputs": [],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [
-                        {"type": "uint256"},
-                        {"type": "address"},
-                        {"type": "uint64"}
-                    ],
-                    "name": "revokeFeedback",
-                    "outputs": [],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [
-                        {"type": "uint256"},
-                        {"type": "address[]"},
-                        {"type": "bytes32"},
-                        {"type": "bytes32"}
-                    ],
-                    "name": "getSummary",
-                    "outputs": [{"type": "uint64"}, {"type": "uint8"}],
-                    "stateMutability": "view",
-                    "type": "function"
-                }
-            ]
-        if contract_name == "ERC8004ValidationRegistry":
-            return [
-                {
-                    "inputs": [
-                        {"type": "address"},
-                        {"type": "uint256"},
-                        {"type": "string"},
-                        {"type": "bytes32"}
-                    ],
-                    "name": "validationRequest",
-                    "outputs": [],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [
-                        {"type": "bytes32"},
-                        {"type": "uint8"},
-                        {"type": "string"},
-                        {"type": "bytes32"},
-                        {"type": "bytes32"}
-                    ],
-                    "name": "validationResponse",
-                    "outputs": [],
-                    "stateMutability": "nonpayable",
-                    "type": "function"
-                },
-                {
-                    "inputs": [{"type": "bytes32"}],
-                    "name": "getValidationStatus",
-                    "outputs": [
-                        {"type": "address"},
-                        {"type": "uint256"},
-                        {"type": "uint8"},
-                        {"type": "bytes32"},
-                        {"type": "uint256"}
-                    ],
-                    "stateMutability": "view",
-                    "type": "function"
-                }
-            ]
-        return []
+        abi = get_abi(contract_name)
+        if not abi:
+            raise ValueError(f"No ABI found for {contract_name}")
+        return self.w3.eth.contract(address=to_checksum_address(address), abi=abi)
 
     def calculate_did_hash(self, did: str) -> bytes:
         """Calculate keccak256 hash of DID string"""
@@ -564,3 +407,104 @@ class ERC8004Client:
 
 
 
+    # ---------------- Identity ----------------
+    def register_agent(self, token_uri: str, metadata: Optional[List[Tuple[str, bytes]]] = None) -> int:
+        """Register agent on IdentityRegistry; returns agentId."""
+        if not self.account:
+            raise ValueError("Private key required for registration")
+        func = self.identity_registry.functions.register(token_uri)
+        if metadata:
+            func = self.identity_registry.functions.register(
+                token_uri, [(k, v) for k, v in metadata]
+            )
+        tx = func.build_transaction(self._tx_params())
+        receipt = self._send_tx(tx)
+        # Try to infer agentId
+        try:
+            logs = self.identity_registry.events.Registered().process_receipt(receipt)
+            if logs:
+                return int(logs[0]["args"]["agentId"])
+        except Exception:
+            pass
+        return int(self.identity_registry.functions.totalAgents().call())
+
+    def set_metadata(self, agent_id: int, key: str, value: bytes) -> str:
+        if not self.account:
+            raise ValueError("Private key required for metadata update")
+        tx = self.identity_registry.functions.setMetadata(agent_id, key, value).build_transaction(self._tx_params())
+        receipt = self._send_tx(tx)
+        return receipt.transactionHash.hex()
+
+    # ---------------- Reputation ----------------
+    def give_feedback(
+        self,
+        agent_id: int,
+        score: int,
+        tag: bytes,
+        stage: bytes,
+        uri: str,
+        payment_hash: bytes,
+        feedback_auth: bytes,
+    ) -> str:
+        if not self.account:
+            raise ValueError("Private key required for feedback")
+        tx = self.reputation_registry.functions.giveFeedback(
+            agent_id, score, tag, stage, uri, payment_hash, feedback_auth
+        ).build_transaction(self._tx_params())
+        receipt = self._send_tx(tx)
+        return receipt.transactionHash.hex()
+
+    def revoke_feedback(self, agent_id: int, validator: str, index: int) -> str:
+        if not self.account:
+            raise ValueError("Private key required for revoke")
+        tx = self.reputation_registry.functions.revokeFeedback(agent_id, validator, index).build_transaction(
+            self._tx_params()
+        )
+        receipt = self._send_tx(tx)
+        return receipt.transactionHash.hex()
+
+    def get_reputation_summary(self, agent_id: int, validators, tag: bytes, stage: bytes):
+        return self.reputation_registry.functions.getSummary(agent_id, validators, tag, stage).call()
+
+    # ---------------- Validation ----------------
+    def validation_request(self, validator: str, agent_id: int, uri: str, request_hash: bytes) -> str:
+        if not self.account:
+            raise ValueError("Private key required for validation request")
+        tx = self.validation_registry.functions.validationRequest(
+            validator, agent_id, uri, request_hash
+        ).build_transaction(self._tx_params())
+        receipt = self._send_tx(tx)
+        return receipt.transactionHash.hex()
+
+    def validation_response(
+        self, request_hash: bytes, score: int, uri: str, payment_hash: bytes, response_hash: bytes
+    ) -> str:
+        if not self.account:
+            raise ValueError("Private key required for validation response")
+        tx = self.validation_registry.functions.validationResponse(
+            request_hash, score, uri, payment_hash, response_hash
+        ).build_transaction(self._tx_params())
+        receipt = self._send_tx(tx)
+        return receipt.transactionHash.hex()
+
+    def get_validation_status(self, request_hash: bytes):
+        return self.validation_registry.functions.getValidationStatus(request_hash).call()
+
+    # ---------------- Helpers ----------------
+    def _tx_params(self) -> Dict:
+        gas_price = self.w3.eth.gas_price
+        return {
+            "from": self.account.address if self.account else None,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address),
+            "gas": 600000,
+            "maxFeePerGas": gas_price,
+            "maxPriorityFeePerGas": gas_price // 2,
+        }
+
+    def _send_tx(self, tx: Dict) -> any:
+        signed = self.account.sign_transaction(tx)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        if receipt.status != 1:
+            raise RuntimeError(f"Transaction failed: {tx_hash.hex()}")
+        return receipt
