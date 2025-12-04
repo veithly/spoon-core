@@ -1,7 +1,7 @@
 # Examples Overview 
 
 Runnable SpoonAI examples and configs. 
-- Top-level demos 顶层示例：`graph_crypto_analysis.py`, `intent_graph_demo.py`, `memory_suite_demo.py`, `my_agent_demo.py`, `neofs-agent-demo.py`, `x402_agent_demo.py`
+- Top-level demos ：`graph_crypto_analysis.py`, `intent_graph_demo.py`, `memory_suite_demo.py`, `my_agent_demo.py`, `neofs-agent-demo.py`, `x402_agent_demo.py`
 - MCP demos: `examples/mcp/` — tool calling, Thirdweb Insight, Tavily search. 
 - Turnkey demos: `examples/turnkey/` — secure signing, wallets, audit.
 
@@ -63,14 +63,13 @@ Secure signing and wallet management via Turnkey.
   ```bash
   cp examples/turnkey/env.example .env
   ```
-- Scripts 脚本：
+- Scripts ：
   ```bash
   python examples/turnkey/build_unsigned_eip1559_tx.py    
   python examples/turnkey/turnkey_trading_use_case.py    
-  python examples/turnkey/multi_account_use_case.py       
-  python examples/turnkey/turnkey-agent-demo.py         
+  python examples/turnkey/multi_account_use_case.py               
   ```
 - Requirements 
   - Repo deps incl. `web3`, `eth-utils`, `rlp`
   - `.env`: `TURNKEY_API_PUBLIC_KEY`, `TURNKEY_API_PRIVATE_KEY`, `TURNKEY_ORG_ID`, `TURNKEY_SIGN_WITH`
-  - Optional 可选: `WEB3_RPC_URL` + `TX_*` for building/broadcasting
+  - Optional : `WEB3_RPC_URL` + `TX_*` for building/broadcasting
