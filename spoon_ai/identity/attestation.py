@@ -153,12 +153,10 @@ class TrustScoreCalculator:
             except Exception:
                 validation_summary = None
         if not isinstance(validation_summary, dict) or "isValidated" not in validation_summary:
-            # Fallback to legacy get_validation_status result shape
-            validation_status = self.erc8004_client.get_validation_status(did)
             validation_summary = {
-                "isValidated": validation_status.get("isValidated", False),
-                "count": validation_status.get("validCount", 0) + validation_status.get("invalidCount", 0),
-                "averageResponse": 100 if validation_status.get("isValidated") else 0,
+                "isValidated": False,
+                "count": 0,
+                "averageResponse": 0,
             }
         is_validated = validation_summary.get("isValidated", False)
 

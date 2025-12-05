@@ -137,13 +137,26 @@ def _register_on_chain_if_requested(
     rpc_url: Optional[str],
     chain_id: int,
     private_key: Optional[str],
-    token_uri: Optional[str],
+    agent_card_uri: Optional[str],
+    did_uri: Optional[str],
+    did_doc_uri: Optional[str],
     identity_registry: Optional[str],
     reputation_registry: Optional[str],
     validation_registry: Optional[str],
     agent_registry: Optional[str],
 ) -> Optional[int]:
-    if not all([rpc_url, private_key, token_uri, identity_registry, reputation_registry, validation_registry, agent_registry]):
+    if not all(
+        [
+            rpc_url,
+            private_key,
+            agent_card_uri,
+            did_uri,
+            identity_registry,
+            reputation_registry,
+            validation_registry,
+            agent_registry,
+        ]
+    ):
         logger.info("Skip on-chain registration (missing config).")
         return None
     client = ERC8004Client(
@@ -155,7 +168,12 @@ def _register_on_chain_if_requested(
         private_key=private_key,
     )
     try:
-        agent_id = client.register_agent(token_uri)
+        metadata = []
+        if did_uri:
+            metadata.append(("did_uri", did_uri.encode()))
+        if did_doc_uri:
+            metadata.append(("did_doc_uri", did_doc_uri.encode()))
+        agent_id = client.register_agent(agent_card_uri, metadata=metadata or None)
         logger.info("Registered agentId=%s", agent_id)
         return agent_id
     except Exception as exc:
@@ -193,6 +211,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=int(os.getenv("ERC8004_AGENT_PORT", "8004")))
     parser.add_argument("--agent-name", default=os.getenv("ERC8004_AGENT_NAME", "ERC8004 Search Agent"))
     parser.add_argument("--did-uri", default=os.getenv("ERC8004_AGENT_DID_URI"))
+    parser.add_argument("--did-doc-uri", default=os.getenv("AGENT_DID_DOC_URI") or os.getenv("DID_DOC_URI"))
     parser.add_argument("--register-agent", action="store_true", help="Register agent on-chain before serving")
     parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
     parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
@@ -207,7 +226,7 @@ def main() -> None:
     parser.add_argument(
         "--token-uri",
         default=os.getenv("AGENT_CARD_URI") or os.getenv("AGENT_DID_URI"),
-        help="tokenURI used in register(); prefer Agent Card URI",
+        help="Agent Card URI used as tokenURI in register()",
     )
     args = parser.parse_args()
 
@@ -216,7 +235,9 @@ def main() -> None:
             rpc_url=args.rpc,
             chain_id=args.chain_id,
             private_key=args.private_key,
-            token_uri=args.token_uri,
+            agent_card_uri=args.token_uri,
+            did_uri=args.did_uri,
+            did_doc_uri=args.did_doc_uri,
             identity_registry=args.registry,
             reputation_registry=args.reputation,
             validation_registry=args.validation,

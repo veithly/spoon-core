@@ -27,6 +27,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run ERC8004 server + client demo")
     parser.add_argument("--register-agent", action="store_true", help="Pre-register agent on IdentityRegistry before serving")
     parser.add_argument("--token-uri", default=os.getenv("AGENT_CARD_URI") or os.getenv("AGENT_DID_URI"))
+    parser.add_argument("--did-uri", default=os.getenv("ERC8004_AGENT_DID_URI"))
+    parser.add_argument("--did-doc-uri", default=os.getenv("AGENT_DID_DOC_URI") or os.getenv("DID_DOC_URI"))
     parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
     parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
     parser.add_argument("--validation", default=os.getenv("NEOX_VALIDATION_REGISTRY"))
@@ -38,14 +40,14 @@ def main() -> None:
 
     server_port = int(os.getenv("ERC8004_AGENT_PORT", "8004"))
     env = os.environ.copy()
-    # Ensure project root on PYTHONPATH so sub-processes can import core.examples...
-    project_root = Path(__file__).resolve().parents[3]
-    env["PYTHONPATH"] = f"{project_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    # Ensure core package path on PYTHONPATH so sub-processes can import examples.*
+    core_dir = Path(__file__).resolve().parents[2]
+    env["PYTHONPATH"] = f"{core_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
     server_cmd = [
         sys.executable,
         "-m",
-        "core.examples.erc8004_did.server_agent",
+        "examples.erc8004_did.server_agent",
         "--port",
         str(server_port),
     ]
@@ -67,6 +69,10 @@ def main() -> None:
         ]
         if args.token_uri:
             server_cmd += ["--token-uri", args.token_uri]
+        if args.did_uri:
+            server_cmd += ["--did-uri", args.did_uri]
+        if args.did_doc_uri:
+            server_cmd += ["--did-doc-uri", args.did_doc_uri]
         if args.private_key:
             server_cmd += ["--private-key", args.private_key]
 
@@ -77,7 +83,7 @@ def main() -> None:
     client_cmd = [
         sys.executable,
         "-m",
-        "core.examples.erc8004_did.client_agent",
+        "examples.erc8004_did.client_agent",
         "--server",
         f"http://127.0.0.1:{server_port}",
     ]
