@@ -163,7 +163,8 @@ class GeminiProvider(LLMProviderInterface):
             return schema
 
         clean_schema = schema.copy()
-        for key in ["additionalProperties", "additional_properties", "title"]:
+        # Remove fields that Gemini API doesn't support
+        for key in ["additionalProperties", "additional_properties", "title", "$schema"]:
             clean_schema.pop(key, None)
 
         if "properties" in clean_schema and isinstance(clean_schema["properties"], dict):

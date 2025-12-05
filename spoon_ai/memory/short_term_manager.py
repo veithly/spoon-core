@@ -259,11 +259,16 @@ class ShortTermMemoryManager:
         prompt_message = Message(role="user", content=summary_prompt)
 
         try:
-            response = await llm_manager.chat(
-                messages=messages + [prompt_message],
-                provider=llm_provider,
-                model=summary_model,
-            )
+            # Only pass model parameter if it's not None
+            # Let provider use its default model if summary_model is None
+            chat_kwargs = {
+                "messages": messages + [prompt_message],
+                "provider": llm_provider,
+            }
+            if summary_model is not None:
+                chat_kwargs["model"] = summary_model
+            
+            response = await llm_manager.chat(**chat_kwargs)
             summary_text = response.content
         except Exception as exc:  # pragma: no cover - safeguard
             logger.error("Failed to generate summary: %s", exc)

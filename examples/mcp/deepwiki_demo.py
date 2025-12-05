@@ -9,7 +9,6 @@ It demonstrates how the agent uses MCP tools to process queries.
 import asyncio
 from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.tools.mcp_tool import MCPTool
-from spoon_ai.llm.manager import LLMManager
 from spoon_ai.chat import ChatBot
 import logging
 
@@ -22,17 +21,14 @@ class MCPToolDemoAgent:
 
     def __init__(self):
         self.agent = None
-        self.llm_manager = None
         self.chatbot = None
 
     async def initialize(self):
         """Initialize the agent with MCP tools"""
         try:
-            # Initialize LLM Manager
-            self.llm_manager = LLMManager()
-
-            # Initialize ChatBot
-            self.chatbot = ChatBot(llm_manager=self.llm_manager)
+            # Initialize ChatBot with LLM provider
+            # ChatBot will automatically create and manage LLMManager internally
+            self.chatbot = ChatBot()
 
             # Create SSE MCP tool configuration
             sse_mcp_config = {
@@ -83,7 +79,7 @@ class MCPToolDemoAgent:
             # Create agent with both MCP tools (tools will be loaded when needed)
             self.agent = SpoonReactMCP(
                 name="mcp_demo_agent",
-                llm_manager=self.llm_manager,
+                llm=self.chatbot,
                 tools=[sse_tool, http_tool]
             )
 

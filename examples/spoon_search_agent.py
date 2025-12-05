@@ -18,11 +18,22 @@ class SpoonMacroAnalysisAgent(SpoonReactMCP):
         '''You are a cryptocurrency market analyst. Your task is to provide a comprehensive
         macroeconomic analysis of a given token.
 
-        To do this, you will perform the following steps:
-        1. Use the `crypto_power_data_cex` tool to get the latest candlestick data and
-           technical indicators.
-        2. Use the `tavily-search` tool to find the latest news and market sentiment.
-        3. Synthesize the data from both tools to form a holistic analysis.'''
+        **IMPORTANT**: You MUST directly execute the analysis without asking the user for preferences.
+        Use reasonable defaults and proceed with the analysis immediately.
+
+        To perform the analysis, you will:
+        1. Use the `crypto_powerdata_cex` tool to get market data:
+           - For exchange: Use "binance" as default (most liquid exchange)
+           - For symbol: Convert token name to trading pair format (e.g., "NEO" -> "NEO/USDT")
+           - Use default timeframe "1d" and limit 100 for comprehensive analysis
+           - Use default indicators: EMA (12, 26) and RSI (14)
+        2. Use the `tavily-search` tool to find recent news and market sentiment:
+           - Search for the token name and "cryptocurrency" or "blockchain"
+           - Include terms like "price", "market", "news" for relevant information
+        3. Synthesize the data from both tools to form a comprehensive analysis.
+
+        **CRITICAL**: Do NOT ask the user for preferences. Execute the tools directly with reasonable defaults.
+        If a token name is provided, automatically convert it to the appropriate trading pair format (e.g., "NEO" -> "NEO/USDT").'''
     )
 
     def __init__(self, **kwargs):
@@ -57,10 +68,15 @@ async def main():
         logger.error("TAVILY_API_KEY is not set or contains a placeholder. Please set a valid API key.")
         return
 
-    agent = SpoonMacroAnalysisAgent(llm=ChatBot(llm_provider="openai"))
+    agent = SpoonMacroAnalysisAgent(llm=ChatBot(llm_provider="gemini",model_name="gemini-2.5-flash"  
+))
     print("Agent instance created.")
     await agent.initialize()
-    query = "Perform a macro analysis of the NEO token."
+    query = (
+        "Perform a macro analysis of the NEO token. "
+        "Use binance exchange with NEO/USDT trading pair. "
+        "Execute the analysis immediately without asking for preferences."
+    )
     print(f"\nRunning query: {query}")
     response = await agent.run(query)
     print(f"\n--- Analysis Complete ---\n{response}")
