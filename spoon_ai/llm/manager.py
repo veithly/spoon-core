@@ -437,14 +437,27 @@ class LLMManager:
 
             self.provider_cleanup_tasks.clear()
 
-            # Cleanup all providers
+            # Cleanup only initialized providers (those with instances or states)
             cleanup_errors = []
-            for provider_name in self.registry.list_providers():
+            # Only cleanup providers that have been initialized (have instances or states)
+            providers_to_cleanup = set()
+            
+            # Add providers that have instances (safely access private attribute)
+            registry_instances = getattr(self.registry, '_instances', {})
+            if registry_instances:
+                providers_to_cleanup.update(registry_instances.keys())
+            
+            # Add providers that have states (initialized)
+            providers_to_cleanup.update(self.provider_states.keys())
+            
+            for provider_name in providers_to_cleanup:
                 try:
-                    provider_instance = self.registry.get_provider(provider_name)
-                    if hasattr(provider_instance, 'cleanup'):
-                        await provider_instance.cleanup()
-                    logger.debug(f"Cleaned up provider: {provider_name}")
+                    # Only try to cleanup if provider has an instance
+                    if provider_name in registry_instances:
+                        provider_instance = registry_instances[provider_name]
+                        if hasattr(provider_instance, 'cleanup'):
+                            await provider_instance.cleanup()
+                        logger.debug(f"Cleaned up provider: {provider_name}")
                 except Exception as e:
                     cleanup_errors.append(f"{provider_name}: {e}")
                     logger.warning(f"Cleanup failed for {provider_name}: {e}")
@@ -869,17 +882,6 @@ class LLMManager:
                 self.load_balancer.update_provider_health(provider_name, False)
 
         return health_status
-
-    async def cleanup(self) -> None:
-        """Cleanup all provider resources."""
-        for provider_name in self.registry.list_providers():
-            try:
-                provider_instance = self.registry.get_provider(provider_name)
-                await provider_instance.cleanup()
-            except Exception as e:
-                logger.warning(f"Cleanup failed for {provider_name}: {e}")
-
-        logger.info("LLM Manager cleanup completed")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get comprehensive statistics.
