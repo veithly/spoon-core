@@ -235,17 +235,23 @@ class LLMManager:
         def cleanup_sync():
             """Synchronous cleanup wrapper."""
             try:
-                # Try to get the current event loop
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If loop is running, schedule cleanup
+                # Try to get the running event loop (Python 3.10+ safe)
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're inside a running loop, schedule cleanup as a task
                     asyncio.create_task(self.cleanup())
-                else:
-                    # If no loop, run cleanup synchronously
-                    loop.run_until_complete(self.cleanup())
-            except RuntimeError:
-                # No event loop available, skip async cleanup
-                logger.warning("No event loop available for async cleanup")
+                except RuntimeError:
+                    # No running loop, create a new one for cleanup
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self.cleanup())
+                        loop.close()
+                    except Exception as e:
+                        logger.debug(f"Cleanup skipped: {e}")
+            except Exception as e:
+                # Silently skip cleanup on shutdown errors
+                logger.debug(f"Cleanup error (safe to ignore at shutdown): {e}")
         
         atexit.register(cleanup_sync)
 
@@ -459,8 +465,12 @@ class LLMManager:
                             await provider_instance.cleanup()
                         logger.debug(f"Cleaned up provider: {provider_name}")
                 except Exception as e:
-                    cleanup_errors.append(f"{provider_name}: {e}")
-                    logger.warning(f"Cleanup failed for {provider_name}: {e}")
+                    # Only track and log non-configuration errors
+                    if "Configuration error" in str(e) or "not configured" in str(e).lower():
+                        logger.debug(f"Skipping cleanup for unconfigured provider {provider_name}")
+                    else:
+                        cleanup_errors.append(f"{provider_name}: {e}")
+                        logger.warning(f"Cleanup failed for {provider_name}: {e}")
 
             # Clear provider states
             self.provider_states.clear()

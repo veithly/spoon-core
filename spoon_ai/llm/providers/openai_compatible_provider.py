@@ -45,6 +45,17 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         tail = model_lower.split("/")[-1]  # strip any provider prefix like openrouter
         return tail.startswith("gpt-5") or tail.startswith("o1") or tail.startswith("o3") or tail.startswith("o4")
 
+    def _supports_temperature(self, model: str) -> bool:
+        """Whether this model supports custom temperature values.
+
+        Some newer OpenAI models (gpt-5.1*, o1*, o3*, o4*) only support the 
+        default temperature value (1.0) and will error on other values.
+        """
+        model_lower = (model or "").lower()
+        tail = model_lower.split("/")[-1]  # strip any provider prefix
+        # gpt-5.1 and reasoning models don't support custom temperature
+        return not (tail.startswith("gpt-5.1") or tail.startswith("o1") or tail.startswith("o3") or tail.startswith("o4"))
+
     def _max_token_kwargs(self, model: str, max_tokens: int, overrides: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build the correct token-limit argument for the OpenAI API.
@@ -300,9 +311,11 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             request_kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": openai_messages,
-                "temperature": temperature,
                 "stream": False,
             }
+            # Only add temperature for models that support it
+            if self._supports_temperature(model):
+                request_kwargs["temperature"] = temperature
             request_kwargs.update(self._max_token_kwargs(model, max_tokens, kwargs))
 
             if tools:
@@ -349,10 +362,12 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             request_kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": openai_messages,
-                "temperature": temperature,
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
+            # Only add temperature for models that support it
+            if self._supports_temperature(model):
+                request_kwargs["temperature"] = temperature
             request_kwargs.update(self._max_token_kwargs(model, max_tokens, kwargs))
 
             if tools:
@@ -546,9 +561,11 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             request_kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": openai_messages,
-                "temperature": temperature,
                 "stream": False,
             }
+            # Only add temperature for models that support it
+            if self._supports_temperature(model):
+                request_kwargs["temperature"] = temperature
             request_kwargs.update(self._max_token_kwargs(model, max_tokens, kwargs))
 
             if tools:
