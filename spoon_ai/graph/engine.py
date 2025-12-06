@@ -750,7 +750,7 @@ class CompiledGraph(Generic[State]):
                 logger.info(f"Using default router target: {target}")
                 return target
 
-        logger.warning("No valid next node found")
+        logger.debug("No valid next node found - graph execution complete")
         return None
 
     async def invoke(self, initial_state: Optional[Dict[str, Any]] = None, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
