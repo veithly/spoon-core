@@ -311,12 +311,14 @@ class GeminiProvider(LLMProviderInterface):
             usage_data = None
             
             # Send streaming request
+            # Filter out parameters that generate_content_stream doesn't accept
+            filtered_kwargs = {k: v for k, v in kwargs.items() 
+                               if k not in ['model', 'max_tokens', 'temperature', 'callbacks', 'timeout']}
             stream = self.client.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=generate_config,
-                **{k: v for k, v in kwargs.items() 
-                   if k not in ['model', 'max_tokens', 'temperature', 'callbacks']}
+                **filtered_kwargs
             )
             
             for part_response in stream:
