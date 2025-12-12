@@ -26,6 +26,7 @@ from spoon_ai.utils.streaming import (
     sanitize_stream_kwargs,
 )
 from spoon_ai.runnables import RunLogPatch, log_patches_from_events
+from spoon_ai.wallet import load_wallet
 
 logger = getLogger(__name__)
 
@@ -112,6 +113,8 @@ class ChatBot:
         enable_long_term_memory: bool = False,
         mem0_config: Optional[Dict[str, Any]] = None,
         callbacks: Optional[List[BaseCallbackHandler]] = None,
+        wallet: Optional[Any] = None,
+        auto_load_wallet: bool = True,
         **kwargs,
     ):
         """Initialize ChatBot with hierarchical configuration priority system.
@@ -133,6 +136,8 @@ class ChatBot:
             enable_long_term_memory: Enable Mem0-backed long-term memory retrieval/storage
             mem0_config: Configuration dict for Mem0 (api_key, user_id/agent_id, collection, etc.)
             callbacks: Optional list of callback handlers for monitoring
+            wallet: Optional pre-configured wallet/signer object
+            auto_load_wallet: Auto-discover wallet from environment when True and wallet is None
             **kwargs: Additional parameters
         """
         self.use_llm_manager = use_llm_manager
@@ -152,6 +157,12 @@ class ChatBot:
         # Store original parameters for priority mode detection
         self._original_llm_provider = llm_provider
         self._original_api_key = api_key
+        self.wallet = wallet
+        self.signer = None
+
+        if self.wallet is None and auto_load_wallet:
+            self.wallet = load_wallet()
+        self.signer = self.wallet
 
         if not self.use_llm_manager:
             logger.warning("use_llm_manager=False is deprecated. LLM Manager architecture is now required.")
