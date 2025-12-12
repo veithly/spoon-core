@@ -331,6 +331,85 @@ async def test_paywalled_request_override_preserves_paywall_asset(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_paywalled_request_supports_payment_required_header_v2(monkeypatch):
+    service = X402PaymentService(facilitator=StubFacilitator())
+    tool = x402_payment.X402PaywalledRequestTool(service=service)
+    url = "https://www.x402.org/protected"
+
+    paywall_header_payload = {
+        "x402Version": 2,
+        "error": "Payment required",
+        "resource": {"url": url, "description": "Access to protected content", "mimeType": ""},
+        "accepts": [
+            {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "10000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x209693Bc6afc0C5328bA36FaF03C514EF312287C",
+                "maxTimeoutSeconds": 300,
+                "extra": {"name": "USDC", "version": "2"},
+            }
+        ],
+    }
+    paywall_header_value = safe_base64_encode(json.dumps(paywall_header_payload))
+
+    responses = [
+        Response(
+            402,
+            request=Request("GET", url),
+            json={},
+            headers={"content-type": "application/json", "payment-required": paywall_header_value},
+        ),
+        Response(
+            200,
+            request=Request("GET", url),
+            json={"ok": True},
+            headers={"content-type": "application/json"},
+        ),
+    ]
+
+    class StubAsyncClient:
+        def __init__(self, responses_list, **kwargs):
+            self._responses = list(responses_list)
+            self.requests = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def request(self, method, request_url, headers=None, json=None, content=None):
+            self.requests.append({"method": method, "url": request_url, "headers": headers})
+            if not self._responses:
+                raise AssertionError("No more responses configured for StubAsyncClient")
+            return self._responses.pop(0)
+
+    stub_client = StubAsyncClient(responses)
+    monkeypatch.setattr(x402_payment.httpx, "AsyncClient", lambda *args, **kwargs: stub_client)
+
+    result = await tool.execute(url=url)
+
+    assert result.error is None
+    assert result.output is not None
+    assert result.output["status"] == 200
+    assert "paymentHeader" in result.output
+    assert result.output["requirements"]["x402Version"] == 2
+    assert result.output["requirements"]["network"] == "eip155:84532"
+
+    # Ensure the retry included a signed payment header.
+    assert len(stub_client.requests) == 2
+    assert "PAYMENT-SIGNATURE" in (stub_client.requests[1]["headers"] or {})
+
+    decoded = json.loads(safe_base64_decode(result.output["paymentHeader"]))
+    assert decoded["x402Version"] == 2
+    assert decoded["accepted"]["network"] == "eip155:84532"
+    assert decoded["accepted"]["scheme"] == "exact"
+    assert decoded["payload"]["authorization"]["to"] == paywall_header_payload["accepts"][0]["payTo"]
+
+
+@pytest.mark.asyncio
 async def test_build_payment_header_with_turnkey(monkeypatch):
     settings = X402Settings(
         pay_to="0xfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed",

@@ -183,8 +183,8 @@ class X402ReactAgent(SpoonReactAI):
         "1. Use `web_scraper` (default format='markdown') to fetch the URL. If it returns 402, note the payment headers."
         "2. Use `x402_paywalled_request` with amount_usdc={amount} to settle the invoice and retry."
         "3. Summarise the protected body in clear English."
-        "4. Return a final answer that includes: summary, HTTP status, signed X-PAYMENT header,"
-        " and any decoded settlement receipt."
+        "4. Return a final answer that includes: summary, HTTP status, signed PAYMENT-SIGNATURE (x402 v2) or X-PAYMENT (v1) header,"
+        " and any decoded settlement receipt (PAYMENT-RESPONSE / X-PAYMENT-RESPONSE)."
         " Be explicit about the Base Sepolia network and the 0.01 USDC charge."
         " If a step fails, explain the reason before attempting recovery."
     )
@@ -296,17 +296,24 @@ async def main() -> None:
 
     payment_header: Optional[str] = None
     payment_receipt: Optional[Dict[str, Any]] = None
+    payment_header_name = "X-PAYMENT"
 
     if payment_result:
         req_meta = payment_result.get("requirements")
         if isinstance(req_meta, dict):
+            if req_meta.get("x402Version") == 2 or "amount" in req_meta:
+                payment_header_name = "PAYMENT-SIGNATURE"
             rprint(
                 "\n[bold yellow]Payment requirement (post-tool) pay_to:[/]"
                 f" {req_meta.get('payTo') or req_meta.get('pay_to')}"
             )
         payment_header = payment_result.get("paymentHeader")
         payment_receipt = payment_result.get("paymentResponse")
-        receipt_header = (payment_result.get("headers") or {}).get("X-PAYMENT-RESPONSE")
+        headers_map = payment_result.get("headers") or {}
+        receipt_header = None
+        if isinstance(headers_map, dict):
+            lowered = {str(k).lower(): v for k, v in headers_map.items()}
+            receipt_header = lowered.get("payment-response") or lowered.get("x-payment-response")
         if not payment_receipt and receipt_header:
             payment_receipt = decode_receipt(receipt_header)
 
@@ -318,7 +325,7 @@ async def main() -> None:
         rprint(music_url)
 
     if payment_header:
-        rprint("\n[bold blue]Signed X-PAYMENT Header[/]")
+        rprint(f"\n[bold blue]Signed {payment_header_name} Header[/]")
         rprint(payment_header)
 
     if payment_receipt:
