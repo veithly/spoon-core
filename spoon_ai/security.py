@@ -62,6 +62,9 @@ def init_security() -> None:
     if not encrypted_keys:
         return
 
+    # Mark that encrypted secrets were present (used by wallet selection logic)
+    os.environ["SPOON_ENC_PRESENT"] = "1"
+
     master_pwd = _resolve_master_password()
     if not master_pwd:
         raise RuntimeError(

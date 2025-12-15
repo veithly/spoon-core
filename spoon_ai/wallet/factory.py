@@ -1,22 +1,25 @@
 """
 Wallet factory implementing a Chain of Responsibility:
-Turnkey (MPC) -> Encrypted private key -> Plaintext key.
+Local key (encrypted/plaintext) -> Turnkey (MPC).
 """
 
+import base64
 import getpass
 import os
 import re
+from typing import Optional
 
 from dotenv import load_dotenv
 from eth_account import Account
 
 from ..turnkey.client import Turnkey
-from .security import decrypt_private_key
+from .security import ENCRYPTED_PREFIX, decrypt_private_key
 from .turnkey_signer import TurnkeySigner
 
 _TURNKEY_REQUIRED_ENV = ("TURNKEY_API_PUBLIC_KEY", "TURNKEY_API_PRIVATE_KEY", "TURNKEY_ORG_ID")
 _MASTER_PASSWORD_ENV = "SPOON_MASTER_PWD"
-_PRIVATE_KEY_ENV = "PRIVATE_KEY"
+_PRIVATE_KEY_ENV_PRIORITY_OVERRIDE = "SPOON_WALLET_ENV_PRIORITY"
+_DEFAULT_PRIVATE_KEY_ENVS = ("PRIVATE_KEY", "EVM_PRIVATE_KEY", "SOLANA_PRIVATE_KEY")
 
 
 def _normalize_private_key(value: str) -> str:
@@ -27,6 +30,62 @@ def _normalize_private_key(value: str) -> str:
 def _looks_like_hex_key(value: str) -> bool:
     key = value.strip()
     return bool(re.fullmatch(r"0x[a-fA-F0-9]{64}", key) or re.fullmatch(r"[a-fA-F0-9]{64}", key))
+
+
+def _decode_base58(value: str) -> Optional[bytes]:
+    """Decode a base58 string if the base58 package is available."""
+    try:
+        import base58  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        return base58.b58decode(value)
+    except Exception:
+        return None
+
+
+def _decode_solana_private_key(value: str) -> Optional[bytes]:
+    """
+    Attempt to decode a Solana private key in base58/base64 format.
+
+    We expect either 64 bytes (secret key + pubkey, typical solana-keygen output)
+    or 32 bytes (seed only). Returns None when decoding fails.
+    """
+    if not isinstance(value, str):
+        return None
+
+    candidate = value.strip()
+    if not candidate:
+        return None
+
+    # Try base58 first (Phantom/solana-keygen style)
+    decoded = _decode_base58(candidate)
+    if decoded is not None and len(decoded) in (64, 32):
+        return decoded
+
+    # Then try base64
+    try:
+        decoded = base64.b64decode(candidate, validate=True)
+        if len(decoded) in (64, 32):
+            return decoded
+    except Exception:
+        pass
+
+    return None
+
+
+class SolanaLocalWallet:
+    """Lightweight holder for a Solana private key."""
+
+    def __init__(self, private_key: str, private_key_bytes: bytes):
+        self.private_key = private_key.strip()
+        self.private_key_bytes = private_key_bytes
+        # Provide an address attr to avoid attribute errors in generic code; not computed here.
+        self.address = None
+
+    def __repr__(self) -> str:  # pragma: no cover - trivial
+        return "SolanaLocalWallet()"
 
 
 def _auto_select_turnkey_address(client: Turnkey) -> str:
@@ -55,16 +114,64 @@ def _has_turnkey_credentials() -> bool:
     return all(os.getenv(k) for k in _TURNKEY_REQUIRED_ENV)
 
 
+def _private_key_env_priority() -> list[str]:
+    """
+    Determine which env vars to inspect for a local key.
+
+    Priority can be overridden with comma-separated SPOON_WALLET_ENV_PRIORITY,
+    otherwise we fall back to a conservative default list.
+    """
+    override = os.getenv(_PRIVATE_KEY_ENV_PRIORITY_OVERRIDE)
+    if override:
+        names = [name.strip() for name in override.split(",") if name.strip()]
+        if names:
+            # Preserve order while removing duplicates
+            return list(dict.fromkeys(names))
+    return list(_DEFAULT_PRIVATE_KEY_ENVS)
+
+
 def load_wallet():
     """
     Evaluate signing options in priority order and return a wallet/signer.
 
-    Priority:
-        1) Turnkey (MPC)
-        2) Encrypted PRIVATE_KEY (ENC:...)
-        3) Plaintext PRIVATE_KEY (0x...)
+    Priority (prefer local keys for dev/test):
+        1) Encrypted key from env priority list (ENC:...)
+        2) Plaintext key from env priority list (0x...)
+        3) Turnkey (MPC) when no usable local key is provided
     """
     load_dotenv()
+
+    env_priority = _private_key_env_priority()
+    for env_name in env_priority:
+        private_key = os.getenv(env_name)
+        if not private_key:
+            continue
+
+        # Special handling for Solana keys (base58/base64)
+        if env_name.upper().startswith("SOLANA"):
+            decoded = _decode_solana_private_key(private_key)
+            if decoded:
+                print(f"✅ [Wallet] Solana private key loaded from {env_name}.")
+                return SolanaLocalWallet(private_key, decoded)
+
+        if isinstance(private_key, str) and private_key.startswith(ENCRYPTED_PREFIX):
+            print(f"🔐 [Wallet] Encrypted {env_name} detected. Decryption required.")
+            password = os.environ.get(_MASTER_PASSWORD_ENV) or getpass.getpass(f"Enter password to decrypt {env_name}: ")
+            decrypted_key = decrypt_private_key(private_key, password)
+            account = Account.from_key(_normalize_private_key(decrypted_key))
+            print(f"✅ [Wallet] Local account unlocked from {env_name}: {account.address}")
+            return account
+
+        if _looks_like_hex_key(private_key):
+            print(f"⚠️ [Wallet] WARNING: Using plaintext {env_name} from environment.")
+            account = Account.from_key(_normalize_private_key(private_key))
+            print(f"✅ [Wallet] Local account loaded from {env_name}: {account.address}")
+            return account
+
+        print(
+            f"⚠️ [Wallet] {env_name} is set but not in a recognized hex private key format; "
+            "skipping and falling back to next option."
+        )
 
     if _has_turnkey_credentials():
         print("🛡️ [Wallet] Turnkey credentials detected; using MPC signer.")
@@ -75,24 +182,7 @@ def load_wallet():
         except Exception as exc:
             raise ValueError(f"Failed to initialize Turnkey signer: {exc}") from exc
 
-    private_key = os.getenv(_PRIVATE_KEY_ENV)
-    if private_key:
-        if private_key.startswith("ENC:"):
-            print("🔐 [Wallet] Encrypted PRIVATE_KEY detected. Decryption required.")
-            password = os.environ.get(_MASTER_PASSWORD_ENV) or getpass.getpass("Enter password to decrypt PRIVATE_KEY: ")
-            decrypted_key = decrypt_private_key(private_key, password)
-            account = Account.from_key(_normalize_private_key(decrypted_key))
-            print(f"✅ [Wallet] Local account unlocked: {account.address}")
-            return account
-
-        if _looks_like_hex_key(private_key):
-            print("⚠️ [Wallet] WARNING: Using plaintext PRIVATE_KEY from environment.")
-            account = Account.from_key(_normalize_private_key(private_key))
-            print(f"✅ [Wallet] Local account loaded: {account.address}")
-            return account
-
-        raise ValueError("PRIVATE_KEY is set but not in a recognized format (ENC:v1 or 0x...).")
-
     raise ValueError(
-        "No valid signing method configured; set Turnkey credentials or PRIVATE_KEY in your .env file."
+        "No valid signing method configured; set one of "
+        f"{', '.join(env_priority)} (plain or ENC:v1) or Turnkey credentials in your .env file."
     )

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import aiohttp
 import asyncio
 
-load_dotenv(override=True)
+#load_dotenv(override=True)
 # ---------------------------- 1. Smart Weather Tool ----------------------------
 class SmartWeatherTool(BaseTool):
     """Smart Weather Tool"""
@@ -115,8 +115,7 @@ async def main():
     # Use LLM manager architecture (only option now)
     info_agent = MyInfoAgent(
         llm=ChatBot(
-            llm_provider="openai",
-            model_name="gpt-4.1"
+            llm_provider="openrouter",
         )
     )
     print("✓ Using LLM manager architecture")
