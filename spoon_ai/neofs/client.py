@@ -345,9 +345,27 @@ class NeoFSClient:
         return self._request('HEAD', f'/v1/objects/{container_id}/by_attribute/{encoded_key}/{encoded_val}', headers=headers, params=params if params else None)
 
     # 8. Object Delete
-    def delete_object(self, container_id: str, object_id: str) -> SuccessResponse:
-        params = generate_simple_signature_params(self.private_key_wif)
-        response = self._request('DELETE', f'/v1/objects/{container_id}/{object_id}', params=params)
+    def delete_object(
+        self, 
+        container_id: str, 
+        object_id: str,
+        *,
+        bearer_token: Optional[str] = None
+    ) -> SuccessResponse:
+        """Delete object. Bearer token is optional for public containers, required for eACL containers with DENY DELETE rule."""
+        headers = {}
+        params = {}
+        
+        if bearer_token:
+            signature_value, signature_key = sign_bearer_token(bearer_token, self.private_key_wif, wallet_connect=False)
+            headers['Authorization'] = f'Bearer {bearer_token}'
+            headers['X-Bearer-Signature'] = signature_value
+            headers['X-Bearer-Signature-Key'] = signature_key
+            params = generate_simple_signature_params(self.private_key_wif, payload_parts=(signature_value.encode(),))
+        else:
+            params = generate_simple_signature_params(self.private_key_wif)
+        
+        response = self._request('DELETE', f'/v1/objects/{container_id}/{object_id}', headers=headers, params=params)
         return SuccessResponse(**response.json())
 
     # 9. Object Search
