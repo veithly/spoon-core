@@ -139,5 +139,5 @@ google-generativeai==0.8.5
 
 uvicorn[standard]>=0.32.0
 
-x402>=0.2.1
+x402>=1.0.0
     # via spoon-ai-sdk (pyproject.toml)
