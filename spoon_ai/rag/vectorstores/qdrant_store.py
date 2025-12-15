@@ -45,19 +45,39 @@ class QdrantVectorStore(VectorStore):
     def add(self, *, collection: str, ids: List[str], embeddings: List[List[float]], metadatas: List[Dict]) -> None:
         client = self._client_or_raise()
         self._ensure_collection(collection, len(embeddings[0]) if embeddings else 1)
+        # Use explicit PointStruct for compatibility with local/embedded client
+        try:
+            from qdrant_client.models import PointStruct  # qdrant-client >=1.x
+        except Exception:  # fallback for older versions
+            PointStruct = None
+
         points = []
         for id_, vec, md in zip(ids, embeddings, metadatas):
-            points.append({"id": id_, "vector": vec, "payload": md})
+            if PointStruct is not None:
+                points.append(PointStruct(id=id_, vector=vec, payload=md))
+            else:
+                points.append({"id": id_, "vector": vec, "payload": md})
         client.upsert(collection_name=collection, points=points)
 
     def query(self, *, collection: str, query_embeddings: List[List[float]], top_k: int = 5, filter: Optional[Dict] = None) -> List[List[Tuple[str, float, Dict]]]:
         client = self._client_or_raise()
         results: List[List[Tuple[str, float, Dict]]] = []
         for q in query_embeddings:
-            res = client.search(collection_name=collection, query_vector=q, limit=top_k, with_payload=True)
+            # qdrant-client >=1.x uses query_points for vector search; ensure payload returned
+            res = client.query_points(collection_name=collection, query=q, limit=top_k, with_payload=True)
+            # Normalize response
+            try:
+                points = res.points  # type: ignore[attr-defined]
+            except Exception:
+                # Fallback if dict-like
+                points = res.get("points", []) if isinstance(res, dict) else []
             out: List[Tuple[str, float, Dict]] = []
-            for r in res:
-                out.append((str(r.id), float(r.score or 0.0), r.payload or {}))
+            for r in points:
+                # r.id may be UUID or str
+                rid = getattr(r, "id", None)
+                rscore = getattr(r, "score", 0.0)
+                rpayload = getattr(r, "payload", {}) or {}
+                out.append((str(rid), float(rscore or 0.0), rpayload))
             results.append(out)
         return results
 

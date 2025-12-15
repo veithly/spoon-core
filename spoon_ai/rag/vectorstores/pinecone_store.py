@@ -29,15 +29,104 @@ class PineconeVectorStore(VectorStore):
         if self._index is not None:
             return self._index
         # Create index if missing (serverless default)
-        indexes = {idx["name"] for idx in pc.list_indexes()}
+        # list_indexes() shape varies across versions: can be list-like, dict, or object with attributes
+        def _extract_index_names(obj) -> set:
+            try:
+                if obj is None:
+                    return set()
+                # Object with attribute 'indexes'
+                if hasattr(obj, "indexes"):
+                    seq = getattr(obj, "indexes")
+                elif isinstance(obj, dict):
+                    seq = obj.get("indexes") or obj.get("data") or obj.get("items") or obj
+                else:
+                    seq = obj
+                names = set()
+                if isinstance(seq, (list, tuple, set)):
+                    for it in seq:
+                        if isinstance(it, dict):
+                            nm = it.get("name") or it.get("index_name")
+                        else:
+                            nm = getattr(it, "name", None)
+                        if nm:
+                            names.add(nm)
+                elif isinstance(seq, dict):
+                    # maybe {"name": ...}
+                    nm = seq.get("name") or seq.get("index_name")
+                    if nm:
+                        names.add(nm)
+                # Some SDKs expose `.names`
+                if not names and hasattr(obj, "names"):
+                    try:
+                        names.update(set(getattr(obj, "names")))
+                    except Exception:
+                        pass
+                return names
+            except Exception:
+                return set()
+
+        try:
+            indexes = _extract_index_names(pc.list_indexes())
+        except Exception:
+            indexes = set()
         if self.index_name not in indexes:
             if not dim:
                 raise RuntimeError("Embedding dimension required to create Pinecone index on first use")
-            pc.create_index(
-                name=self.index_name,
-                dimension=dim,
-                metric="cosine",
-            )
+            # Use serverless spec defaults, overridable via env
+            cloud = os.getenv("PINECONE_CLOUD", "aws")
+            region = os.getenv("PINECONE_REGION", "us-east-1")
+            # Prefer new SDK with ServerlessSpec; only fall back if import fails
+            try:
+                from pinecone import ServerlessSpec
+                spec = ServerlessSpec(cloud=cloud, region=region)
+                try:
+                    pc.create_index(
+                        name=self.index_name,
+                        dimension=dim,
+                        metric="cosine",
+                        spec=spec,
+                    )
+                except Exception as e:
+                    # If index was created concurrently, ignore 409
+                    try:
+                        from pinecone.exceptions import PineconeApiException  # type: ignore
+                    except Exception:
+                        PineconeApiException = tuple()  # type: ignore
+                    msg = str(e).lower()
+                    status = getattr(e, "status", None)
+                    if (hasattr(e, "__class__") and e.__class__.__name__ == "PineconeApiException") or isinstance(e, PineconeApiException):
+                        if status == 409 or "already_exists" in msg or "already exists" in msg:
+                            pass
+                        else:
+                            raise
+                    else:
+                        # Non-API exceptions should bubble up
+                        raise
+            except Exception as import_or_call_err:
+                # If ServerlessSpec is missing (old SDK), try the older signature
+                if "ServerlessSpec" in str(import_or_call_err):
+                    try:
+                        pc.create_index(
+                            name=self.index_name,
+                            dimension=dim,
+                            metric="cosine",
+                        )
+                    except Exception as e:
+                        # If the old signature still demands spec, re-raise with guidance
+                        if "missing 1 required positional argument: 'spec'" in str(e):
+                            raise RuntimeError(
+                                "Your pinecone SDK requires ServerlessSpec. Please upgrade or set PINECONE_REGION/CLOUD."
+                            ) from e
+                        # Ignore 'already exists'
+                        msg = str(e).lower()
+                        status = getattr(e, "status", None)
+                        if status == 409 or "already exists" in msg:
+                            pass
+                        else:
+                            raise
+                else:
+                    # We only swallow import errors; other errors should surface
+                    raise
         self._index = pc.Index(self.index_name)
         return self._index
 
@@ -71,4 +160,3 @@ class PineconeVectorStore(VectorStore):
             index.delete(namespace=collection, delete_all=True)
         except Exception:
             pass
-
