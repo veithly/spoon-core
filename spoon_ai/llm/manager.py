@@ -41,10 +41,10 @@ class ProviderState:
         """Check if provider initialization can be retried."""
         if self.initialization_attempts >= self.max_attempts:
             return False
-        
+
         if self.backoff_until and datetime.now() < self.backoff_until:
             return False
-            
+
         return True
 
     def record_initialization_failure(self, error: Exception) -> None:
@@ -54,7 +54,7 @@ class ProviderState:
         self.last_error_time = datetime.now()
         self.is_initialized = False
         self.is_initializing = False
-        
+
         # Exponential backoff: 2^attempts seconds
         backoff_seconds = min(2 ** self.initialization_attempts, 300)  # Max 5 minutes
         self.backoff_until = datetime.now() + timedelta(seconds=backoff_seconds)
@@ -214,7 +214,7 @@ class LLMManager:
         self.provider_cleanup_tasks: Set[asyncio.Task] = set()
         self._manager_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
-        
+
         # Existing configuration
         self.fallback_chain: List[str] = []
         self.default_provider: Optional[str] = None
@@ -231,7 +231,7 @@ class LLMManager:
         """Register cleanup callback for graceful shutdown."""
         import atexit
         import signal
-        
+
         def cleanup_sync():
             """Synchronous cleanup wrapper."""
             try:
@@ -252,7 +252,7 @@ class LLMManager:
             except Exception as e:
                 # Silently skip cleanup on shutdown errors
                 logger.debug(f"Cleanup error (safe to ignore at shutdown): {e}")
-        
+
         atexit.register(cleanup_sync)
 
     def _get_provider_state(self, provider_name: str) -> ProviderState:
@@ -263,16 +263,16 @@ class LLMManager:
 
     async def _ensure_provider_initialized(self, provider_name: str) -> bool:
         """Ensure provider is properly initialized with thread safety.
-        
+
         Returns:
             bool: True if provider is initialized, False if initialization failed
         """
         state = self._get_provider_state(provider_name)
-        
+
         # Fast path: already initialized
         if state.is_initialized:
             return True
-        
+
         # Check if initialization is possible
         if not state.can_retry_initialization():
             logger.error(f"Provider {provider_name} initialization blocked: "
@@ -285,14 +285,14 @@ class LLMManager:
             # Double-check after acquiring lock (another thread might have initialized)
             if state.is_initialized:
                 return True
-            
+
             # Check if already initializing in another coroutine
             if state.is_initializing:
                 logger.info(f"Provider {provider_name} is already being initialized, waiting...")
                 # Wait for initialization to complete (with timeout)
                 try:
                     await asyncio.wait_for(
-                        self._wait_for_initialization(state), 
+                        self._wait_for_initialization(state),
                         timeout=30.0
                     )
                     return state.is_initialized
@@ -302,34 +302,34 @@ class LLMManager:
 
             # Mark as initializing
             state.is_initializing = True
-            
+
             try:
                 # Get provider configuration
                 config = self.config_manager.load_provider_config(provider_name)
                 provider_instance = self.registry.get_provider(provider_name, config.model_dump())
 
                 logger.info(f"Initializing provider: {provider_name}")
-                
+
                 # Initialize the provider
                 await provider_instance.initialize(config.model_dump())
-                
+
                 # Mark as successfully initialized
                 state.record_initialization_success()
-                
+
                 logger.info(f"Successfully initialized provider: {provider_name}")
                 return True
 
             except Exception as e:
                 # Record the failure
                 state.record_initialization_failure(e)
-                
+
                 logger.error(f"Failed to initialize provider {provider_name} "
                            f"(attempt {state.initialization_attempts}): {e}")
-                
+
                 # If this was the last attempt, mark provider as unhealthy
                 if not state.can_retry_initialization():
                     self.load_balancer.update_provider_health(provider_name, False)
-                
+
                 return False
 
     async def _wait_for_initialization(self, state: ProviderState) -> None:
@@ -364,7 +364,7 @@ class LLMManager:
             operation = getattr(provider_instance, method)
             if not callable(operation):
                 raise ProviderError(provider_name, f"Method {method} not available on provider")
-                
+
             response = await operation(*args, **kwargs)
 
             # Calculate duration and add metadata
@@ -414,12 +414,12 @@ class LLMManager:
         critical_error_patterns = [
             "connection",
             "authentication",
-            "unauthorized", 
+            "unauthorized",
             "invalid_api_key",
             "token",
             "timeout"
         ]
-        
+
         error_str = str(error).lower()
         return any(pattern in error_str for pattern in critical_error_patterns)
 
@@ -427,7 +427,7 @@ class LLMManager:
         """Enhanced cleanup with proper resource management."""
         if self._shutdown_event.is_set():
             return  # Already cleaning up
-            
+
         logger.info("Starting LLM Manager cleanup...")
         self._shutdown_event.set()
 
@@ -447,15 +447,15 @@ class LLMManager:
             cleanup_errors = []
             # Only cleanup providers that have been initialized (have instances or states)
             providers_to_cleanup = set()
-            
+
             # Add providers that have instances (safely access private attribute)
             registry_instances = getattr(self.registry, '_instances', {})
             if registry_instances:
                 providers_to_cleanup.update(registry_instances.keys())
-            
+
             # Add providers that have states (initialized)
             providers_to_cleanup.update(self.provider_states.keys())
-            
+
             for provider_name in providers_to_cleanup:
                 try:
                     # Only try to cleanup if provider has an instance
@@ -466,8 +466,13 @@ class LLMManager:
                         logger.debug(f"Cleaned up provider: {provider_name}")
                 except Exception as e:
                     # Only track and log non-configuration errors
-                    if "Configuration error" in str(e) or "not configured" in str(e).lower():
+                    error_str = str(e).lower()
+                    if "configuration error" in error_str or "not configured" in error_str:
                         logger.debug(f"Skipping cleanup for unconfigured provider {provider_name}")
+                    elif "event loop is closed" in error_str:
+                        # During interpreter shutdown, the event loop may already be closed.
+                        # Cleanup is best-effort; don't spam warnings in this case.
+                        logger.debug(f"Skipping cleanup for provider {provider_name}: event loop is closed")
                     else:
                         cleanup_errors.append(f"{provider_name}: {e}")
                         logger.warning(f"Cleanup failed for {provider_name}: {e}")
@@ -483,7 +488,7 @@ class LLMManager:
     def get_provider_status(self) -> Dict[str, Dict[str, Any]]:
         """Get detailed status of all providers."""
         status = {}
-        
+
         for provider_name in self.registry.list_providers():
             state = self._get_provider_state(provider_name)
             status[provider_name] = {
@@ -496,22 +501,22 @@ class LLMManager:
                 "backoff_until": state.backoff_until.isoformat() if state.backoff_until else None,
                 "health_status": self.load_balancer.provider_health.get(provider_name, True)
             }
-        
+
         return status
 
     async def reset_provider(self, provider_name: str) -> bool:
         """Reset a provider's state and force reinitialization.
-        
+
         Args:
             provider_name: Name of provider to reset
-            
+
         Returns:
             bool: True if reset successful
         """
         if provider_name not in self.provider_states:
             logger.warning(f"Provider {provider_name} not found in states")
             return False
-            
+
         async with self._manager_lock:
             # Reset state
             state = self.provider_states[provider_name]
@@ -522,9 +527,9 @@ class LLMManager:
                 state.last_error = None
                 state.last_error_time = None
                 state.backoff_until = None
-                
+
                 logger.info(f"Reset provider state: {provider_name}")
-                
+
                 # Try to reinitialize
                 return await self._ensure_provider_initialized(provider_name)
     def _initialize_providers(self) -> None:
@@ -603,7 +608,7 @@ class LLMManager:
         return self.response_normalizer.normalize_response(response)
 
     async def chat_stream(self,messages: List[Message],provider: Optional[str] = None,callbacks: Optional[List[BaseCallbackHandler]] = None,**kwargs) -> AsyncGenerator[LLMResponseChunk, None]:
-        """Send streaming chat request with callback support.              
+        """Send streaming chat request with callback support.
         Args:
             messages: List of conversation messages
             provider: Specific provider to use (optional)
@@ -617,7 +622,7 @@ class LLMManager:
         providers = self._get_providers_for_request(provider)
         provider_name = providers[0]
         await self._ensure_provider_initialized(provider_name)
-        
+
         # Get provider instance
         provider_instance = self.registry.get_provider(provider_name)
 
@@ -649,7 +654,7 @@ class LLMManager:
                 provider_name, 'chat_stream', duration, False, error=str(e)
             )
             raise
-    
+
     def _get_internal_callbacks(self) -> List[BaseCallbackHandler]:
         """Get internal monitoring callbacks."""
         # For now, return empty list

@@ -359,7 +359,11 @@ class GraphAgent:
             memory_class = self.memory.__class__
             if memory_class == Memory or memory_class == MockMemory:
                 old_session = self.memory.session_id
-                new_memory = memory_class(session_id=session_id)
+                storage_path = getattr(self.memory, "storage_path", None)
+                new_memory = memory_class(
+                    storage_path=str(storage_path) if storage_path else None,
+                    session_id=session_id,
+                )
                 self.memory = new_memory
                 print(f"Switched from session '{old_session}' to '{session_id}'")
             else:
