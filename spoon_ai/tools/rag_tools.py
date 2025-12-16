@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-from pydantic import Field
+from pydantic import PrivateAttr
 
 from spoon_ai.tools.base import BaseTool, ToolResult
 from spoon_ai.chat import ChatBot
-
 from spoon_ai.rag import (
     get_default_config,
     get_embedding_client,
@@ -34,9 +33,7 @@ def _build_components():
 
 class RAGIngestTool(BaseTool):
     name: str = "rag_ingest"
-    description: str = (
-        "Ingest local files or URLs into the RAG index. Accepts a list of paths or URLs."
-    )
+    description: str = "Ingest local files or URLs into the RAG index."
     parameters: dict = {
         "type": "object",
         "properties": {
@@ -59,13 +56,13 @@ class RAGIngestTool(BaseTool):
 
 class RAGSearchTool(BaseTool):
     name: str = "rag_search"
-    description: str = "Search the RAG index and return top matching snippets."
+    description: str = "Search the RAG index and return top snippets."
     parameters: dict = {
         "type": "object",
         "properties": {
             "query": {"type": "string"},
-            "top_k": {"type": "integer"},
-            "collection": {"type": "string"},
+            "top_k": {"type": "integer", "description": "Number of snippets to return (default: 5)"},
+            "collection": {"type": "string", "description": "Collection to search (default: 'default')"},
         },
         "required": ["query"],
     }
@@ -85,22 +82,33 @@ class RAGQATool(BaseTool):
         "type": "object",
         "properties": {
             "question": {"type": "string"},
-            "top_k": {"type": "integer"},
-            "collection": {"type": "string"},
+            "top_k": {"type": "integer", "description": "Number of snippets to use (default: 5)"},
+            "collection": {"type": "string", "description": "Collection to search (default: 'default')"},
         },
         "required": ["question"],
     }
+
+    _llm: Optional[Any] = PrivateAttr(default=None)
+
+    def __init__(self, llm: Optional[Any] = None, **data):
+        super().__init__(**data)
+        self._llm = llm
 
     async def execute(self, *, question: str, top_k: Optional[int] = None, collection: Optional[str] = None) -> ToolResult:
         cfg, store, embed = _build_components()
         retr = RagRetriever(config=cfg, store=store, embeddings=embed)
         chunks = retr.retrieve(question, collection=collection, top_k=top_k)
-        # LLM for QA
-        llm = ChatBot()
+
+        # Use injected LLM if available, otherwise fallback (lazy init)
+        # If RAG_FAKE_QA=1, avoid initializing ChatBot to prevent heavy deps
+        if self._llm:
+            llm = self._llm
+        else:
+            llm = None if os.getenv("RAG_FAKE_QA") == "1" else ChatBot()
+
         qa = RagQA(config=cfg, llm=llm)
         res = await qa.answer(question, chunks)
         return ToolResult(output=res.answer, system=str({"citations": res.citations}))
 
 
 __all__ = ["RAGIngestTool", "RAGSearchTool", "RAGQATool"]
-

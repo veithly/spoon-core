@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Dict, List, Optional, Tuple
 
 from .base import VectorStore
@@ -8,11 +9,73 @@ from .base import VectorStore
 class FaissVectorStore(VectorStore):
     """FAISS-backed local vector store (cosine via inner product + L2 norm)."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, persist_dir: Optional[str] = None) -> None:
+        import os
+        self.persist_dir = persist_dir or os.getenv("RAG_FAISS_DIR", os.path.join(os.getenv("RAG_DIR", ".rag_store"), "faiss"))
         self._collections: Dict[str, Dict] = {}
+        self._load()
+
+    def _get_index_path(self, collection: str) -> str:
+        return os.path.join(self.persist_dir, f"{collection}.index")
+
+    def _get_meta_path(self, collection: str) -> str:
+        return os.path.join(self.persist_dir, f"{collection}.pkl")
+
+    def _load(self):
+        import os
+        import pickle
+        import faiss # type: ignore
+        
+        if not os.path.exists(self.persist_dir):
+            return
+
+        for fname in os.listdir(self.persist_dir):
+            if fname.endswith(".index"):
+                collection = fname[:-6]
+                index_path = os.path.join(self.persist_dir, fname)
+                meta_path = self._get_meta_path(collection)
+                
+                if not os.path.exists(meta_path):
+                    continue
+                    
+                try:
+                    index = faiss.read_index(index_path)
+                    with open(meta_path, "rb") as f:
+                        meta_data = pickle.load(f)
+                    
+                    self._collections[collection] = {
+                        "index": index,
+                        "ids": meta_data["ids"],
+                        "metas": meta_data["metas"],
+                        "dim": meta_data["dim"],
+                    }
+                except Exception as e:
+                    print(f"Error loading FAISS collection '{collection}': {e}")
+                    # Ignore corrupted files
+                    pass
+
+    def _save(self, collection: str):
+        import os
+        import pickle
+        import faiss # type: ignore
+        
+        os.makedirs(self.persist_dir, exist_ok=True)
+        col = self._collections.get(collection)
+        if not col:
+            return
+
+        index_path = self._get_index_path(collection)
+        meta_path = self._get_meta_path(collection)
+        
+        faiss.write_index(col["index"], index_path)
+        with open(meta_path, "wb") as f:
+            pickle.dump({
+                "ids": col["ids"],
+                "metas": col["metas"],
+                "dim": col["dim"]
+            }, f)
 
     def _get_or_create(self, collection: str, dim: Optional[int] = None):
-        import numpy as np  # noqa: F401
         import faiss  # type: ignore
 
         col = self._collections.get(collection)
@@ -53,11 +116,19 @@ class FaissVectorStore(VectorStore):
         col["ids"].extend(ids)
         for id_, md in zip(ids, metadatas):
             col["metas"][id_] = md
+        
+        # Persist changes
+        self._save(collection)
 
     def query(self, *, collection: str, query_embeddings: List[List[float]], top_k: int = 5, filter: Optional[Dict] = None) -> List[List[Tuple[str, float, Dict]]]:
         import numpy as np
 
-        col = self._get_or_create(collection)
+        # Ensure loaded or created if not in memory (but _load handles init)
+        col = self._collections.get(collection)
+        if not col:
+            # If not in memory and not loaded, it doesn't exist
+            return [[] for _ in query_embeddings]
+
         if len(col["ids"]) == 0:
             return [[] for _ in query_embeddings]
 
@@ -85,5 +156,14 @@ class FaissVectorStore(VectorStore):
         return results
 
     def delete_collection(self, collection: str) -> None:
+        import os
         self._collections.pop(collection, None)
+        # Also remove from disk
+        try:
+            if os.path.exists(self._get_index_path(collection)):
+                os.remove(self._get_index_path(collection))
+            if os.path.exists(self._get_meta_path(collection)):
+                os.remove(self._get_meta_path(collection))
+        except Exception:
+            pass
 

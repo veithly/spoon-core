@@ -133,7 +133,7 @@ class PineconeVectorStore(VectorStore):
     def add(self, *, collection: str, ids: List[str], embeddings: List[List[float]], metadatas: List[Dict]) -> None:
         index = self._ensure_index(dim=len(embeddings[0]) if embeddings else None)
         vectors = [
-            {"id": id_, "values": vec, "metadata": md}
+            {"id": id_, "values": [float(x) for x in vec], "metadata": md}
             for id_, vec, md in zip(ids, embeddings, metadatas)
         ]
         index.upsert(vectors=vectors, namespace=collection)
@@ -142,7 +142,8 @@ class PineconeVectorStore(VectorStore):
         index = self._ensure_index()
         results: List[List[Tuple[str, float, Dict]]] = []
         for q in query_embeddings:
-            res = index.query(namespace=collection, vector=q, top_k=top_k, include_metadata=True)
+            # Pass filter dict directly (Pinecone uses Mongo-style filters)
+            res = index.query(namespace=collection, vector=q, top_k=top_k, include_metadata=True, filter=filter)
             matches = res.get("matches", []) if isinstance(res, dict) else getattr(res, "matches", [])
             out: List[Tuple[str, float, Dict]] = []
             for m in matches:

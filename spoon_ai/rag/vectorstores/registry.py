@@ -1,7 +1,10 @@
 import os
-from typing import Optional
+from typing import Optional, Dict
 
 from .base import VectorStore, InMemoryVectorStore
+
+# Global cache to reuse instances within the same process
+_STORE_CACHE: Dict[str, VectorStore] = {}
 
 
 def get_vector_store(backend: Optional[str] = None) -> VectorStore:
@@ -14,22 +17,33 @@ def get_vector_store(backend: Optional[str] = None) -> VectorStore:
     - chroma: local Chroma (requires chromadb)
     """
     name = (backend or os.getenv("RAG_BACKEND", "faiss")).lower()
+    
+    if name in _STORE_CACHE:
+        return _STORE_CACHE[name]
+
+    store: VectorStore
+
     if name == "pinecone":
         from .pinecone_store import PineconeVectorStore
-        return PineconeVectorStore()
-    if name == "qdrant":
+        store = PineconeVectorStore()
+    elif name == "qdrant":
         from .qdrant_store import QdrantVectorStore
-        return QdrantVectorStore()
-    if name == "chroma":
+        store = QdrantVectorStore()
+    elif name == "chroma":
         from .chroma_store import ChromaVectorStore
-        return ChromaVectorStore()
-    if name == "faiss":
+        store = ChromaVectorStore()
+    elif name == "faiss":
         try:
             import faiss  # noqa: F401
             from .faiss_store import FaissVectorStore
-            return FaissVectorStore()
-        except Exception:
+            store = FaissVectorStore()
+        except Exception as e:
+            print(f"Warning: FAISS not available ({e}), falling back to InMemoryVectorStore")
             # fallback to in-memory if faiss not installed
-            return InMemoryVectorStore()
-    # Default: FAISS/local → InMemory
-    return InMemoryVectorStore()
+            store = InMemoryVectorStore()
+    else:
+        # Default: FAISS/local → InMemory
+        store = InMemoryVectorStore()
+
+    _STORE_CACHE[name] = store
+    return store
