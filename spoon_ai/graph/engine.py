@@ -87,6 +87,7 @@ class RunnableNode(BaseNode[State]):
                 return {"result": result}
 
         except InterruptError:
+            # Human-in-the-loop: allow interrupts to propagate to the graph engine.
             # Let InterruptError propagate to be handled in invoke()
             raise
         except Exception as e:
@@ -157,6 +158,9 @@ class ConditionNode(BaseNode[State]):
                 result = await self.condition_func(state)
 
             return {"condition_result": result, "next_node": result}
+        except InterruptError:
+            # Human-in-the-loop: allow interrupts to propagate to the graph engine.
+            raise
         except Exception as e:
             logger.error(f"Condition node {self.name} failed: {e}")
             raise NodeExecutionError(f"Condition '{self.name}' failed", node_name=self.name, original_error=e, state=state) from e
@@ -511,7 +515,7 @@ class StateGraph(Generic[State]):
 
         return self
 
-    def _create_default_llm_router(self, state: Dict[str, Any], query: str) -> str:
+    async def _create_default_llm_router(self, state: Dict[str, Any], query: str) -> str:
         """Create and use default LLM router for natural language routing"""
         try:
             # Lazy import to avoid circular dependencies
@@ -533,10 +537,10 @@ class StateGraph(Generic[State]):
             Return ONLY the step name (lowercase, no explanation).
             """
 
-            messages = [{"role": "user", "content": routing_prompt}]
+            messages = [Message(role="user", content=routing_prompt)]
 
             # Use LLM to determine next step
-            response = llm_manager.chat(messages, **config)
+            response = await llm_manager.chat(messages, provider=None, **config)
             next_step = response.content.strip().lower()
 
             # Validate the response
@@ -593,6 +597,14 @@ class StateGraph(Generic[State]):
         """
         if config:
             self.llm_router_config.update(config)
+
+        # Enabling LLM routing implies allowing the router to call the LLM.
+        # Keep this best-effort to avoid surprising failures if config is not a GraphConfig.
+        try:
+            if isinstance(self.config, GraphConfig):
+                self.config.router.allow_llm = True
+        except Exception:
+            pass
 
         # Set LLM router as the intelligent router
         self.set_llm_router()
@@ -841,6 +853,11 @@ class CompiledGraph(Generic[State]):
                             try:
                                 if callable(self.graph.state_validator):
                                     self.graph.state_validator(state)
+                                # Also support GraphConfig.state_validators (list of callables)
+                                if isinstance(self.graph.config, GraphConfig):
+                                    for validator in self.graph.config.state_validators:
+                                        if callable(validator):
+                                            validator(state)
                             except Exception as e:
                                 raise GraphExecutionError(f"State validation failed: {e}", node=current_node, iteration=iteration)
                 except InterruptError as e:
@@ -911,6 +928,7 @@ class CompiledGraph(Generic[State]):
                 pass
             return result if isinstance(result, dict) else {"result": result}
         except InterruptError:
+            # Human-in-the-loop: allow interrupts to propagate to the graph engine.
             # Let InterruptError propagate to be handled in invoke()
             raise
         except Exception as e:
@@ -1202,11 +1220,21 @@ class CompiledGraph(Generic[State]):
                         self._update_state_with_reducers(state, result)
                         if stream_mode == "values":
                             yield state.copy()
+                        # optional validation (mirrors invoke)
+                        try:
+                            if callable(self.graph.state_validator):
+                                self.graph.state_validator(state)
+                            if isinstance(self.graph.config, GraphConfig):
+                                for validator in self.graph.config.state_validators:
+                                    if callable(validator):
+                                        validator(state)
+                        except Exception as e:
+                            raise GraphExecutionError(f"State validation failed: {e}", node=current_node, iteration=iteration)
             except InterruptError as e:
                 yield {"type": "interrupt", "node": current_node, "interrupt_id": e.interrupt_id, "interrupt_data": e.interrupt_data, "state": state.copy()}
                 return
             next_node = await self._determine_next_node(current_node, state)
-            if next_node == "END" or next_node is None:
+            if next_node == END or next_node is None:
                 if stream_mode == "values":
                     yield state.copy()
                 break
