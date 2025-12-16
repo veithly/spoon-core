@@ -35,21 +35,26 @@ class ChromaVectorStore(VectorStore):
 
     def query(self, *, collection: str, query_embeddings: List[List[float]], top_k: int = 5, filter: Optional[Dict] = None) -> List[List[Tuple[str, float, Dict]]]:
         col = self._get_collection(collection)
-        res = col.query(query_embeddings=query_embeddings, n_results=top_k, include=["metadatas", "distances", "ids"])
+        # Chroma >=1.3 disallows requesting "ids" in include; request metadatas+distances only.
+        res = col.query(query_embeddings=query_embeddings, n_results=top_k, include=["metadatas", "distances"])
         out: List[List[Tuple[str, float, Dict]]] = []
         q = len(query_embeddings)
         for i in range(q):
-            ids = res.get("ids", [[]])[i]
             mds = res.get("metadatas", [[]])[i]
             dists = res.get("distances", [[]])[i]
             triples: List[Tuple[str, float, Dict]] = []
-            for id_, dist, md in zip(ids, dists, mds):
+            # Some Chroma versions return ids even if not requested; otherwise synthesize
+            ids = res.get("ids", [[]])
+            ids_i = ids[i] if i < len(ids) else []
+            for j, (dist, md) in enumerate(zip(dists, mds)):
                 # Convert distance to a similarity-like score; keep ordering
                 try:
                     d = float(dist)
                 except Exception:
                     d = 0.0
                 score = 1.0 / (1.0 + max(d, 0.0))
+                fallback_id = f"chroma-{i}-{j}"
+                id_ = ids_i[j] if j < len(ids_i) else (md.get("id") if isinstance(md, dict) and md.get("id") else fallback_id)
                 triples.append((id_, score, md or {}))
             out.append(triples)
         return out
