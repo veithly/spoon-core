@@ -86,6 +86,9 @@ class RunnableNode(BaseNode[State]):
             else:
                 return {"result": result}
 
+        except InterruptError:
+            # Let InterruptError propagate to be handled in invoke()
+            raise
         except Exception as e:
             logger.error(f"Node {self.name} execution failed: {e}")
             raise NodeExecutionError(f"Node '{self.name}' failed", node_name=self.name, original_error=e, state=state) from e
@@ -757,8 +760,44 @@ class CompiledGraph(Generic[State]):
         config = config or {}
         thread_id = config.get("configurable", {}).get("thread_id", str(uuid.uuid4()))
 
-        # Handle resume from checkpoint
-        if self._resume_thread_id:
+        # Handle Command object (for resume/goto/update)
+        if isinstance(initial_state, Command):
+            cmd = initial_state
+            # Handle resume: load checkpoint and merge updates
+            if cmd.resume is not None:
+                checkpoint = self.graph.checkpointer.get_checkpoint(thread_id)
+                if checkpoint:
+                    state = checkpoint.values.copy()
+                    # Merge resume data into state
+                    if isinstance(cmd.resume, dict):
+                        state.update(cmd.resume)
+                    current_node = checkpoint.next[0] if checkpoint.next else self.graph._entry_point
+                    iteration = checkpoint.metadata.get("iteration", 0) + 1
+                else:
+                    raise GraphExecutionError(f"No checkpoint found for thread_id '{thread_id}' to resume from")
+            # Handle goto: jump to specific node
+            elif cmd.goto:
+                state = self._initialize_state(cmd.update or {})
+                current_node = cmd.goto
+                iteration = 0
+            # Handle update: update state and continue
+            elif cmd.update:
+                checkpoint = self.graph.checkpointer.get_checkpoint(thread_id)
+                if checkpoint:
+                    state = checkpoint.values.copy()
+                    state.update(cmd.update)
+                    current_node = checkpoint.next[0] if checkpoint.next else self.graph._entry_point
+                    iteration = checkpoint.metadata.get("iteration", 0) + 1
+                else:
+                    state = self._initialize_state(cmd.update)
+                    current_node = self.graph._entry_point
+                    iteration = 0
+            else:
+                state = self._initialize_state({})
+                current_node = self.graph._entry_point
+                iteration = 0
+        # Handle resume from checkpoint (legacy)
+        elif self._resume_thread_id:
             thread_id = self._resume_thread_id
             checkpoint = self.graph.checkpointer.get_checkpoint(thread_id, self._resume_checkpoint_id)
             if checkpoint:
@@ -871,6 +910,9 @@ class CompiledGraph(Generic[State]):
             except Exception:
                 pass
             return result if isinstance(result, dict) else {"result": result}
+        except InterruptError:
+            # Let InterruptError propagate to be handled in invoke()
+            raise
         except Exception as e:
             logger.error(f"Node {node_name} execution failed: {e}")
             try:

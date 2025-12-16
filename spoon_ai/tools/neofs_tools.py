@@ -578,20 +578,21 @@ class DeleteObjectTool(BaseTool):
     """Delete an object"""
     
     name: str = "delete_neofs_object"
-    description: str = "Delete an object from container."
+    description: str = "Delete an object from container. Bearer token is optional for public containers, required for eACL containers with DENY DELETE rule."
     parameters: dict = {
         "type": "object",
         "properties": {
             "container_id": {"type": "string", "description": "Container ID"},
-            "object_id": {"type": "string", "description": "Object ID"}
+            "object_id": {"type": "string", "description": "Object ID"},
+            "bearer_token": {"type": "string", "description": "Bearer token (optional for public containers, required for eACL containers with DENY DELETE rule)"}
         },
         "required": ["container_id", "object_id"]
     }
     
-    async def execute(self, container_id: str, object_id: str, **kwargs) -> str:
+    async def execute(self, container_id: str, object_id: str, bearer_token: str = None, **kwargs) -> str:
         try:
             client = get_shared_neofs_client()
-            result = client.delete_object(container_id, object_id)
+            result = client.delete_object(container_id, object_id, bearer_token=bearer_token)
             
             return f"""✅ Object deleted!
 Object ID: {object_id}
@@ -802,18 +803,18 @@ class DeleteContainerTool(BaseTool):
     """Delete container"""
     
     name: str = "delete_neofs_container"
-    description: str = "Delete container. Requires bearer token."
+    description: str = "Delete container. Bearer token is optional but recommended - can use private key signature if not provided."
     parameters: dict = {
         "type": "object",
         "properties": {
             "container_id": {"type": "string", "description": "Container ID"},
-            "bearer_token": {"type": "string", "description": "Bearer token (required)"},
+            "bearer_token": {"type": "string", "description": "Bearer token (optional but recommended for security)"},
             "wallet_connect": {"type": "boolean", "description": "Use wallet_connect mode"}
         },
-        "required": ["container_id", "bearer_token"]
+        "required": ["container_id"]
     }
     
-    async def execute(self, container_id: str, bearer_token: str, wallet_connect: bool = True, **kwargs) -> str:
+    async def execute(self, container_id: str, bearer_token: str = None, wallet_connect: bool = True, **kwargs) -> str:
         try:
             client = get_shared_neofs_client()
             client.delete_container(container_id, bearer_token=bearer_token, wallet_connect=wallet_connect)
