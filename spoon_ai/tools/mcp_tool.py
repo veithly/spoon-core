@@ -111,10 +111,15 @@ class MCPTool(BaseTool, MCPClientMixin):
             elif command == "uvx":
                 if not args:
                     raise ValueError("No package specified for uvx transport")
-                package = args[0]
-                return UvxStdioTransport(package=package, args=args[1:], env_vars=env)
+                tool_name = args[0]
+                tool_args = args[1:] if len(args) > 1 else None
+                return UvxStdioTransport(tool_name=tool_name, tool_args=tool_args, env_vars=env)
             elif command in ["python", "python3"]:
-                return PythonStdioTransport(args=args, env=merged_env)
+                if not args:
+                    raise ValueError("No script path specified for python transport")
+                script_path = args[0]
+                script_args = args[1:] if len(args) > 1 else None
+                return PythonStdioTransport(script_path=script_path, args=script_args, env=merged_env)
             else:
                 full_command = [command] + args
                 return StdioTransport(command=full_command[0], args=full_command[1:], env=merged_env)
