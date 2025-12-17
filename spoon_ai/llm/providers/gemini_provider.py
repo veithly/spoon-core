@@ -33,40 +33,98 @@ logger = getLogger(__name__)
 ])
 class GeminiProvider(LLMProviderInterface):
     """Gemini provider implementation."""
-    
+
     def __init__(self):
         self.client: Optional[genai.Client] = None
         self.config: Dict[str, Any] = {}
         self.model: str = ""
         self.max_tokens: int = 4096
         self.temperature: float = 0.3
-        
+
+    @staticmethod
+    def _safe_get_response_text(response: Any) -> str:
+        """Best-effort extraction of plain text from a Gemini response object.
+
+        The google-genai SDK can sometimes return responses where candidates exist but
+        the candidate content has empty/missing ``parts`` while the convenience
+        ``response.text`` is still populated. We use a defensive strategy:
+        - collect any part.text values if present
+        - fall back to response.text if available
+        """
+        try:
+            parts_text: List[str] = []
+            if hasattr(response, "candidates") and response.candidates:
+                candidate = response.candidates[0]
+                content = getattr(candidate, "content", None)
+                parts = getattr(content, "parts", None) if content is not None else None
+                if parts:
+                    for part in parts:
+                        text = getattr(part, "text", None)
+                        if text:
+                            parts_text.append(text)
+            joined = "\n".join(parts_text).strip()
+            if joined:
+                return joined
+
+            text_attr = getattr(response, "text", None)
+            if isinstance(text_attr, str) and text_attr.strip():
+                return text_attr.strip()
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _is_gemini_model_name(model: str) -> bool:
+        if not isinstance(model, str):
+            return False
+        normalized = model.strip().lower()
+        if not normalized:
+            return False
+        return "gemini" in normalized
+
+    def _resolve_model_name(self, requested_model: Optional[str]) -> str:
+        """Resolve requested model name for Gemini.
+
+        Graph snippets/examples may pass OpenAI/Anthropic model names (e.g. "gpt-4")
+        even when the runtime provider is Gemini. In that case we fall back to the
+        configured Gemini model to avoid hard failures.
+        """
+        if requested_model and self._is_gemini_model_name(requested_model):
+            return requested_model.strip()
+        if requested_model and not self._is_gemini_model_name(requested_model):
+            logger.info(
+                "Gemini provider received non-Gemini model '%s'; falling back to '%s'",
+                requested_model,
+                self.model,
+            )
+        return self.model
+
     async def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize the Gemini provider with configuration."""
         try:
             self.config = config
-            self.model = config.get('model', 'gemini-2.5-pro')
+            self.model = config.get('model', 'models/gemini-3-pro-preview')
             self.max_tokens = config.get('max_tokens', 4096)
             self.temperature = config.get('temperature', 0.3)
-            
+
             api_key = config.get('api_key')
             if not api_key:
                 raise AuthenticationError("gemini", context={"config": config})
-            
+
             self.client = genai.Client(api_key=api_key)
-            
+
             logger.info(f"Gemini provider initialized with model: {self.model}")
-            
+
         except Exception as e:
             if isinstance(e, (AuthenticationError, ProviderError)):
                 raise
             raise ProviderError("gemini", f"Failed to initialize: {str(e)}", original_error=e)
-    
+
     def _convert_messages(self, messages: List[Message]) -> tuple[Optional[str], str]:
         """Convert Message objects to Gemini format for simple chat."""
         system_content = ""
         user_message = ""
-        
+
         # Extract system messages
         for message in messages:
             if message.role == "system":
@@ -74,24 +132,24 @@ class GeminiProvider(LLMProviderInterface):
                     system_content += " " + message.content
                 else:
                     system_content = message.content
-        
+
         # Get the last user message
         for message in reversed(messages):
             if message.role == "user":
                 user_message = message.content
                 break
-        
+
         # If no user message found, use a default
         if not user_message:
             user_message = "Hello"
-        
+
         return system_content, user_message
-    
+
     def _convert_messages_for_tools(self, messages: List[Message]) -> tuple[Optional[str], List]:
         """Convert Message objects to Gemini format for tool calling."""
         system_content = ""
         gemini_messages = []
-        
+
         for message in messages:
             if message.role == "system":
                 if system_content:
@@ -109,14 +167,14 @@ class GeminiProvider(LLMProviderInterface):
                     parts = []
                     if message.content:
                         parts.append(types.Part.from_text(text=message.content))
-                    
+
                     for tool_call in message.tool_calls:
                         args = tool_call.function.get_arguments_dict()
                         parts.append(types.Part.from_function_call(
                             name=tool_call.function.name,
                             args=args
                         ))
-                    
+
                     gemini_messages.append(types.Content(
                         role="model",
                         parts=parts
@@ -142,11 +200,11 @@ class GeminiProvider(LLMProviderInterface):
                                         break
                                 if tool_name:
                                     break
-                    
+
                     # If still no name found, use a default
                     if not tool_name:
                         tool_name = "unknown_function"
-                
+
                 gemini_messages.append(types.Content(
                     role="user",
                     parts=[types.Part.from_function_response(
@@ -154,7 +212,7 @@ class GeminiProvider(LLMProviderInterface):
                         response={"result": message.content}
                     )]
                 ))
-        
+
         return system_content, gemini_messages
 
     def _sanitize_gemini_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -175,11 +233,11 @@ class GeminiProvider(LLMProviderInterface):
             clean_schema["items"] = self._sanitize_gemini_schema(clean_schema["items"])
 
         return clean_schema
-    
+
     def _convert_tools_to_gemini(self, tools: List[Dict]) -> List:
         """Convert OpenAI/Anthropic tool format to Gemini format."""
         gemini_tools = []
-        
+
         if tools:
             function_declarations = []
             for tool in tools:
@@ -191,48 +249,48 @@ class GeminiProvider(LLMProviderInterface):
                         description=func.get('description'),
                         parameters=parameters
                     ))
-            
+
             if function_declarations:
                 gemini_tools.append(types.Tool(function_declarations=function_declarations))
-        
+
         return gemini_tools
-    
+
     async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
         """Send chat request to Gemini."""
         if not self.client:
             raise ProviderError("gemini", "Provider not initialized")
-        
+
         try:
             start_time = asyncio.get_event_loop().time()
-            
+
             system_content, user_message = self._convert_messages(messages)
-            
+
             # Extract parameters
-            model = kwargs.get('model', self.model)
+            model = self._resolve_model_name(kwargs.get('model'))
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
             response_modalities = kwargs.get('response_modalities')
-            
+
             # Build request content
             if isinstance(user_message, str):
                 contents = [types.Part.from_text(text=user_message)]
             else:
                 contents = [user_message]
-            
+
             # Generate configuration
             generate_config = types.GenerateContentConfig(
                 max_output_tokens=max_tokens,
                 temperature=temperature
             )
-            
+
             # Add system instruction if available
             if system_content:
                 generate_config.system_instruction = system_content
-            
+
             # Add response modalities if specified
             if response_modalities:
                 generate_config.response_modalities = response_modalities
-            
+
             # Check for structured output requirements
             if "IMPORTANT INSTRUCTION" in system_content and "JSON format" in system_content:
                 schema = {
@@ -252,22 +310,22 @@ class GeminiProvider(LLMProviderInterface):
                 }
                 generate_config.response_schema = schema
                 generate_config.response_mime_type = 'application/json'
-            
+
             # Send request
             response = self.client.models.generate_content(
                 model=model,
                 contents=contents,
                 config=generate_config
             )
-            
+
             duration = asyncio.get_event_loop().time() - start_time
-            return self._convert_response(response, duration)
-            
+            return self._convert_response(response, duration, model=model)
+
         except Exception as e:
             await self._handle_error(e)
-    
+
     async def chat_stream(self, messages: List[Message],callbacks: Optional[List] = None, **kwargs) -> AsyncIterator[LLMResponseChunk]:
-        """Send streaming chat request to Gemini with callback support. 
+        """Send streaming chat request to Gemini with callback support.
         Yields:
             LLMResponseChunk: Structured streaming response chunks
         """
@@ -277,42 +335,42 @@ class GeminiProvider(LLMProviderInterface):
         # Create callback manager
         callback_manager = CallbackManager.from_callbacks(callbacks)
         run_id = uuid4()
-        
+
         try:
             system_content, user_message = self._convert_messages(messages)
-            
+
             # Extract parameters
-            model = kwargs.get('model', self.model)
+            model = self._resolve_model_name(kwargs.get('model'))
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
-            
+
             # Trigger on_llm_start callback
             await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider="gemini")
-            
+
             # Build request content
             if isinstance(user_message, str):
                 contents = [types.Part.from_text(text=user_message)]
             else:
                 contents = [user_message]
-            
+
             # Generate configuration
             generate_config = types.GenerateContentConfig(
                 max_output_tokens=max_tokens,
                 temperature=temperature
             )
-            
+
             if system_content:
                 generate_config.system_instruction = system_content
-            
+
             # Process streaming response
             full_content = ""
             chunk_index = 0
             finish_reason = None
             usage_data = None
-            
+
             # Send streaming request
             # Filter out parameters that generate_content_stream doesn't accept
-            filtered_kwargs = {k: v for k, v in kwargs.items() 
+            filtered_kwargs = {k: v for k, v in kwargs.items()
                                if k not in ['model', 'max_tokens', 'temperature', 'callbacks', 'timeout']}
             stream = self.client.models.generate_content_stream(
                 model=model,
@@ -320,50 +378,72 @@ class GeminiProvider(LLMProviderInterface):
                 config=generate_config,
                 **filtered_kwargs
             )
-            
+
             for part_response in stream:
-                if part_response.candidates and part_response.candidates[0].content.parts:
-                    chunk = part_response.candidates[0].content.parts[0].text
-                    if chunk:
-                        full_content += chunk
-                        
-                        # Trigger on_llm_new_token callback
-                        await callback_manager.on_llm_new_token(
-                            token=chunk,
-                            run_id=run_id
+                chunk = ""
+                try:
+                    if (
+                        hasattr(part_response, "candidates")
+                        and part_response.candidates
+                        and getattr(part_response.candidates[0], "content", None) is not None
+                        and getattr(part_response.candidates[0].content, "parts", None)
+                    ):
+                        parts = part_response.candidates[0].content.parts
+                        chunk = "".join(
+                            [p.text for p in parts if getattr(p, "text", None)]
                         )
-                        
-                        # Extract finish reason
-                        if (part_response.candidates and 
-                            part_response.candidates[0].finish_reason):
-                            finish_reason = str(part_response.candidates[0].finish_reason)
-                        
-                        # Extract usage stats if available
-                        if hasattr(part_response, 'usage_metadata') and part_response.usage_metadata:
-                            usage_data = {
-                                "prompt_tokens": part_response.usage_metadata.prompt_token_count,
-                                "completion_tokens": part_response.usage_metadata.candidates_token_count,
-                                "total_tokens": part_response.usage_metadata.total_token_count
-                            }
-                        
-                        # Build response chunk
-                        response_chunk = LLMResponseChunk(
-                            content=full_content,
-                            delta=chunk,
-                            provider="gemini",
-                            model=model,
-                            finish_reason=finish_reason,
-                            tool_calls=[],
-                            usage=usage_data,
-                            metadata={
-                                "chunk_index": chunk_index,
-                                "finish_reason": finish_reason
-                            },
-                            chunk_index=chunk_index
-                        )
-                        chunk_index += 1
-                        yield response_chunk
-            
+                except Exception:
+                    chunk = ""
+
+                # Fallback: some SDK responses expose streaming text via `part_response.text`
+                if not chunk:
+                    maybe_text = getattr(part_response, "text", None)
+                    if isinstance(maybe_text, str):
+                        chunk = maybe_text
+
+                if chunk:
+                    full_content += chunk
+
+                    # Trigger on_llm_new_token callback
+                    await callback_manager.on_llm_new_token(
+                        token=chunk,
+                        run_id=run_id
+                    )
+
+                    # Extract finish reason
+                    if (
+                        hasattr(part_response, "candidates")
+                        and part_response.candidates
+                        and part_response.candidates[0].finish_reason
+                    ):
+                        finish_reason = str(part_response.candidates[0].finish_reason)
+
+                    # Extract usage stats if available
+                    if hasattr(part_response, 'usage_metadata') and part_response.usage_metadata:
+                        usage_data = {
+                            "prompt_tokens": part_response.usage_metadata.prompt_token_count,
+                            "completion_tokens": part_response.usage_metadata.candidates_token_count,
+                            "total_tokens": part_response.usage_metadata.total_token_count
+                        }
+
+                    # Build response chunk
+                    response_chunk = LLMResponseChunk(
+                        content=full_content,
+                        delta=chunk,
+                        provider="gemini",
+                        model=model,
+                        finish_reason=finish_reason,
+                        tool_calls=[],
+                        usage=usage_data,
+                        metadata={
+                            "chunk_index": chunk_index,
+                            "finish_reason": finish_reason
+                        },
+                        chunk_index=chunk_index
+                    )
+                    chunk_index += 1
+                    yield response_chunk
+
             # Trigger on_llm_end callback
             final_response = LLMResponse(
                 content=full_content,
@@ -379,76 +459,77 @@ class GeminiProvider(LLMProviderInterface):
                 response=final_response,
                 run_id=run_id
             )
-                            
+
         except Exception as e:
             await callback_manager.on_llm_error(
                 error=e,
                 run_id=run_id
             )
             await self._handle_error(e)
-    
+
     async def completion(self, prompt: str, **kwargs) -> LLMResponse:
         """Send completion request to Gemini."""
         # Convert to chat format
         messages = [Message(role="user", content=prompt)]
         return await self.chat(messages, **kwargs)
-    
+
     async def chat_with_tools(self, messages: List[Message], tools: List[Dict], **kwargs) -> LLMResponse:
         """Send chat request with tools to Gemini using native function calling."""
         if not self.client:
             raise ProviderError("gemini", "Provider not initialized")
-        
+
         try:
             start_time = asyncio.get_event_loop().time()
-            
+
             # Convert messages to Gemini format
             system_content, gemini_messages = self._convert_messages_for_tools(messages)
-            
+
             # Convert tools to Gemini format
             gemini_tools = self._convert_tools_to_gemini(tools)
-            
+
             # Extract parameters
-            model = kwargs.get('model', self.model)
+            model = self._resolve_model_name(kwargs.get('model'))
             max_tokens = kwargs.get('max_tokens', self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
-            
+
             # Generate configuration
             generate_config = types.GenerateContentConfig(
                 max_output_tokens=max_tokens,
                 temperature=temperature,
                 tools=gemini_tools
             )
-            
+
             # Add system instruction if available
             if system_content:
                 generate_config.system_instruction = system_content
-            
+
             # Send request
             response = self.client.models.generate_content(
                 model=model,
                 contents=gemini_messages,
                 config=generate_config
             )
-            
+
             duration = asyncio.get_event_loop().time() - start_time
-            return self._convert_tool_response(response, duration)
-            
+            return self._convert_tool_response(response, duration, model=model)
+
         except Exception as e:
             await self._handle_error(e)
-    
-    def _convert_response(self, response, duration: float) -> LLMResponse:
+
+    def _convert_response(self, response, duration: float, *, model: Optional[str] = None) -> LLMResponse:
         """Convert Gemini response to standardized LLMResponse."""
         content = ""
         response_text = ""
         image_paths = []
         tool_calls = []
-        
+
         # Check if there are candidate results
         if hasattr(response, "candidates") and response.candidates:
             candidate = response.candidates[0]
             if hasattr(candidate, "content") and candidate.content:
                 # Iterate through all parts
-                for part in candidate.content.parts:
+                parts = getattr(candidate.content, "parts", None) or []
+                for part in parts:
                     # Check if there is text content
                     if hasattr(part, "text") and part.text:
                         if content:
@@ -463,25 +544,25 @@ class GeminiProvider(LLMProviderInterface):
                             "mime_type": getattr(part.inline_data, "mime_type", "image/jpeg"),
                             "data": getattr(part.inline_data, "data", b"")
                         }
-                        
+
                         # Save image to local storage
                         output_dir = "runtime-image-output"
                         os.makedirs(output_dir, exist_ok=True)
-                        
+
                         timestamp = int(time.time())
                         ext = image_data['mime_type'].split('/')[-1]
                         filename = f"gemini_image_{timestamp}.{ext}"
                         filepath = os.path.join(output_dir, filename)
-                        
+
                         try:
                             with open(filepath, "wb") as f:
                                 f.write(image_data['data'])
-                            
+
                             image_paths.append({
                                 "filepath": filepath,
                                 "mime_type": image_data['mime_type']
                             })
-                            
+
                             # Add to tool calls for compatibility
                             tool_calls.append({
                                 "type": "image",
@@ -490,34 +571,34 @@ class GeminiProvider(LLMProviderInterface):
                                     "data": image_data["data"]
                                 }
                             })
-                            
+
                             # Update content
                             if content:
                                 content += f"\n[Generated image saved to: {filepath}]"
                             else:
                                 content = f"[Generated image saved to: {filepath}]"
                             response_text = content
-                            
+
                         except Exception as e:
                             logger.error(f"Failed to save image: {str(e)}")
-        
-        # If no content was obtained and there were no candidates, fall back to response.text
-        if (
-            not content
-            and (not hasattr(response, "candidates") or not response.candidates)
-            and hasattr(response, "text")
-        ):
-            response_text = response.text
-            content = response_text
-        
+
+        # If no text content was obtained, fall back to response.text (if available).
+        # Some Gemini SDK responses keep `response.text` populated even when
+        # `candidates[0].content.parts` is empty.
+        if not content:
+            fallback_text = self._safe_get_response_text(response)
+            if fallback_text:
+                response_text = fallback_text
+                content = fallback_text
+
         # Default content for image responses
         if not content and image_paths:
             content = "【Image response】"
-        
+
         return LLMResponse(
             content=content or "",
             provider="gemini",
-            model=self.model,
+            model=model or self.model,
             finish_reason="stop",  # Gemini doesn't provide detailed finish reasons
             native_finish_reason="stop",
             tool_calls=[],  # Will be populated by _convert_tool_response for tool calls
@@ -527,19 +608,20 @@ class GeminiProvider(LLMProviderInterface):
                 "has_images": len(image_paths) > 0
             }
         )
-    
-    def _convert_tool_response(self, response, duration: float) -> LLMResponse:
+
+    def _convert_tool_response(self, response, duration: float, *, model: Optional[str] = None) -> LLMResponse:
         """Convert Gemini tool response to standardized LLMResponse."""
         content = ""
         tool_calls = []
         finish_reason = "stop"
-        
+
         # Check if there are candidate results
         if hasattr(response, "candidates") and response.candidates:
             candidate = response.candidates[0]
             if hasattr(candidate, "content") and candidate.content:
                 # Iterate through all parts
-                for part in candidate.content.parts:
+                parts = getattr(candidate.content, "parts", None) or []
+                for part in parts:
                     # Check if there is text content
                     if hasattr(part, "text") and part.text:
                         if content:
@@ -550,15 +632,15 @@ class GeminiProvider(LLMProviderInterface):
                     elif hasattr(part, "function_call") and part.function_call:
                         # Convert Gemini function call to our ToolCall format
                         function_call = part.function_call
-                        
+
                         # Generate a unique ID for the tool call
                         import uuid
                         tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
-                        
+
                         # Convert arguments to JSON string
                         import json
                         arguments_json = json.dumps(function_call.args) if function_call.args else "{}"
-                        
+
                         tool_call = ToolCall(
                             id=tool_call_id,
                             type="function",
@@ -569,26 +651,24 @@ class GeminiProvider(LLMProviderInterface):
                         )
                         tool_calls.append(tool_call)
                         finish_reason = "tool_calls"
-        
-        # If no content was obtained and there were no candidates, fall back to response.text
-        if (
-            not content
-            and (not hasattr(response, "candidates") or not response.candidates)
-            and hasattr(response, "text")
-        ):
-            content = response.text
-        
+
+        # If no content was obtained, fall back to response.text (if available).
+        if not content:
+            fallback_text = self._safe_get_response_text(response)
+            if fallback_text:
+                content = fallback_text
+
         return LLMResponse(
             content=content or "",
             provider="gemini",
-            model=self.model,
+            model=model or self.model,
             finish_reason=finish_reason,
             native_finish_reason=finish_reason,
             tool_calls=tool_calls,
             duration=duration,
             metadata={}
         )
-    
+
     def get_metadata(self) -> ProviderMetadata:
         """Get Gemini provider metadata."""
         return ProviderMetadata(
@@ -609,17 +689,17 @@ class GeminiProvider(LLMProviderInterface):
                 "tokens_per_minute": 32000
             }
         )
-    
+
     async def health_check(self) -> bool:
         """Check if Gemini provider is healthy."""
         if not self.client:
             return False
-        
+
         try:
             # Simple test request
             contents = [types.Part.from_text(text="test")]
             config = types.GenerateContentConfig(max_output_tokens=1)
-            
+
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=contents,
@@ -629,17 +709,57 @@ class GeminiProvider(LLMProviderInterface):
         except Exception as e:
             logger.warning(f"Gemini health check failed: {e}")
             return False
-    
+
     async def cleanup(self) -> None:
         """Cleanup Gemini provider resources."""
-        # Gemini client doesn't require explicit cleanup
+        client = self.client
         self.client = None
+
+        if not client:
+            logger.info("Gemini provider cleaned up")
+            return
+
+        async def _call_close(maybe_callable: Any) -> None:
+            if not callable(maybe_callable):
+                return
+            try:
+                result = maybe_callable()
+                if asyncio.iscoroutine(result):
+                    await result
+            except RuntimeError as e:
+                # Common during interpreter teardown: the loop may already be closed.
+                if "event loop is closed" not in str(e).lower():
+                    raise
+
+        # google-genai can maintain separate sync/async clients. Close both best-effort.
+        try:
+            aio_client = getattr(client, "aio", None)
+            if aio_client is not None:
+                await _call_close(getattr(aio_client, "aclose", None))
+                await _call_close(getattr(aio_client, "close", None))
+        except Exception:
+            pass
+
+        try:
+            await _call_close(getattr(client, "close", None))
+            await _call_close(getattr(client, "aclose", None))
+        except Exception:
+            pass
+
+        # Last resort: some versions expose a private `_api_client` with `aclose()`.
+        try:
+            api_client = getattr(client, "_api_client", None)
+            if api_client is not None:
+                await _call_close(getattr(api_client, "aclose", None))
+        except Exception:
+            pass
+
         logger.info("Gemini provider cleaned up")
-    
+
     async def _handle_error(self, error: Exception) -> None:
         """Handle and convert Gemini errors to standardized errors."""
         error_str = str(error).lower()
-        
+
         if "authentication" in error_str or "api key" in error_str:
             raise AuthenticationError("gemini", context={"original_error": str(error)})
         elif "quota" in error_str or "rate limit" in error_str:
