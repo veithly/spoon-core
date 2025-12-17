@@ -80,8 +80,8 @@ class LLMProviderRegistry:
             instance = provider_class()
 
             # Initialize with configuration
-            import asyncio
-            if asyncio.iscoroutinefunction(instance.initialize):
+            import inspect
+            if inspect.iscoroutinefunction(instance.initialize):
                 # For async initialization, we'll need to handle this in the manager
                 # For now, store the config and let the manager handle initialization
                 pass
