@@ -101,16 +101,43 @@ class GeminiProvider(LLMProviderInterface):
         return self.model
 
     @staticmethod
-    def _requires_thinking_mode(model: str) -> bool:
-        """Return True if the model requires thinking_config to produce output.
+    def _thinking_budget_min_for_model(model: str) -> Optional[int]:
+        """Return minimum thinking_budget for models that support/require thinking_config."""
+        if not isinstance(model, str):
+            return None
+        normalized = model.strip().lower()
+        if not normalized:
+            return None
 
-        Some Gemini 3 preview models only work in thinking mode and may return empty
-        content unless thinking_config is set with a sufficient budget.
+        # Gemini 3 preview: must be in thinking mode; small budgets still work.
+        if "gemini-3" in normalized:
+            return 24
+
+        # Gemini 2.5 Pro: supports thinking_config but rejects small budgets.
+        if "gemini-2.5-pro" in normalized:
+            return 128
+
+        return None
+
+    @staticmethod
+    def _min_output_tokens_for_model(model: str) -> int:
+        """Return a safe minimum max_output_tokens for models that can otherwise return empty output.
+
+        Empirically, some Gemini "pro" / thinking-oriented models may return empty
+        visible content when max_output_tokens is too small (even for short answers).
         """
         if not isinstance(model, str):
-            return False
+            return 0
         normalized = model.strip().lower()
-        return "gemini-3" in normalized
+        if not normalized:
+            return 0
+
+        # Gemini 3 preview (thinking) and Gemini 2.5 Pro frequently need a higher
+        # output budget to include visible text (otherwise finish_reason=MAX_TOKENS and text=None).
+        if "gemini-3" in normalized or "gemini-2.5-pro" in normalized:
+            return 256
+
+        return 0
 
     def _apply_thinking_defaults(
         self,
@@ -119,23 +146,22 @@ class GeminiProvider(LLMProviderInterface):
         requested_max_tokens: int,
         kwargs: Dict[str, Any],
     ) -> tuple[int, Optional[types.ThinkingConfig]]:
-        """Apply safe defaults for thinking models to avoid empty outputs."""
-        if not self._requires_thinking_mode(model):
-            return requested_max_tokens, None
-
-        # Empirically, Gemini 3 thinking models may produce empty visible output
-        # when max_output_tokens is too small (even for short answers).
-        # 256 is a practical minimum to avoid truncated outputs for structured JSON.
-        min_output_tokens = 256
+        """Apply safe defaults for Gemini models to avoid empty outputs."""
         max_tokens = requested_max_tokens
-        if max_tokens < min_output_tokens:
+
+        min_output_tokens = self._min_output_tokens_for_model(model)
+        if min_output_tokens and max_tokens < min_output_tokens:
             logger.info(
-                "Gemini thinking model '%s' requested max_tokens=%s; bumping to %s to avoid empty output",
+                "Gemini model '%s' requested max_tokens=%s; bumping to %s to avoid empty output",
                 model,
                 requested_max_tokens,
                 min_output_tokens,
             )
             max_tokens = min_output_tokens
+
+        min_thinking_budget = self._thinking_budget_min_for_model(model)
+        if min_thinking_budget is None:
+            return max_tokens, None
 
         # Allow callers to pass an explicit ThinkingConfig or thinking_budget.
         thinking_cfg = kwargs.get("thinking_config")
@@ -145,20 +171,37 @@ class GeminiProvider(LLMProviderInterface):
             except Exception:
                 thinking_cfg = None
         if isinstance(thinking_cfg, types.ThinkingConfig):
-            return max_tokens, thinking_cfg
+            # Normalize invalid/empty budgets for known models.
+            budget = getattr(thinking_cfg, "thinking_budget", None)
+            if budget is None:
+                budget_int = min_thinking_budget
+            else:
+                try:
+                    budget_int = int(budget)
+                except Exception:
+                    budget_int = min_thinking_budget
+
+            if budget_int < min_thinking_budget:
+                budget_int = min_thinking_budget
+
+            return max_tokens, types.ThinkingConfig(
+                include_thoughts=getattr(thinking_cfg, "include_thoughts", None),
+                thinking_level=getattr(thinking_cfg, "thinking_level", None),
+                thinking_budget=budget_int,
+            )
 
         thinking_budget = kwargs.get("thinking_budget")
         if thinking_budget is None:
             # Default tuned to reliably yield visible text output.
-            thinking_budget = 32
+            thinking_budget = 32 if min_thinking_budget <= 32 else min_thinking_budget
         try:
             thinking_budget_int = int(thinking_budget)
         except Exception:
-            thinking_budget_int = 32
+            thinking_budget_int = 32 if min_thinking_budget <= 32 else min_thinking_budget
 
-        # For Gemini 3 preview: budget 0 is invalid; too-small budgets can still yield empty output.
-        if thinking_budget_int < 24:
-            thinking_budget_int = 24
+        # Enforce model-specific minimums.
+        if thinking_budget_int < min_thinking_budget:
+            thinking_budget_int = min_thinking_budget
 
         return max_tokens, types.ThinkingConfig(thinking_budget=thinking_budget_int)
 
