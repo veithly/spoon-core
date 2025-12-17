@@ -238,17 +238,22 @@ class LLMManager:
                 # Try to get the running event loop (Python 3.10+ safe)
                 try:
                     loop = asyncio.get_running_loop()
-                    # If we're inside a running loop, schedule cleanup as a task
+                    # If we're inside a running loop, schedule cleanup as a task (best-effort).
+                    # We intentionally do NOT block here.
                     asyncio.create_task(self.cleanup())
                 except RuntimeError:
-                    # No running loop, create a new one for cleanup
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(self.cleanup())
-                        loop.close()
-                    except Exception as e:
-                        logger.debug(f"Cleanup skipped: {e}")
+                    # No running loop (common during interpreter shutdown).
+                    #
+                    # IMPORTANT:
+                    # Do not create a new event loop here. Some third-party SDKs
+                    # (notably google-genai) schedule async cleanup tasks in
+                    # `__del__` when a loop is running. Spinning up a loop solely
+                    # for atexit cleanup can therefore cause noisy shutdown warnings:
+                    # "Task was destroyed but it is pending!" / "aclose was never awaited".
+                    #
+                    # Users who need deterministic cleanup should call
+                    # `await get_llm_manager().cleanup()` explicitly.
+                    return
             except Exception as e:
                 # Silently skip cleanup on shutdown errors
                 logger.debug(f"Cleanup error (safe to ignore at shutdown): {e}")
