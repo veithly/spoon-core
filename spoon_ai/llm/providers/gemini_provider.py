@@ -40,6 +40,7 @@ class GeminiProvider(LLMProviderInterface):
         self.model: str = ""
         self.max_tokens: int = 4096
         self.temperature: float = 0.3
+        self.api_key: str = ""
 
     @staticmethod
     def _safe_get_response_text(response: Any) -> str:
@@ -99,6 +100,68 @@ class GeminiProvider(LLMProviderInterface):
             )
         return self.model
 
+    @staticmethod
+    def _requires_thinking_mode(model: str) -> bool:
+        """Return True if the model requires thinking_config to produce output.
+
+        Some Gemini 3 preview models only work in thinking mode and may return empty
+        content unless thinking_config is set with a sufficient budget.
+        """
+        if not isinstance(model, str):
+            return False
+        normalized = model.strip().lower()
+        return "gemini-3" in normalized
+
+    def _apply_thinking_defaults(
+        self,
+        *,
+        model: str,
+        requested_max_tokens: int,
+        kwargs: Dict[str, Any],
+    ) -> tuple[int, Optional[types.ThinkingConfig]]:
+        """Apply safe defaults for thinking models to avoid empty outputs."""
+        if not self._requires_thinking_mode(model):
+            return requested_max_tokens, None
+
+        # Empirically, Gemini 3 thinking models may produce empty visible output
+        # when max_output_tokens is too small (even for short answers).
+        # 256 is a practical minimum to avoid truncated outputs for structured JSON.
+        min_output_tokens = 256
+        max_tokens = requested_max_tokens
+        if max_tokens < min_output_tokens:
+            logger.info(
+                "Gemini thinking model '%s' requested max_tokens=%s; bumping to %s to avoid empty output",
+                model,
+                requested_max_tokens,
+                min_output_tokens,
+            )
+            max_tokens = min_output_tokens
+
+        # Allow callers to pass an explicit ThinkingConfig or thinking_budget.
+        thinking_cfg = kwargs.get("thinking_config")
+        if isinstance(thinking_cfg, dict):
+            try:
+                thinking_cfg = types.ThinkingConfig(**thinking_cfg)
+            except Exception:
+                thinking_cfg = None
+        if isinstance(thinking_cfg, types.ThinkingConfig):
+            return max_tokens, thinking_cfg
+
+        thinking_budget = kwargs.get("thinking_budget")
+        if thinking_budget is None:
+            # Default tuned to reliably yield visible text output.
+            thinking_budget = 32
+        try:
+            thinking_budget_int = int(thinking_budget)
+        except Exception:
+            thinking_budget_int = 32
+
+        # For Gemini 3 preview: budget 0 is invalid; too-small budgets can still yield empty output.
+        if thinking_budget_int < 24:
+            thinking_budget_int = 24
+
+        return max_tokens, types.ThinkingConfig(thinking_budget=thinking_budget_int)
+
     async def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize the Gemini provider with configuration."""
         try:
@@ -111,7 +174,10 @@ class GeminiProvider(LLMProviderInterface):
             if not api_key:
                 raise AuthenticationError("gemini", context={"config": config})
 
-            self.client = genai.Client(api_key=api_key)
+            # Keep api_key only; create/close clients per request to avoid
+            # shutdown warnings from google-genai about pending aclose tasks.
+            self.api_key = str(api_key)
+            self.client = None
 
             logger.info(f"Gemini provider initialized with model: {self.model}")
 
@@ -257,7 +323,7 @@ class GeminiProvider(LLMProviderInterface):
 
     async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
         """Send chat request to Gemini."""
-        if not self.client:
+        if not self.api_key:
             raise ProviderError("gemini", "Provider not initialized")
 
         try:
@@ -267,9 +333,19 @@ class GeminiProvider(LLMProviderInterface):
 
             # Extract parameters
             model = self._resolve_model_name(kwargs.get('model'))
-            max_tokens = kwargs.get('max_tokens', self.max_tokens)
+            max_tokens_raw = kwargs.get('max_tokens', self.max_tokens)
+            try:
+                max_tokens = int(max_tokens_raw)
+            except Exception:
+                max_tokens = int(self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
             response_modalities = kwargs.get('response_modalities')
+
+            max_tokens, thinking_config = self._apply_thinking_defaults(
+                model=model,
+                requested_max_tokens=max_tokens,
+                kwargs=kwargs,
+            )
 
             # Build request content
             if isinstance(user_message, str):
@@ -282,6 +358,9 @@ class GeminiProvider(LLMProviderInterface):
                 max_output_tokens=max_tokens,
                 temperature=temperature
             )
+
+            if thinking_config is not None:
+                generate_config.thinking_config = thinking_config
 
             # Add system instruction if available
             if system_content:
@@ -311,12 +390,24 @@ class GeminiProvider(LLMProviderInterface):
                 generate_config.response_schema = schema
                 generate_config.response_mime_type = 'application/json'
 
-            # Send request
-            response = self.client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=generate_config
-            )
+            client = genai.Client(api_key=self.api_key)
+            try:
+                # Send request
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=generate_config
+                )
+            finally:
+                # Close both sync + async clients to prevent pending-task warnings.
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    await client.aio.aclose()
+                except Exception:
+                    pass
 
             duration = asyncio.get_event_loop().time() - start_time
             return self._convert_response(response, duration, model=model)
@@ -329,7 +420,7 @@ class GeminiProvider(LLMProviderInterface):
         Yields:
             LLMResponseChunk: Structured streaming response chunks
         """
-        if not self.client:
+        if not self.api_key:
             raise ProviderError("gemini", "Provider not initialized")
 
         # Create callback manager
@@ -341,8 +432,18 @@ class GeminiProvider(LLMProviderInterface):
 
             # Extract parameters
             model = self._resolve_model_name(kwargs.get('model'))
-            max_tokens = kwargs.get('max_tokens', self.max_tokens)
+            max_tokens_raw = kwargs.get('max_tokens', self.max_tokens)
+            try:
+                max_tokens = int(max_tokens_raw)
+            except Exception:
+                max_tokens = int(self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
+
+            max_tokens, thinking_config = self._apply_thinking_defaults(
+                model=model,
+                requested_max_tokens=max_tokens,
+                kwargs=kwargs,
+            )
 
             # Trigger on_llm_start callback
             await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider="gemini")
@@ -359,6 +460,9 @@ class GeminiProvider(LLMProviderInterface):
                 temperature=temperature
             )
 
+            if thinking_config is not None:
+                generate_config.thinking_config = thinking_config
+
             if system_content:
                 generate_config.system_instruction = system_content
 
@@ -372,36 +476,40 @@ class GeminiProvider(LLMProviderInterface):
             # Filter out parameters that generate_content_stream doesn't accept
             filtered_kwargs = {k: v for k, v in kwargs.items()
                                if k not in ['model', 'max_tokens', 'temperature', 'callbacks', 'timeout']}
-            stream = self.client.models.generate_content_stream(
-                model=model,
-                contents=contents,
-                config=generate_config,
-                **filtered_kwargs
-            )
+            client = genai.Client(api_key=self.api_key)
+            try:
+                stream = client.models.generate_content_stream(
+                    model=model,
+                    contents=contents,
+                    config=generate_config,
+                    **filtered_kwargs
+                )
 
-            for part_response in stream:
-                chunk = ""
-                try:
-                    if (
-                        hasattr(part_response, "candidates")
-                        and part_response.candidates
-                        and getattr(part_response.candidates[0], "content", None) is not None
-                        and getattr(part_response.candidates[0].content, "parts", None)
-                    ):
-                        parts = part_response.candidates[0].content.parts
-                        chunk = "".join(
-                            [p.text for p in parts if getattr(p, "text", None)]
-                        )
-                except Exception:
+                for part_response in stream:
                     chunk = ""
+                    try:
+                        if (
+                            hasattr(part_response, "candidates")
+                            and part_response.candidates
+                            and getattr(part_response.candidates[0], "content", None) is not None
+                            and getattr(part_response.candidates[0].content, "parts", None)
+                        ):
+                            parts = part_response.candidates[0].content.parts
+                            chunk = "".join(
+                                [p.text for p in parts if getattr(p, "text", None)]
+                            )
+                    except Exception:
+                        chunk = ""
 
-                # Fallback: some SDK responses expose streaming text via `part_response.text`
-                if not chunk:
-                    maybe_text = getattr(part_response, "text", None)
-                    if isinstance(maybe_text, str):
-                        chunk = maybe_text
+                    # Fallback: some SDK responses expose streaming text via `part_response.text`
+                    if not chunk:
+                        maybe_text = getattr(part_response, "text", None)
+                        if isinstance(maybe_text, str):
+                            chunk = maybe_text
 
-                if chunk:
+                    if not chunk:
+                        continue
+
                     full_content += chunk
 
                     # Trigger on_llm_new_token callback
@@ -443,6 +551,15 @@ class GeminiProvider(LLMProviderInterface):
                     )
                     chunk_index += 1
                     yield response_chunk
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    await client.aio.aclose()
+                except Exception:
+                    pass
 
             # Trigger on_llm_end callback
             final_response = LLMResponse(
@@ -475,7 +592,7 @@ class GeminiProvider(LLMProviderInterface):
 
     async def chat_with_tools(self, messages: List[Message], tools: List[Dict], **kwargs) -> LLMResponse:
         """Send chat request with tools to Gemini using native function calling."""
-        if not self.client:
+        if not self.api_key:
             raise ProviderError("gemini", "Provider not initialized")
 
         try:
@@ -489,8 +606,18 @@ class GeminiProvider(LLMProviderInterface):
 
             # Extract parameters
             model = self._resolve_model_name(kwargs.get('model'))
-            max_tokens = kwargs.get('max_tokens', self.max_tokens)
+            max_tokens_raw = kwargs.get('max_tokens', self.max_tokens)
+            try:
+                max_tokens = int(max_tokens_raw)
+            except Exception:
+                max_tokens = int(self.max_tokens)
             temperature = kwargs.get('temperature', self.temperature)
+
+            max_tokens, thinking_config = self._apply_thinking_defaults(
+                model=model,
+                requested_max_tokens=max_tokens,
+                kwargs=kwargs,
+            )
 
             # Generate configuration
             generate_config = types.GenerateContentConfig(
@@ -499,16 +626,30 @@ class GeminiProvider(LLMProviderInterface):
                 tools=gemini_tools
             )
 
+            if thinking_config is not None:
+                generate_config.thinking_config = thinking_config
+
             # Add system instruction if available
             if system_content:
                 generate_config.system_instruction = system_content
 
             # Send request
-            response = self.client.models.generate_content(
-                model=model,
-                contents=gemini_messages,
-                config=generate_config
-            )
+            client = genai.Client(api_key=self.api_key)
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=gemini_messages,
+                    config=generate_config
+                )
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                try:
+                    await client.aio.aclose()
+                except Exception:
+                    pass
 
             duration = asyncio.get_event_loop().time() - start_time
             return self._convert_tool_response(response, duration, model=model)
@@ -712,47 +853,9 @@ class GeminiProvider(LLMProviderInterface):
 
     async def cleanup(self) -> None:
         """Cleanup Gemini provider resources."""
-        client = self.client
+        # No persistent client is kept; nothing to clean up.
         self.client = None
-
-        if not client:
-            logger.info("Gemini provider cleaned up")
-            return
-
-        async def _call_close(maybe_callable: Any) -> None:
-            if not callable(maybe_callable):
-                return
-            try:
-                result = maybe_callable()
-                if asyncio.iscoroutine(result):
-                    await result
-            except RuntimeError as e:
-                # Common during interpreter teardown: the loop may already be closed.
-                if "event loop is closed" not in str(e).lower():
-                    raise
-
-        # google-genai can maintain separate sync/async clients. Close both best-effort.
-        try:
-            aio_client = getattr(client, "aio", None)
-            if aio_client is not None:
-                await _call_close(getattr(aio_client, "aclose", None))
-                await _call_close(getattr(aio_client, "close", None))
-        except Exception:
-            pass
-
-        try:
-            await _call_close(getattr(client, "close", None))
-            await _call_close(getattr(client, "aclose", None))
-        except Exception:
-            pass
-
-        # Last resort: some versions expose a private `_api_client` with `aclose()`.
-        try:
-            api_client = getattr(client, "_api_client", None)
-            if api_client is not None:
-                await _call_close(getattr(api_client, "aclose", None))
-        except Exception:
-            pass
+        self.api_key = ""
 
         logger.info("Gemini provider cleaned up")
 
