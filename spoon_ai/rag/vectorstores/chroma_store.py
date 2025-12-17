@@ -31,12 +31,40 @@ class ChromaVectorStore(VectorStore):
 
     def add(self, *, collection: str, ids: List[str], embeddings: List[List[float]], metadatas: List[Dict]) -> None:
         col = self._get_collection(collection)
-        col.add(ids=ids, embeddings=embeddings, metadatas=metadatas)
+        try:
+            col.add(ids=ids, embeddings=embeddings, metadatas=metadatas)
+        except Exception as e:
+            msg = str(e).lower()
+            if "dimension" in msg or "dimensionality" in msg:
+                raise ValueError(
+                    f"Chroma embedding dimension mismatch in collection '{collection}'. "
+                    "You may be using a different embedding model than the one used to create this collection. "
+                    f"Consider deleting the collection via `store.delete_collection('{collection}')` "
+                    "or using a new collection name."
+                ) from e
+            raise e
 
     def query(self, *, collection: str, query_embeddings: List[List[float]], top_k: int = 5, filter: Optional[Dict] = None) -> List[List[Tuple[str, float, Dict]]]:
         col = self._get_collection(collection)
-        # Chroma >=1.3 disallows requesting "ids" in include; request metadatas+distances only.
-        res = col.query(query_embeddings=query_embeddings, n_results=top_k, include=["metadatas", "distances"])
+        try:
+            # Chroma >=1.3 disallows requesting "ids" in include; request metadatas+distances only.
+            # Pass filter as 'where' clause for metadata filtering
+            res = col.query(
+                query_embeddings=query_embeddings, 
+                n_results=top_k, 
+                include=["metadatas", "distances"],
+                where=filter  # Pass explicit filter dict
+            )
+        except Exception as e:
+            msg = str(e).lower()
+            if "dimension" in msg or "dimensionality" in msg:
+                raise ValueError(
+                    f"Chroma query dimension mismatch in collection '{collection}'. "
+                    "The query embedding dimension does not match the collection's index. "
+                    "Please ensure you are using the same embedding model as when the data was ingested."
+                ) from e
+            raise e
+
         out: List[List[Tuple[str, float, Dict]]] = []
         q = len(query_embeddings)
         for i in range(q):

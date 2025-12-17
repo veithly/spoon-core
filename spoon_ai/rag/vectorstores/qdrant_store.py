@@ -61,10 +61,25 @@ class QdrantVectorStore(VectorStore):
 
     def query(self, *, collection: str, query_embeddings: List[List[float]], top_k: int = 5, filter: Optional[Dict] = None) -> List[List[Tuple[str, float, Dict]]]:
         client = self._client_or_raise()
+        
+        # Build Qdrant filter (dict structure to avoid imports)
+        q_filter = None
+        if filter:
+            musts = []
+            for k, v in filter.items():
+                musts.append({"key": k, "match": {"value": v}})
+            q_filter = {"must": musts}
+
         results: List[List[Tuple[str, float, Dict]]] = []
         for q in query_embeddings:
             # qdrant-client >=1.x uses query_points for vector search; ensure payload returned
-            res = client.query_points(collection_name=collection, query=q, limit=top_k, with_payload=True)
+            res = client.query_points(
+                collection_name=collection, 
+                query=q, 
+                limit=top_k, 
+                with_payload=True,
+                query_filter=q_filter
+            )
             # Normalize response
             try:
                 points = res.points  # type: ignore[attr-defined]
