@@ -103,7 +103,8 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             if not api_key:
                 raise AuthenticationError(self.get_provider_name(), context={"config": config})
 
-            base_url = config.get('base_url', self.get_default_base_url())
+            # Treat explicit None/empty base_url as "use provider default".
+            base_url = config.get('base_url') or self.get_default_base_url()
             timeout = config.get('timeout', 30)
 
             # Get provider-specific headers
