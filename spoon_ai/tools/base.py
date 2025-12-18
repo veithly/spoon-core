@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,13 +9,43 @@ class BaseTool(ABC, BaseModel):
     description: str = Field(description="A description of the tool")
     parameters: dict = Field(description="The parameters of the tool")
 
+    # When True, tool calls will run inside a scoped env-decryption context so
+    # ENC:v1 secrets can be consumed by tools without leaving plaintext values
+    # in `os.environ` after the call.
+    requires_decrypted_env: ClassVar[bool] = False
+
+    # Heuristic default: common blockchain tool prefixes that may need private keys.
+    _DECRYPT_ENV_NAME_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "evm_",
+        "solana_",
+        "neo",
+        "neofs",
+        "sign_",
+        "broadcast_",
+    )
+
     model_config = {
         "arbitrary_types_allowed": True
     }
 
 
     async def __call__(self, *args, **kwargs) -> Any:
-        return await self.execute(*args, **kwargs)
+        # Avoid decrypting secrets for unrelated tools (which would prompt for a
+        # password unnecessarily). Use either an explicit opt-in flag on the tool
+        # class or a conservative name-based heuristic.
+        tool_name = (self.name or "").lower()
+        should_decrypt = (
+            self.requires_decrypted_env
+            or tool_name.startswith(self._DECRYPT_ENV_NAME_PREFIXES)
+            or "neofs" in tool_name
+        )
+        if not should_decrypt:
+            return await self.execute(*args, **kwargs)
+
+        from spoon_ai.security import async_decrypted_environ
+
+        async with async_decrypted_environ():
+            return await self.execute(*args, **kwargs)
 
     @abstractmethod
     async def execute(self, *args, **kwargs) -> Any:

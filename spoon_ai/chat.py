@@ -114,7 +114,7 @@ class ChatBot:
         mem0_config: Optional[Dict[str, Any]] = None,
         callbacks: Optional[List[BaseCallbackHandler]] = None,
         wallet: Optional[Any] = None,
-        auto_load_wallet: bool = True,
+        auto_load_wallet: bool = False,
         **kwargs,
     ):
         """Initialize ChatBot with hierarchical configuration priority system.
@@ -137,7 +137,7 @@ class ChatBot:
             mem0_config: Configuration dict for Mem0 (api_key, user_id/agent_id, collection, etc.)
             callbacks: Optional list of callback handlers for monitoring
             wallet: Optional pre-configured wallet/signer object
-            auto_load_wallet: Auto-discover wallet from environment when True and wallet is None
+            auto_load_wallet: Auto-discover wallet from environment when True and wallet is None (defaults to False for safety)
             **kwargs: Additional parameters
         """
         self.use_llm_manager = use_llm_manager
