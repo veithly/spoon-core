@@ -345,6 +345,13 @@ class ConfigurationManager:
                 'base_url': 'https://generativelanguage.googleapis.com/v1beta',
                 'temperature': 0.1,   # Lower temperature for Gemini
                 **{k: v for k, v in common_defaults.items() if k != 'temperature'}
+            },
+            'ollama': {
+                # Local Ollama server (no real API key required; placeholder keeps config validation consistent)
+                'api_key': 'ollama',
+                'model': 'llama3.2',
+                'base_url': 'http://localhost:11434',
+                **common_defaults
             }
         }
 
