@@ -1,7 +1,7 @@
 """ReAct Agent demo using the RAG component (ingest -> search -> QA).
 
 Runs offline by default using a deterministic hash embedding and in-memory store.
-If OPENAI_API_KEY or ANYROUTE_* are present, will use those embeddings.
+If OPENAI_API_KEY or OPENROUTER_API_KEY are present, will use those embeddings.
 
 Env vars:
 - RAG_BACKEND=faiss|pinecone|qdrant|chroma (default: faiss)

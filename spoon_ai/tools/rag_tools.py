@@ -22,11 +22,7 @@ def _build_components():
     store = get_vector_store(cfg.backend)
     embed = get_embedding_client(
         cfg.embeddings_provider,
-        openai_api_key=cfg.openai_api_key,
         openai_model=cfg.openai_embeddings_model,
-        anyroute_api_key=cfg.anyroute_api_key,
-        anyroute_base_url=cfg.anyroute_base_url,
-        anyroute_model=cfg.anyroute_model,
     )
     return cfg, store, embed
 
