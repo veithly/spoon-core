@@ -237,13 +237,11 @@ def get_embedding_client(
             from spoon_ai.llm.config import ConfigurationManager
 
             cm = ConfigurationManager()
+            available = set(cm.list_configured_providers())
             for p in ("openai", "openrouter", "gemini"):
-                try:
-                    cm.load_provider_config(p)
-                except Exception:
-                    continue
-                provider_norm = p
-                break
+                if p in available:
+                    provider_norm = p
+                    break
 
             # Finally, allow a custom OpenAI-compatible embeddings endpoint if explicitly configured.
             # This is checked after Gemini to match the desired priority.

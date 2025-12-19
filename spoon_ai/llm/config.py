@@ -400,10 +400,15 @@ class ConfigurationManager:
                     return provider
 
         # 2. Check environment variable for explicit preference
-        env_provider = os.getenv('DEFAULT_LLM_PROVIDER')
+        env_provider = os.getenv("LLM_PROVIDER") or os.getenv("DEFAULT_LLM_PROVIDER")
         if env_provider:
-            logger.info(f"Using provider from DEFAULT_LLM_PROVIDER: {env_provider}")
-            return env_provider
+            normalized = env_provider.strip().lower()
+            if normalized:
+                logger.info(
+                    "Using provider from environment (LLM_PROVIDER/DEFAULT_LLM_PROVIDER): %s",
+                    normalized,
+                )
+                return normalized
 
         # 3. Intelligent selection based on available API keys and quality
         # Priority order: openai (GPT-4.1 default) -> anthropic -> openrouter -> deepseek -> gemini
@@ -435,20 +440,70 @@ class ConfigurationManager:
         Returns:
             List[str]: List of provider names in fallback order
         """
+        def _dedupe_preserve_order(items: List[str]) -> List[str]:
+            seen = set()
+            result: List[str] = []
+            for item in items:
+                if item in seen:
+                    continue
+                seen.add(item)
+                result.append(item)
+            return result
+
+        def _filter_available_providers(items: List[str]) -> List[str]:
+            usable: List[str] = []
+            for provider in items:
+                try:
+                    config = self._get_provider_config_dict(provider)
+                except Exception:
+                    # Invalid config (e.g. placeholder BASE_URL). Treat as unavailable.
+                    continue
+
+                api_key = config.get("api_key")
+                if not api_key:
+                    continue
+                if isinstance(api_key, str) and self._is_placeholder_value(api_key):
+                    continue
+                usable.append(provider)
+            return usable
+
         # Check environment variable override first
         env_chain = os.getenv("LLM_FALLBACK_CHAIN")
         if env_chain:
-            chain = [provider.strip() for provider in env_chain.split(",") if provider.strip()]
-            if chain:
-                logger.info(f"Using fallback chain from environment: {chain}")
-                return chain
+            raw = [provider.strip().lower() for provider in env_chain.split(",") if provider.strip()]
+            chain = _dedupe_preserve_order(raw)
+            filtered = _filter_available_providers(chain)
+            if filtered:
+                if filtered != chain:
+                    logger.info(
+                        "Filtered fallback chain to configured providers. requested=%s usable=%s",
+                        chain,
+                        filtered,
+                    )
+                else:
+                    logger.info("Using fallback chain from environment: %s", filtered)
+                return filtered
 
         # Support programmatic cache injections (used by higher-level tooling)
         if self._config_cache and 'llm_settings' in self._config_cache:
             fallback_chain = self._config_cache['llm_settings'].get('fallback_chain')
             if isinstance(fallback_chain, list) and fallback_chain:
-                logger.info(f"Using fallback chain from injected configuration: {fallback_chain}")
-                return fallback_chain
+                raw = [str(provider).strip().lower() for provider in fallback_chain if str(provider).strip()]
+                chain = _dedupe_preserve_order(raw)
+                filtered = _filter_available_providers(chain)
+                if filtered:
+                    if filtered != chain:
+                        logger.info(
+                            "Filtered injected fallback chain to configured providers. requested=%s usable=%s",
+                            chain,
+                            filtered,
+                        )
+                    else:
+                        logger.info(
+                            "Using fallback chain from injected configuration: %s",
+                            filtered,
+                        )
+                    return filtered
 
         # Fallback to intelligent selection based on available providers
         available_providers = self.get_available_providers_by_priority()
@@ -466,21 +521,40 @@ class ConfigurationManager:
         Returns:
             List[str]: List of provider names that have configuration
         """
-        providers = set()
+        configured: set[str] = set()
 
-        # From injected configuration data
+        # Candidate providers from injected configuration data (if present).
+        candidates: set[str] = set()
         if self._config_cache:
             if 'providers' in self._config_cache:
-                providers.update(self._config_cache['providers'].keys())
+                candidates.update(str(k).strip().lower() for k in self._config_cache['providers'].keys())
             if 'api_keys' in self._config_cache:
-                providers.update(self._config_cache['api_keys'].keys())
+                candidates.update(str(k).strip().lower() for k in self._config_cache['api_keys'].keys())
 
-        # From environment variables
+        # Candidate providers from environment variables.
         for provider in ['openai', 'anthropic', 'openrouter', 'deepseek', 'gemini']:
-            if os.getenv(f'{provider.upper()}_API_KEY'):
-                providers.add(provider)
+            env_value = os.getenv(f'{provider.upper()}_API_KEY')
+            if not env_value:
+                continue
+            if self._is_placeholder_value(env_value):
+                continue
+            candidates.add(provider)
 
-        return list(providers)
+        # Only consider a provider "configured" if it can supply a valid api_key
+        # after applying the full resolution logic (config cache -> env -> defaults).
+        for provider in candidates:
+            try:
+                config = self._get_provider_config_dict(provider)
+            except Exception:
+                continue
+            api_key = config.get("api_key")
+            if not api_key:
+                continue
+            if isinstance(api_key, str) and self._is_placeholder_value(api_key):
+                continue
+            configured.add(provider)
+
+        return list(configured)
 
     def get_available_providers_by_priority(self) -> List[str]:
         """Get available providers ordered by priority and quality.

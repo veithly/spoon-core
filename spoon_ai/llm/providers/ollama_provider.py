@@ -298,3 +298,4 @@ class OllamaProvider(LLMProviderInterface):
         if self.client is not None:
             await self.client.aclose()
             self.client = None
+
