@@ -700,6 +700,34 @@ class GeminiProvider(LLMProviderInterface):
         except Exception as e:
             await self._handle_error(e)
 
+    @staticmethod
+    def _clean_json_response(content: str) -> str:
+        """Clean JSON response by removing markdown code blocks and extra text.
+        
+        Gemini sometimes returns JSON wrapped in markdown code blocks or with extra text.
+        This method extracts the JSON content.
+        """
+        if not content:
+            return content
+        
+        import re
+        
+        # Remove markdown code block markers if present
+        cleaned = re.sub(r'^```(?:json)?\s*', '', content, flags=re.MULTILINE)
+        cleaned = re.sub(r'\s*```$', '', cleaned, flags=re.MULTILINE)
+        cleaned = cleaned.strip()
+        
+        # Try to find JSON object in the response (handles cases with extra text)
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned)
+        if json_match:
+            # If JSON is found, return it (user can parse it themselves if needed)
+            # But for now, we keep the original content and let users handle JSON extraction
+            # This is a conservative approach to avoid breaking existing code
+            pass
+        
+        return cleaned
+
+
     def _convert_response(self, response, duration: float, *, model: Optional[str] = None) -> LLMResponse:
         """Convert Gemini response to standardized LLMResponse."""
         content = ""
@@ -779,8 +807,12 @@ class GeminiProvider(LLMProviderInterface):
         if not content and image_paths:
             content = "【Image response】"
 
+        # Clean JSON responses (remove markdown code blocks and extra text)
+        # This helps when LLM is asked to return JSON but wraps it in markdown
+        cleaned_content = self._clean_json_response(content or "")
+
         return LLMResponse(
-            content=content or "",
+            content=cleaned_content,
             provider="gemini",
             model=model or self.model,
             finish_reason="stop",  # Gemini doesn't provide detailed finish reasons

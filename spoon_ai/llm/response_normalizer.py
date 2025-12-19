@@ -100,6 +100,19 @@ class ResponseNormalizer:
         if not response.content:
             response.content = ""
         
+        # Clean JSON responses: Gemini sometimes returns JSON wrapped in markdown code blocks.
+        # Remove markdown code block markers to make JSON parsing easier for users.
+        if response.content:
+            import re
+            content = response.content.strip()
+            
+            # Remove markdown code block markers if present (common when LLM returns JSON)
+            content = re.sub(r'^```(?:json)?\s*', '', content, flags=re.MULTILINE)
+            content = re.sub(r'\s*```$', '', content, flags=re.MULTILINE)
+            content = content.strip()
+            
+            response.content = content
+        
         # Gemini doesn't provide detailed finish reasons, default to 'stop'
         if not response.finish_reason:
             response.finish_reason = 'stop'
