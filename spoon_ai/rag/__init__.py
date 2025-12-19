@@ -2,7 +2,9 @@ from .config import RagConfig, get_default_config
 from .embeddings import (
     EmbeddingClient,
     OpenAIEmbeddingClient,
-    AnyRouteEmbeddingClient,
+    OpenAICompatibleEmbeddingClient,
+    GeminiEmbeddingClient,
+    OllamaEmbeddingClient,
     HashEmbeddingClient,
     get_embedding_client,
 )
@@ -20,7 +22,9 @@ __all__ = [
     "get_default_config",
     "EmbeddingClient",
     "OpenAIEmbeddingClient",
-    "AnyRouteEmbeddingClient",
+    "OpenAICompatibleEmbeddingClient",
+    "GeminiEmbeddingClient",
+    "OllamaEmbeddingClient",
     "HashEmbeddingClient",
     "get_embedding_client",
     "VectorStore",

@@ -546,7 +546,8 @@ class LLMManager:
                 OpenRouterProvider,
                 DeepSeekProvider,
                 AnthropicProvider,
-                GeminiProvider
+                GeminiProvider,
+                OllamaProvider,
             )
 
             # Get configured providers

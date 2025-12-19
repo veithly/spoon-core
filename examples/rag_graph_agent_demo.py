@@ -4,6 +4,7 @@ Offline by default (hash embeddings + in-memory store).
 """
 
 import asyncio
+import os
 from typing import Dict, Any, List
 
 from spoon_ai.graph import StateGraph
@@ -25,23 +26,19 @@ def build_pipeline():
     store = get_vector_store(cfg.backend)
     embed = get_embedding_client(
         cfg.embeddings_provider,
-        openai_api_key=cfg.openai_api_key,
         openai_model=cfg.openai_embeddings_model,
-        anyroute_api_key=cfg.anyroute_api_key,
-        anyroute_base_url=cfg.anyroute_base_url,
-        anyroute_model=cfg.anyroute_model,
     )
 
     index = RagIndex(config=cfg, store=store, embeddings=embed)
     retriever = RagRetriever(config=cfg, store=store, embeddings=embed)
     # Offline-friendly: if RAG_FAKE_QA=1, avoid initializing ChatBot
-    import os
     llm = None if os.getenv("RAG_FAKE_QA") == "1" else ChatBot()
     qa = RagQA(config=cfg, llm=llm)
 
     def ingest_node(state: Dict[str, Any]) -> Dict[str, Any]:
         inputs = state.get("inputs", [])
         n = index.ingest(inputs)
+        print(f"[ingest] inputs={inputs} chunks={n}")
         return {"ingested": n}
 
     def retrieve_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,12 +64,13 @@ def build_pipeline():
 
 async def main():
     compiled = build_pipeline()
-    agent = GraphAgent(name="rag-graph", graph=compiled.graph)
+    # BaseAgent (parent of GraphAgent) requires an llm instance; use ChatBot by default
+    agent = GraphAgent(name="rag-graph", graph=compiled.graph, llm=ChatBot())
     initial_state = {
-        "inputs": ["./doc"],
-        "question": "How do I install the SDK?",
+        "inputs": ["./Readme.md"],  # small local doc
+        "question": "How do I quickly install?",
     }
-    result = await compiled.ainvoke(initial_state)
+    result = await compiled.invoke(initial_state)
     print("\n== RAG Graph Agent Demo ==")
     print("Answer:", result.get("answer"))
     print("Citations:", result.get("citations"))

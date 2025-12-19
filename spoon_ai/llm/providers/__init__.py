@@ -8,6 +8,7 @@ from .openrouter_provider import OpenRouterProvider
 from .deepseek_provider import DeepSeekProvider
 from .anthropic_provider import AnthropicProvider
 from .gemini_provider import GeminiProvider
+from .ollama_provider import OllamaProvider
 
 __all__ = [
     'OpenAICompatibleProvider',
@@ -15,5 +16,6 @@ __all__ = [
     'OpenRouterProvider',
     'DeepSeekProvider',
     'AnthropicProvider', 
-    'GeminiProvider'
+    'GeminiProvider',
+    'OllamaProvider',
 ]

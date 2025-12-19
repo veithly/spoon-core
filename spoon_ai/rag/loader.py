@@ -25,6 +25,21 @@ def _strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _try_convert_github_url(url: str) -> str:
+    """Convert GitHub blob URLs to raw URLs to fetch clean content.
+
+    Example:
+        https://github.com/user/repo/blob/main/README.md
+        -> https://raw.githubusercontent.com/user/repo/main/README.md
+    """
+    pattern = r"^https?://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*)$"
+    match = re.match(pattern, url)
+    if not match:
+        return url
+    user, repo, branch, path = match.groups()
+    return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}"
+
+
 def _load_file(path: Path) -> Optional[LoadedDoc]:
     suffix = path.suffix.lower()
     try:
@@ -52,7 +67,8 @@ def _load_file(path: Path) -> Optional[LoadedDoc]:
 
 def _load_url(url: str) -> Optional[LoadedDoc]:
     try:
-        r = requests.get(url, timeout=20)
+        target_url = _try_convert_github_url(url)
+        r = requests.get(target_url, timeout=20)
         r.raise_for_status()
         content_type = r.headers.get("content-type", "").lower()
         text: str
