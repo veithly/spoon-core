@@ -26,18 +26,18 @@ def _strip_html(html: str) -> str:
 
 
 def _try_convert_github_url(url: str) -> str:
-    """Convert GitHub blob URLs to raw URLs to fetch clean content.
-
-    Example:
-        https://github.com/user/repo/blob/main/README.md
-        -> https://raw.githubusercontent.com/user/repo/main/README.md
     """
+    Convert GitHub blob URLs to raw URLs to extract clean content without HTML UI.
+    Example: https://github.com/user/repo/blob/main/README.md 
+    -> https://raw.githubusercontent.com/user/repo/main/README.md
+    """
+    # Pattern matches: github.com/{user}/{repo}/blob/{branch}/{path}
     pattern = r"^https?://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*)$"
     match = re.match(pattern, url)
-    if not match:
-        return url
-    user, repo, branch, path = match.groups()
-    return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}"
+    if match:
+        user, repo, branch, path = match.groups()
+        return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}"
+    return url
 
 
 def _load_file(path: Path) -> Optional[LoadedDoc]:
@@ -67,15 +67,53 @@ def _load_file(path: Path) -> Optional[LoadedDoc]:
 
 def _load_url(url: str) -> Optional[LoadedDoc]:
     try:
+        # 1. GitHub 转换: 尝试将 GitHub Blob URL 转为 Raw URL，以便获取纯内容
         target_url = _try_convert_github_url(url)
+        
+        # 2. 策略判断: 
+        # 如果是 Github Raw 链接或常见的纯文本/代码文件后缀，直接下载更高效且精准。
+        # 否则 (通用网页)，尝试使用 Jina Reader 将 HTML 转换为高质量 Markdown。
+        
+        # 常见纯文本/代码后缀，不需要 LLM Reader 进行清理
+        raw_extensions = (
+            ".txt", ".md", ".json", ".yaml", ".yml", ".csv", ".xml", ".ini", ".conf",
+            ".py", ".js", ".ts", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".cs", ".php", ".rb", ".sh"
+        )
+        
+        is_github_raw = "raw.githubusercontent.com" in target_url
+        is_pure_text = target_url.lower().endswith(raw_extensions)
+        
+        should_use_jina = not (is_github_raw or is_pure_text)
+
+        if should_use_jina:
+            # 3. 尝试 Jina Reader (https://jina.ai/reader)
+            # 它可以将杂乱的网页转换为干净的 Markdown，非常适合 RAG
+            jina_api_key = os.getenv("JINA_API_KEY")
+            headers = {"X-Retain-Images": "none"}
+            if jina_api_key:
+                headers["Authorization"] = f"Bearer {jina_api_key}"
+            
+            try:
+                jina_url = f"https://r.jina.ai/{target_url}"
+                r_jina = requests.get(jina_url, headers=headers, timeout=20)
+                if r_jina.status_code == 200:
+                    return LoadedDoc(id=url, text=r_jina.text, source=url)
+            except Exception:
+                # 如果 Jina 服务超时或失败，静默回退到普通下载
+                pass
+
+        # 4. 回退/默认路径: 直接请求目标 URL
+        # 适用于 Jina 失败、或者是直接下载路径 (GitHub Raw/Text files)
         r = requests.get(target_url, timeout=20)
         r.raise_for_status()
+        
         content_type = r.headers.get("content-type", "").lower()
-        text: str
         if "html" in content_type:
+            # 使用简易方式去除标签作为保底
             text = _strip_html(r.text)
         else:
             text = r.text
+            
         return LoadedDoc(id=url, text=text, source=url)
     except Exception:
         return None
