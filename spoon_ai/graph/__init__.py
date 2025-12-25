@@ -50,5 +50,7 @@ from .engine import (
     # Multimodal utilities for graph workflows
     create_multimodal_message,
     create_vision_user_message,
+    create_pdf_message,
+    create_document_message,
 )
 from .agent import GraphAgent, AgentStateCheckpoint, MockMemory, Memory

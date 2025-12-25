@@ -36,7 +36,8 @@ from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
 from spoon_ai.schema import (
     Message, MessageContent, ContentBlock,
-    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource
+    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource,
+    DocumentContent, DocumentSource
 )
 from .config import GraphConfig, ParallelGroupConfig, ParallelRetryPolicy, RouterConfig
 
@@ -150,6 +151,101 @@ def create_vision_user_message(
             )
 
     return Message(role="user", content=content_blocks)
+
+
+def create_pdf_message(
+    role: str,
+    text: str,
+    pdf_data: str,
+    filename: Optional[str] = None
+) -> Message:
+    """Create a message with a PDF document for use in graph state.
+
+    Args:
+        role: Message role (user, assistant, system)
+        text: Text content
+        pdf_data: Base64-encoded PDF data
+        filename: Optional filename for the PDF
+
+    Returns:
+        Message: A multimodal message with PDF ready for graph state
+
+    Example:
+        ```python
+        # In a graph node function
+        async def analyze_document(state: State) -> dict:
+            msg = create_pdf_message(
+                "user",
+                "Summarize this whitepaper",
+                pdf_data="<base64_encoded_pdf>",
+                filename="bitcoin.pdf"
+            )
+            return {"messages": [msg]}
+        ```
+    """
+    content_blocks: List[ContentBlock] = [TextContent(text=text)]
+    content_blocks.append(
+        DocumentContent(
+            source=DocumentSource(
+                type="base64",
+                media_type="application/pdf",
+                data=pdf_data
+            ),
+            filename=filename
+        )
+    )
+
+    return Message(role=role, content=content_blocks)
+
+
+def create_document_message(
+    role: str,
+    text: str,
+    document_data: str,
+    media_type: str = "application/pdf",
+    filename: Optional[str] = None
+) -> Message:
+    """Create a message with a document for use in graph state.
+
+    Supports various document types including PDF, text files, etc.
+
+    Args:
+        role: Message role (user, assistant, system)
+        text: Text content
+        document_data: Base64-encoded document data
+        media_type: MIME type of the document (default: application/pdf)
+        filename: Optional filename for the document
+
+    Returns:
+        Message: A multimodal message with document ready for graph state
+
+    Example:
+        ```python
+        # In a graph node function
+        async def process_report(state: State) -> dict:
+            msg = create_document_message(
+                "user",
+                "Extract key metrics from this report",
+                document_data="<base64_encoded_data>",
+                media_type="application/pdf",
+                filename="annual_report.pdf"
+            )
+            return {"messages": [msg]}
+        ```
+    """
+    content_blocks: List[ContentBlock] = [TextContent(text=text)]
+    content_blocks.append(
+        DocumentContent(
+            source=DocumentSource(
+                type="base64",
+                media_type=media_type,
+                data=document_data
+            ),
+            filename=filename
+        )
+    )
+
+    return Message(role=role, content=content_blocks)
 
 
 # Type variables for generic state handling

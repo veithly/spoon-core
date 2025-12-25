@@ -12,7 +12,8 @@ import time
 
 from spoon_ai.schema import (
     Message, Role, MessageContent, ContentBlock,
-    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource
+    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource,
+    DocumentContent, DocumentSource
 )
 from pydantic import BaseModel, Field
 
@@ -268,6 +269,97 @@ class BaseAgent(BaseModel, ABC):
                     data=image_data
                 ))
             )
+
+        await self.add_message(role, content_blocks, timeout=timeout)
+
+    async def add_message_with_pdf(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        pdf_data: str,
+        filename: Optional[str] = None,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with a PDF document.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the PDF
+            pdf_data: Base64-encoded PDF data
+            filename: Optional filename for the PDF
+            timeout: Operation timeout in seconds
+
+        Example:
+            # With base64 PDF data
+            await agent.add_message_with_pdf(
+                "user",
+                "Summarize this document",
+                pdf_data="<base64_string>",
+                filename="report.pdf"
+            )
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Multimodal messages only support user/assistant roles, got: {role}")
+
+        content_blocks: List[ContentBlock] = [TextContent(text=text)]
+        content_blocks.append(
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type="application/pdf",
+                    data=pdf_data
+                ),
+                filename=filename
+            )
+        )
+
+        await self.add_message(role, content_blocks, timeout=timeout)
+
+    async def add_message_with_document(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        document_data: str,
+        media_type: str = "application/pdf",
+        filename: Optional[str] = None,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with a document.
+
+        Supports various document types including PDF, text, etc.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the document
+            document_data: Base64-encoded document data
+            media_type: MIME type of the document (default: application/pdf)
+            filename: Optional filename for the document
+            timeout: Operation timeout in seconds
+
+        Example:
+            # With PDF document
+            await agent.add_message_with_document(
+                "user",
+                "Analyze this report",
+                document_data="<base64_string>",
+                media_type="application/pdf",
+                filename="annual_report.pdf"
+            )
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Multimodal messages only support user/assistant roles, got: {role}")
+
+        content_blocks: List[ContentBlock] = [TextContent(text=text)]
+        content_blocks.append(
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type=media_type,
+                    data=document_data
+                ),
+                filename=filename
+            )
+        )
 
         await self.add_message(role, content_blocks, timeout=timeout)
 
