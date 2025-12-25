@@ -46,6 +46,9 @@ from .engine import (
     ConditionNode,
     START,
     END,
-    interrupt
+    interrupt,
+    # Multimodal utilities for graph workflows
+    create_multimodal_message,
+    create_vision_user_message,
 )
 from .agent import GraphAgent, AgentStateCheckpoint, MockMemory, Memory

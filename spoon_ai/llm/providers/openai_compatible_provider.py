@@ -12,7 +12,10 @@ from datetime import datetime
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
+from spoon_ai.schema import (
+    Message, ToolCall, Function, LLMResponseChunk,
+    TextContent, ImageContent, ImageUrlContent, DocumentContent, FileContent, ContentBlock
+)
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
 from spoon_ai.callbacks.base import BaseCallbackHandler
@@ -124,15 +127,86 @@ class OpenAICompatibleProvider(LLMProviderInterface):
                 raise
             raise ProviderError(self.get_provider_name(), f"Failed to initialize: {str(e)}", original_error=e)
 
+    def _convert_content_block(self, block: ContentBlock) -> Dict[str, Any]:
+        """Convert a content block to OpenAI-compatible format.
+
+        Args:
+            block: A content block (TextContent, ImageContent, ImageUrlContent, etc.)
+
+        Returns:
+            Dict in OpenAI multimodal content format
+        """
+        if isinstance(block, TextContent):
+            return {"type": "text", "text": block.text}
+
+        elif isinstance(block, ImageUrlContent):
+            # OpenAI expects image_url format
+            result = {
+                "type": "image_url",
+                "image_url": {"url": block.image_url.url}
+            }
+            if block.image_url.detail:
+                result["image_url"]["detail"] = block.image_url.detail
+            return result
+
+        elif isinstance(block, ImageContent):
+            # Convert base64 image to OpenAI's data URL format
+            data_url = f"data:{block.source.media_type};base64,{block.source.data}"
+            return {
+                "type": "image_url",
+                "image_url": {"url": data_url}
+            }
+
+        elif isinstance(block, DocumentContent):
+            # OpenAI supports PDF via type: "file" with file_data as data URL
+            # https://platform.openai.com/docs/guides/pdf-files
+            filename = block.filename or "document.pdf"
+            # Format: data:application/pdf;base64,<base64_data>
+            file_data = f"data:{block.source.media_type};base64,{block.source.data}"
+            return {
+                "type": "file",
+                "file": {
+                    "filename": filename,
+                    "file_data": file_data
+                }
+            }
+
+        elif isinstance(block, FileContent):
+            # File content - include as text with path info (OpenAI doesn't support files directly)
+            logger.warning(f"FileContent not fully supported, converting to text: {block.file_path}")
+            return {"type": "text", "text": f"[File: {block.file_path}]"}
+
+        elif isinstance(block, dict):
+            # Already in dict format, pass through
+            return block
+
+        else:
+            # Fallback for unknown content types
+            logger.warning(f"Unknown content block type: {type(block)}")
+            return {"type": "text", "text": str(block)}
+
     def _convert_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
-        """Convert Message objects to OpenAI-compatible format with validation."""
+        """Convert Message objects to OpenAI-compatible format with validation.
+
+        Handles both text-only and multimodal messages seamlessly.
+        """
         openai_messages = []
 
         for i, message in enumerate(messages):
             msg_dict = {"role": message.role}
 
-            if message.content:
-                msg_dict["content"] = message.content
+            if message.content is not None:
+                if isinstance(message.content, str):
+                    # Simple text content
+                    msg_dict["content"] = message.content
+                elif isinstance(message.content, list):
+                    # Multimodal content - convert each block
+                    msg_dict["content"] = [
+                        self._convert_content_block(block) for block in message.content
+                    ]
+                else:
+                    # Fallback for unexpected types
+                    msg_dict["content"] = str(message.content)
 
             if message.tool_calls:
                 msg_dict["tool_calls"] = [

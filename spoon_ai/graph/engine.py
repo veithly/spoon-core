@@ -34,10 +34,123 @@ from .reducers import (
 )
 from .decorators import node_decorator
 from .checkpointer import InMemoryCheckpointer
-from spoon_ai.schema import Message
+from spoon_ai.schema import (
+    Message, MessageContent, ContentBlock,
+    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource
+)
 from .config import GraphConfig, ParallelGroupConfig, ParallelRetryPolicy, RouterConfig
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Multimodal Message Utilities for Graph Workflows
+# =============================================================================
+
+def create_multimodal_message(
+    role: str,
+    text: str,
+    image_url: Optional[str] = None,
+    image_data: Optional[str] = None,
+    image_media_type: str = "image/png",
+    detail: Literal["auto", "low", "high"] = "auto"
+) -> Message:
+    """Create a multimodal message for use in graph state.
+
+    Supports both URL-based and base64-encoded images.
+
+    Args:
+        role: Message role (user, assistant, system)
+        text: Text content
+        image_url: URL of the image (including data URLs)
+        image_data: Base64-encoded image data (alternative to image_url)
+        image_media_type: MIME type for base64 images
+        detail: Image detail level (auto, low, high)
+
+    Returns:
+        Message: A multimodal message ready for graph state
+
+    Example:
+        ```python
+        # In a graph node function
+        async def analyze_image(state: State) -> dict:
+            msg = create_multimodal_message(
+                "user",
+                "Analyze this chart",
+                image_url="https://example.com/chart.png"
+            )
+            return {"messages": [msg]}
+        ```
+    """
+    if not image_url and not image_data:
+        # Text-only message
+        return Message(role=role, content=text)
+
+    content_blocks: List[ContentBlock] = [TextContent(text=text)]
+
+    if image_url:
+        content_blocks.append(
+            ImageUrlContent(image_url=ImageUrlSource(url=image_url, detail=detail))
+        )
+    elif image_data:
+        content_blocks.append(
+            ImageContent(source=ImageSource(
+                type="base64",
+                media_type=image_media_type,
+                data=image_data
+            ))
+        )
+
+    return Message(role=role, content=content_blocks)
+
+
+def create_vision_user_message(
+    text: str,
+    images: List[Dict[str, str]]
+) -> Message:
+    """Create a user message with multiple images.
+
+    Args:
+        text: Text prompt
+        images: List of image specs, each with either:
+            - {"url": "https://..."} for URL-based images
+            - {"data": "<base64>", "media_type": "image/png"} for base64 images
+
+    Returns:
+        Message: A multimodal message with multiple images
+
+    Example:
+        ```python
+        msg = create_vision_user_message(
+            "Compare these two charts",
+            images=[
+                {"url": "https://example.com/chart1.png"},
+                {"url": "https://example.com/chart2.png"}
+            ]
+        )
+        ```
+    """
+    content_blocks: List[ContentBlock] = [TextContent(text=text)]
+
+    for img in images:
+        if "url" in img:
+            content_blocks.append(
+                ImageUrlContent(image_url=ImageUrlSource(
+                    url=img["url"],
+                    detail=img.get("detail", "auto")
+                ))
+            )
+        elif "data" in img:
+            content_blocks.append(
+                ImageContent(source=ImageSource(
+                    type="base64",
+                    media_type=img.get("media_type", "image/png"),
+                    data=img["data"]
+                ))
+            )
+
+    return Message(role="user", content=content_blocks)
+
 
 # Type variables for generic state handling
 State = TypeVar('State')

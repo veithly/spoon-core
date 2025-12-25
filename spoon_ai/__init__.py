@@ -65,19 +65,43 @@ __version__: str = _resolve_version()
 # so that subpackages (e.g., spoon_ai.rag) can be used in minimal/offline envs.
 try:
     from spoon_ai.chat import ChatBot  # type: ignore
-    from spoon_ai.schema import LLMResponse, LLMResponseChunk, Message  # type: ignore
+    from spoon_ai.schema import (  # type: ignore
+        LLMResponse, LLMResponseChunk, Message,
+        # Multimodal content types
+        TextContent, ImageContent, ImageUrlContent, DocumentContent,
+        ImageSource, ImageUrlSource, DocumentSource, MessageContent, ContentBlock
+    )
     _exported = [
         "__version__",
         "ChatBot",
         "Message",
         "LLMResponse",
         "LLMResponseChunk",
+        # Multimodal exports
+        "TextContent",
+        "ImageContent",
+        "ImageUrlContent",
+        "DocumentContent",
+        "ImageSource",
+        "ImageUrlSource",
+        "DocumentSource",
+        "MessageContent",
+        "ContentBlock",
     ]
 except Exception:  # pragma: no cover - optional dependency surface
     ChatBot = None  # type: ignore
     Message = None  # type: ignore
     LLMResponse = None  # type: ignore
     LLMResponseChunk = None  # type: ignore
+    TextContent = None  # type: ignore
+    ImageContent = None  # type: ignore
+    ImageUrlContent = None  # type: ignore
+    DocumentContent = None  # type: ignore
+    ImageSource = None  # type: ignore
+    ImageUrlSource = None  # type: ignore
+    DocumentSource = None  # type: ignore
+    MessageContent = None  # type: ignore
+    ContentBlock = None  # type: ignore
     _exported = ["__version__"]
 
 __all__ = _exported

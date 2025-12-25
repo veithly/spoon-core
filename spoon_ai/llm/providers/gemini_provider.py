@@ -14,7 +14,12 @@ from uuid import uuid4
 from google import genai
 from google.genai import types
 
-from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
+from spoon_ai.schema import (
+    Message, ToolCall, Function, LLMResponseChunk,
+    TextContent, ImageContent, ImageUrlContent, DocumentContent, FileContent, ContentBlock
+)
+import base64
+import re
 from spoon_ai.callbacks.manager import CallbackManager
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
@@ -229,46 +234,157 @@ class GeminiProvider(LLMProviderInterface):
                 raise
             raise ProviderError("gemini", f"Failed to initialize: {str(e)}", original_error=e)
 
-    def _convert_messages(self, messages: List[Message]) -> tuple[Optional[str], str]:
-        """Convert Message objects to Gemini format for simple chat."""
+    def _convert_content_block_to_part(self, block: ContentBlock) -> types.Part:
+        """Convert a content block to a Gemini Part.
+
+        Args:
+            block: A content block (TextContent, ImageContent, ImageUrlContent, etc.)
+
+        Returns:
+            Gemini types.Part object
+        """
+        if isinstance(block, TextContent):
+            return types.Part.from_text(text=block.text)
+
+        elif isinstance(block, ImageContent):
+            # Base64 image data - convert to bytes
+            image_data = base64.b64decode(block.source.data)
+            return types.Part.from_bytes(
+                data=image_data,
+                mime_type=block.source.media_type
+            )
+
+        elif isinstance(block, ImageUrlContent):
+            url = block.image_url.url
+            # Check if it's a data URL (base64)
+            if url.startswith("data:"):
+                # Parse data URL: data:image/png;base64,<data>
+                match = re.match(r"data:([^;]+);base64,(.+)", url)
+                if match:
+                    mime_type, b64_data = match.groups()
+                    image_data = base64.b64decode(b64_data)
+                    return types.Part.from_bytes(
+                        data=image_data,
+                        mime_type=mime_type
+                    )
+            # For regular URLs, Gemini needs the file to be uploaded or downloaded
+            # For now, we'll log a warning and include as text
+            logger.warning(f"External image URLs require download. URL: {url[:50]}...")
+            return types.Part.from_text(text=f"[Image URL: {url}]")
+
+        elif isinstance(block, DocumentContent):
+            # Gemini supports PDFs and documents via inline_data
+            document_data = base64.b64decode(block.source.data)
+            return types.Part.from_bytes(
+                data=document_data,
+                mime_type=block.source.media_type
+            )
+
+        elif isinstance(block, FileContent):
+            # File content - include as text (Gemini doesn't support files directly without upload)
+            logger.warning(f"FileContent not fully supported, converting to text: {block.file_path}")
+            return types.Part.from_text(text=f"[File: {block.file_path}]")
+
+        elif isinstance(block, dict):
+            # Handle dict format content blocks
+            block_type = block.get("type", "text")
+            if block_type == "text":
+                return types.Part.from_text(text=block.get("text", ""))
+            elif block_type == "image":
+                source = block.get("source", {})
+                if source.get("type") == "base64":
+                    image_data = base64.b64decode(source.get("data", ""))
+                    return types.Part.from_bytes(
+                        data=image_data,
+                        mime_type=source.get("media_type", "image/png")
+                    )
+            elif block_type == "image_url":
+                url = block.get("image_url", {}).get("url", "")
+                if url.startswith("data:"):
+                    match = re.match(r"data:([^;]+);base64,(.+)", url)
+                    if match:
+                        mime_type, b64_data = match.groups()
+                        image_data = base64.b64decode(b64_data)
+                        return types.Part.from_bytes(
+                            data=image_data,
+                            mime_type=mime_type
+                        )
+                return types.Part.from_text(text=f"[Image URL: {url}]")
+            return types.Part.from_text(text=str(block))
+
+        else:
+            # Fallback for unknown content types
+            logger.warning(f"Unknown content block type: {type(block)}")
+            return types.Part.from_text(text=str(block))
+
+    def _convert_message_content_to_parts(self, content) -> List[types.Part]:
+        """Convert message content to list of Gemini Parts.
+
+        Args:
+            content: Message content (str or List[ContentBlock])
+
+        Returns:
+            List of Gemini types.Part objects
+        """
+        if content is None:
+            return [types.Part.from_text(text="")]
+        if isinstance(content, str):
+            return [types.Part.from_text(text=content)]
+        elif isinstance(content, list):
+            return [self._convert_content_block_to_part(block) for block in content]
+        else:
+            return [types.Part.from_text(text=str(content))]
+
+    def _convert_messages(self, messages: List[Message]) -> tuple[Optional[str], Any]:
+        """Convert Message objects to Gemini format for simple chat.
+
+        Handles both text-only and multimodal messages seamlessly.
+        """
         system_content = ""
-        user_message = ""
+        user_parts = []
 
         # Extract system messages
         for message in messages:
             if message.role == "system":
+                msg_text = message.text_content if message.is_multimodal else message.content
                 if system_content:
-                    system_content += " " + message.content
+                    system_content += " " + msg_text
                 else:
-                    system_content = message.content
+                    system_content = msg_text or ""
 
-        # Get the last user message
+        # Get the last user message - can be text or multimodal
         for message in reversed(messages):
             if message.role == "user":
-                user_message = message.content
+                user_parts = self._convert_message_content_to_parts(message.content)
                 break
 
         # If no user message found, use a default
-        if not user_message:
-            user_message = "Hello"
+        if not user_parts:
+            user_parts = [types.Part.from_text(text="Hello")]
 
-        return system_content, user_message
+        return system_content, user_parts
 
     def _convert_messages_for_tools(self, messages: List[Message]) -> tuple[Optional[str], List]:
-        """Convert Message objects to Gemini format for tool calling."""
+        """Convert Message objects to Gemini format for tool calling.
+
+        Handles both text-only and multimodal messages seamlessly.
+        """
         system_content = ""
         gemini_messages = []
 
         for message in messages:
             if message.role == "system":
+                msg_text = message.text_content if message.is_multimodal else message.content
                 if system_content:
-                    system_content += " " + message.content
+                    system_content += " " + msg_text
                 else:
-                    system_content = message.content
+                    system_content = msg_text or ""
             elif message.role == "user":
+                # Handle both text and multimodal user messages
+                parts = self._convert_message_content_to_parts(message.content)
                 gemini_messages.append(types.Content(
                     role="user",
-                    parts=[types.Part.from_text(text=message.content)]
+                    parts=parts
                 ))
             elif message.role == "assistant":
                 if message.tool_calls:
@@ -372,7 +488,7 @@ class GeminiProvider(LLMProviderInterface):
         try:
             start_time = asyncio.get_event_loop().time()
 
-            system_content, user_message = self._convert_messages(messages)
+            system_content, user_parts = self._convert_messages(messages)
 
             # Extract parameters
             model = self._resolve_model_name(kwargs.get('model'))
@@ -390,11 +506,8 @@ class GeminiProvider(LLMProviderInterface):
                 kwargs=kwargs,
             )
 
-            # Build request content
-            if isinstance(user_message, str):
-                contents = [types.Part.from_text(text=user_message)]
-            else:
-                contents = [user_message]
+            # Build request content - user_parts is already a list of Parts
+            contents = user_parts
 
             # Generate configuration
             generate_config = types.GenerateContentConfig(
@@ -471,7 +584,7 @@ class GeminiProvider(LLMProviderInterface):
         run_id = uuid4()
 
         try:
-            system_content, user_message = self._convert_messages(messages)
+            system_content, user_parts = self._convert_messages(messages)
 
             # Extract parameters
             model = self._resolve_model_name(kwargs.get('model'))
@@ -491,11 +604,8 @@ class GeminiProvider(LLMProviderInterface):
             # Trigger on_llm_start callback
             await callback_manager.on_llm_start(run_id=run_id,messages=messages,model=model,provider="gemini")
 
-            # Build request content
-            if isinstance(user_message, str):
-                contents = [types.Part.from_text(text=user_message)]
-            else:
-                contents = [user_message]
+            # Build request content - user_parts is already a list of Parts
+            contents = user_parts
 
             # Generate configuration
             generate_config = types.GenerateContentConfig(

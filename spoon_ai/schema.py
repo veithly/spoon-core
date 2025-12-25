@@ -80,15 +80,326 @@ ROLE_VALUES = tuple(role.value for role in Role)
 ROLE_TYPE = Literal[ROLE_VALUES]  # type: ignore
 
 
+# =============================================================================
+# Multimodal Content Types - Native Vision Support
+# =============================================================================
+
+class ContentType(str, Enum):
+    """Types of content blocks for multimodal messages"""
+    TEXT = "text"
+    IMAGE = "image"          # Base64 encoded image data
+    IMAGE_URL = "image_url"  # URL reference to image
+    DOCUMENT = "document"    # PDF and other documents (base64)
+    FILE = "file"            # File attachment (path-based)
+    AUDIO = "audio"          # Audio content (future)
+
+
+class ImageMediaType(str, Enum):
+    """Supported image media types"""
+    JPEG = "image/jpeg"
+    PNG = "image/png"
+    GIF = "image/gif"
+    WEBP = "image/webp"
+
+
+class ImageSource(BaseModel):
+    """Source for base64-encoded image content (Anthropic style)"""
+    type: Literal["base64"] = "base64"
+    media_type: str = Field(..., description="MIME type: image/jpeg, image/png, image/gif, image/webp")
+    data: str = Field(..., description="Base64-encoded image data")
+
+
+class ImageUrlSource(BaseModel):
+    """Source for URL-based image content (OpenAI style)"""
+    url: str = Field(..., description="URL of the image or base64 data URL")
+    detail: Optional[Literal["auto", "low", "high"]] = Field(
+        default="auto",
+        description="Image detail level for processing"
+    )
+
+
+class TextContent(BaseModel):
+    """Text content block"""
+    type: Literal["text"] = "text"
+    text: str = Field(..., description="The text content")
+
+
+class ImageContent(BaseModel):
+    """Image content block with base64 data (Anthropic-compatible)"""
+    type: Literal["image"] = "image"
+    source: ImageSource = Field(..., description="Base64 image source")
+
+
+class ImageUrlContent(BaseModel):
+    """Image content block with URL reference (OpenAI-compatible)"""
+    type: Literal["image_url"] = "image_url"
+    image_url: ImageUrlSource = Field(..., description="Image URL source")
+
+
+class FileContent(BaseModel):
+    """File content block (path-based, for local file references)"""
+    type: Literal["file"] = "file"
+    file_path: str = Field(..., description="Path to the file")
+    media_type: Optional[str] = Field(default=None, description="MIME type of the file")
+
+
+class DocumentSource(BaseModel):
+    """Source for base64-encoded document content (PDF, etc.)"""
+    type: Literal["base64"] = "base64"
+    media_type: str = Field(..., description="MIME type: application/pdf, text/plain, etc.")
+    data: str = Field(..., description="Base64-encoded document data")
+
+
+class DocumentContent(BaseModel):
+    """Document content block for PDFs and other documents (Anthropic/Gemini compatible)
+
+    Supported by:
+    - Anthropic Claude: Native PDF support via base64
+    - Gemini: Native PDF support via inline_data
+    - OpenAI: NOT supported (will be converted to text placeholder)
+    """
+    type: Literal["document"] = "document"
+    source: DocumentSource = Field(..., description="Base64 document source")
+    filename: Optional[str] = Field(default=None, description="Optional filename for display")
+
+
+# Union of all content block types
+ContentBlock = Union[TextContent, ImageContent, ImageUrlContent, DocumentContent, FileContent]
+
+# Message content can be either a simple string or a list of content blocks
+MessageContent = Union[str, List[ContentBlock]]
+
+
 class Message(BaseModel):
-    """Represents a chat message in the conversation"""
+    """Represents a chat message in the conversation.
+
+    Supports both text-only and multimodal content:
+    - Simple text: content="Hello world"
+    - Multimodal: content=[TextContent(...), ImageUrlContent(...)]
+    """
 
     id: Optional[str] = Field(default=None)
     role: ROLE_TYPE = Field(...) # type: ignore
-    content: Optional[str] = Field(default=None)
+    content: Optional[MessageContent] = Field(default=None)
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     name: Optional[str] = Field(default=None)
     tool_call_id: Optional[str] = Field(default=None)
+
+    @property
+    def is_multimodal(self) -> bool:
+        """Check if this message contains multimodal content."""
+        return isinstance(self.content, list)
+
+    @property
+    def text_content(self) -> str:
+        """Extract text content from message (for backward compatibility).
+
+        Returns:
+            str: Combined text content from all text blocks, or empty string
+        """
+        if self.content is None:
+            return ""
+        if isinstance(self.content, str):
+            return self.content
+        # Extract text from content blocks
+        texts = []
+        for block in self.content:
+            if isinstance(block, TextContent):
+                texts.append(block.text)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                texts.append(block.get("text", ""))
+        return "\n".join(texts)
+
+    @property
+    def has_images(self) -> bool:
+        """Check if message contains any image content."""
+        if not isinstance(self.content, list):
+            return False
+        return any(
+            isinstance(block, (ImageContent, ImageUrlContent)) or
+            (isinstance(block, dict) and block.get("type") in ("image", "image_url"))
+            for block in self.content
+        )
+
+    @property
+    def has_documents(self) -> bool:
+        """Check if message contains any document content (PDF, etc.)."""
+        if not isinstance(self.content, list):
+            return False
+        return any(
+            isinstance(block, DocumentContent) or
+            (isinstance(block, dict) and block.get("type") == "document")
+            for block in self.content
+        )
+
+    @classmethod
+    def create_text(cls, role: str, text: str, **kwargs) -> "Message":
+        """Create a simple text message.
+
+        Args:
+            role: Message role (user, assistant, system, tool)
+            text: Text content
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Text message instance
+        """
+        return cls(role=role, content=text, **kwargs)
+
+    @classmethod
+    def create_multimodal(
+        cls,
+        role: str,
+        content_blocks: List[ContentBlock],
+        **kwargs
+    ) -> "Message":
+        """Create a multimodal message with mixed content types.
+
+        Args:
+            role: Message role (user, assistant, system, tool)
+            content_blocks: List of content blocks (TextContent, ImageContent, etc.)
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Multimodal message instance
+        """
+        return cls(role=role, content=content_blocks, **kwargs)
+
+    @classmethod
+    def create_with_image_url(
+        cls,
+        role: str,
+        text: str,
+        image_url: str,
+        detail: Literal["auto", "low", "high"] = "auto",
+        **kwargs
+    ) -> "Message":
+        """Create a message with text and an image URL.
+
+        Args:
+            role: Message role
+            text: Text content
+            image_url: URL of the image
+            detail: Image detail level (auto, low, high)
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Multimodal message with text and image URL
+        """
+        content_blocks: List[ContentBlock] = [
+            TextContent(text=text),
+            ImageUrlContent(image_url=ImageUrlSource(url=image_url, detail=detail))
+        ]
+        return cls(role=role, content=content_blocks, **kwargs)
+
+    @classmethod
+    def create_with_base64_image(
+        cls,
+        role: str,
+        text: str,
+        image_data: str,
+        media_type: str = "image/png",
+        **kwargs
+    ) -> "Message":
+        """Create a message with text and a base64-encoded image.
+
+        Args:
+            role: Message role
+            text: Text content
+            image_data: Base64-encoded image data
+            media_type: Image MIME type (image/jpeg, image/png, etc.)
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Multimodal message with text and base64 image
+        """
+        content_blocks: List[ContentBlock] = [
+            TextContent(text=text),
+            ImageContent(source=ImageSource(
+                type="base64",
+                media_type=media_type,
+                data=image_data
+            ))
+        ]
+        return cls(role=role, content=content_blocks, **kwargs)
+
+    @classmethod
+    def create_with_pdf(
+        cls,
+        role: str,
+        text: str,
+        pdf_data: str,
+        filename: Optional[str] = None,
+        **kwargs
+    ) -> "Message":
+        """Create a message with text and a base64-encoded PDF document.
+
+        Supported by Anthropic Claude and Gemini. OpenAI does not support PDFs.
+
+        Args:
+            role: Message role
+            text: Text content / question about the PDF
+            pdf_data: Base64-encoded PDF data
+            filename: Optional filename for display
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Multimodal message with text and PDF document
+        """
+        content_blocks: List[ContentBlock] = [
+            TextContent(text=text),
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type="application/pdf",
+                    data=pdf_data
+                ),
+                filename=filename
+            )
+        ]
+        return cls(role=role, content=content_blocks, **kwargs)
+
+    @classmethod
+    def create_with_document(
+        cls,
+        role: str,
+        text: str,
+        document_data: str,
+        media_type: str = "application/pdf",
+        filename: Optional[str] = None,
+        **kwargs
+    ) -> "Message":
+        """Create a message with text and a base64-encoded document.
+
+        Supported document types vary by provider:
+        - Anthropic: PDF
+        - Gemini: PDF, and many other formats
+        - OpenAI: NOT supported (will show placeholder)
+
+        Args:
+            role: Message role
+            text: Text content / question about the document
+            document_data: Base64-encoded document data
+            media_type: Document MIME type (default: application/pdf)
+            filename: Optional filename for display
+            **kwargs: Additional message fields
+
+        Returns:
+            Message: Multimodal message with text and document
+        """
+        content_blocks: List[ContentBlock] = [
+            TextContent(text=text),
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type=media_type,
+                    data=document_data
+                ),
+                filename=filename
+            )
+        ]
+        return cls(role=role, content=content_blocks, **kwargs)
+
 
 class SystemMessage(Message):
     role: ROLE_TYPE = Field(default=Role.SYSTEM.value)  # type: ignore
