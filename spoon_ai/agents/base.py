@@ -10,7 +10,11 @@ from typing import Literal, Optional, List, Union, Dict, Any, cast
 import threading
 import time
 
-from spoon_ai.schema import Message, Role
+from spoon_ai.schema import (
+    Message, Role, MessageContent, ContentBlock,
+    TextContent, ImageContent, ImageUrlContent, ImageSource, ImageUrlSource,
+    DocumentContent, DocumentSource
+)
 from pydantic import BaseModel, Field
 
 from spoon_ai.chat import ChatBot, Memory
@@ -132,13 +136,26 @@ class BaseAgent(BaseModel, ABC):
     async def add_message(
         self,
         role: Literal["user", "assistant", "tool"],
-        content: str,
+        content: MessageContent,
         tool_call_id: Optional[str] = None,
         tool_calls: Optional[List[ToolCall]] = None,
         tool_name: Optional[str] = None,
         timeout: Optional[float] = None
     ) -> None:
-        """Thread-safe message addition with timeout protection"""
+        """Thread-safe message addition with timeout protection.
+
+        Supports both text-only and multimodal content:
+        - Text: content="Hello world"
+        - Multimodal: content=[TextContent(...), ImageUrlContent(...)]
+
+        Args:
+            role: Message role (user, assistant, tool)
+            content: Text string or list of content blocks for multimodal messages
+            tool_call_id: ID for tool responses
+            tool_calls: List of tool calls for assistant messages
+            tool_name: Name of the tool for tool responses
+            timeout: Operation timeout in seconds
+        """
         if role not in ["user", "assistant", "tool"]:
             raise ValueError(f"Invalid role: {role}")
 
@@ -192,6 +209,159 @@ class BaseAgent(BaseModel, ABC):
             raise
         finally:
             self._active_operations.discard(operation_id)
+
+    async def add_message_with_image(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        image_url: Optional[str] = None,
+        image_data: Optional[str] = None,
+        image_media_type: str = "image/png",
+        detail: Literal["auto", "low", "high"] = "auto",
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with an image.
+
+        Supports both URL-based and base64-encoded images.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the image
+            image_url: URL of the image (including data URLs)
+            image_data: Base64-encoded image data
+            image_media_type: MIME type for base64 images (e.g., "image/png")
+            detail: Image detail level for processing
+            timeout: Operation timeout in seconds
+
+        Example:
+            # With image URL
+            await agent.add_message_with_image(
+                "user",
+                "What's in this image?",
+                image_url="https://example.com/image.png"
+            )
+
+            # With base64 data
+            await agent.add_message_with_image(
+                "user",
+                "Describe this diagram",
+                image_data="<base64_string>",
+                image_media_type="image/png"
+            )
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Multimodal messages only support user/assistant roles, got: {role}")
+
+        if not image_url and not image_data:
+            raise ValueError("Either image_url or image_data must be provided")
+
+        content_blocks: List[ContentBlock] = [TextContent(text=text)]
+
+        if image_url:
+            content_blocks.append(
+                ImageUrlContent(image_url=ImageUrlSource(url=image_url, detail=detail))
+            )
+        elif image_data:
+            content_blocks.append(
+                ImageContent(source=ImageSource(
+                    type="base64",
+                    media_type=image_media_type,
+                    data=image_data
+                ))
+            )
+
+        await self.add_message(role, content_blocks, timeout=timeout)
+
+    async def add_message_with_pdf(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        pdf_data: str,
+        filename: Optional[str] = None,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with a PDF document.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the PDF
+            pdf_data: Base64-encoded PDF data
+            filename: Optional filename for the PDF
+            timeout: Operation timeout in seconds
+
+        Example:
+            # With base64 PDF data
+            await agent.add_message_with_pdf(
+                "user",
+                "Summarize this document",
+                pdf_data="<base64_string>",
+                filename="report.pdf"
+            )
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Multimodal messages only support user/assistant roles, got: {role}")
+
+        content_blocks: List[ContentBlock] = [TextContent(text=text)]
+        content_blocks.append(
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type="application/pdf",
+                    data=pdf_data
+                ),
+                filename=filename
+            )
+        )
+
+        await self.add_message(role, content_blocks, timeout=timeout)
+
+    async def add_message_with_document(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        document_data: str,
+        media_type: str = "application/pdf",
+        filename: Optional[str] = None,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with a document.
+
+        Supports various document types including PDF, text, etc.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the document
+            document_data: Base64-encoded document data
+            media_type: MIME type of the document (default: application/pdf)
+            filename: Optional filename for the document
+            timeout: Operation timeout in seconds
+
+        Example:
+            # With PDF document
+            await agent.add_message_with_document(
+                "user",
+                "Analyze this report",
+                document_data="<base64_string>",
+                media_type="application/pdf",
+                filename="annual_report.pdf"
+            )
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Multimodal messages only support user/assistant roles, got: {role}")
+
+        content_blocks: List[ContentBlock] = [TextContent(text=text)]
+        content_blocks.append(
+            DocumentContent(
+                source=DocumentSource(
+                    type="base64",
+                    media_type=media_type,
+                    data=document_data
+                ),
+                filename=filename
+            )
+        )
+
+        await self.add_message(role, content_blocks, timeout=timeout)
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState, timeout: Optional[float] = None):
@@ -369,20 +539,26 @@ class BaseAgent(BaseModel, ABC):
             raise NotImplementedError("Subclasses must implement this method")
 
     async def is_stuck(self) -> bool:
-        """Thread-safe stuck detection"""
+        """Thread-safe stuck detection.
+
+        Uses text_content property for comparison to handle both
+        text-only and multimodal messages.
+        """
         async with self._memory_lock:
             messages = self.memory.get_messages()
             if len(messages) < 2:
                 return False
 
             last_message = messages[-1]
-            if not last_message.content:
+            # Use text_content property for multimodal compatibility
+            last_content = last_message.text_content
+            if not last_content:
                 return False
 
             duplicate_count = sum(
                 1
                 for msg in reversed(messages[:-1])
-                if msg.role == Role.ASSISTANT and msg.content == last_message.content
+                if msg.role == Role.ASSISTANT and msg.text_content == last_content
             )
             return duplicate_count >= 2
 

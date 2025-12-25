@@ -11,7 +11,10 @@ from uuid import uuid4
 from anthropic import AsyncAnthropic
 from httpx import AsyncClient
 
-from spoon_ai.schema import Message, ToolCall, Function, LLMResponseChunk
+from spoon_ai.schema import (
+    Message, ToolCall, Function, LLMResponseChunk,
+    TextContent, ImageContent, ImageUrlContent, DocumentContent, FileContent, ContentBlock
+)
 from spoon_ai.callbacks.manager import CallbackManager
 from ..interface import LLMProviderInterface, LLMResponse, ProviderMetadata, ProviderCapability
 from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNotFoundError, NetworkError
@@ -70,48 +73,154 @@ class AnthropicProvider(LLMProviderInterface):
                 raise
             raise ProviderError("anthropic", f"Failed to initialize: {str(e)}", original_error=e)
     
+    def _convert_content_block(self, block: ContentBlock) -> Dict[str, Any]:
+        """Convert a content block to Anthropic-compatible format.
+
+        Args:
+            block: A content block (TextContent, ImageContent, ImageUrlContent, etc.)
+
+        Returns:
+            Dict in Anthropic multimodal content format
+        """
+        if isinstance(block, TextContent):
+            return {"type": "text", "text": block.text}
+
+        elif isinstance(block, ImageContent):
+            # Anthropic's native base64 image format
+            return {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": block.source.media_type,
+                    "data": block.source.data
+                }
+            }
+
+        elif isinstance(block, ImageUrlContent):
+            # Convert image URL to Anthropic format
+            url = block.image_url.url
+            # Check if it's a data URL (base64)
+            if url.startswith("data:"):
+                # Parse data URL: data:image/png;base64,<data>
+                import re
+                match = re.match(r"data:([^;]+);base64,(.+)", url)
+                if match:
+                    media_type, data = match.groups()
+                    return {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": data
+                        }
+                    }
+            # Otherwise, use URL source (Anthropic supports URLs)
+            return {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": url
+                }
+            }
+
+        elif isinstance(block, DocumentContent):
+            # Anthropic native PDF/document support
+            # https://docs.anthropic.com/en/docs/build-with-claude/pdf-support
+            return {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": block.source.media_type,
+                    "data": block.source.data
+                }
+            }
+
+        elif isinstance(block, FileContent):
+            # File content - include as text (Anthropic doesn't support files directly)
+            logger.warning(f"FileContent not fully supported, converting to text: {block.file_path}")
+            return {"type": "text", "text": f"[File: {block.file_path}]"}
+
+        elif isinstance(block, dict):
+            # Already in dict format, pass through
+            return block
+
+        else:
+            # Fallback for unknown content types
+            logger.warning(f"Unknown content block type: {type(block)}")
+            return {"type": "text", "text": str(block)}
+
+    def _convert_message_content(self, content) -> Any:
+        """Convert message content (string or list of blocks) to Anthropic format.
+
+        Args:
+            content: Message content (str or List[ContentBlock])
+
+        Returns:
+            String or list of content dicts for Anthropic API
+        """
+        if content is None:
+            return None
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            return [self._convert_content_block(block) for block in content]
+        else:
+            return str(content)
+
     def _convert_messages(self, messages: List[Message]) -> tuple[Optional[str], List[Dict[str, Any]]]:
-        """Convert Message objects to Anthropic format, separating system messages."""
+        """Convert Message objects to Anthropic format, separating system messages.
+
+        Handles both text-only and multimodal messages seamlessly.
+        """
         system_content = None
         anthropic_messages = []
-        
+
         for message in messages:
             if message.role == "system":
                 # Handle system messages separately
+                # Get text content from message
+                msg_content = message.text_content if message.is_multimodal else message.content
+
                 # Only apply cache_control to system message if it's large enough
-                if (self.enable_prompt_cache and 
-                    len(message.content) >= 4000):
+                if (self.enable_prompt_cache and
+                    msg_content and len(msg_content) >= 4000):
                     system_content = [
                         {
                             "type": "text",
-                            "text": message.content,
+                            "text": msg_content,
                             "cache_control": {"type": "ephemeral"}
                         }
                     ]
-                    logger.info(f"Applied cache_control to system message ({len(message.content)} chars)")
+                    logger.info(f"Applied cache_control to system message ({len(msg_content)} chars)")
                 else:
                     # Use string format for simple system messages
-                    system_content = message.content
+                    system_content = msg_content
             elif message.role == "tool":
                 # Convert tool messages to user messages with tool_result
+                tool_content = message.text_content if message.is_multimodal else message.content
                 anthropic_messages.append({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": message.tool_call_id,
-                        "content": message.content
+                        "content": tool_content
                     }]
                 })
             elif message.role == "assistant":
                 content = []
-                
-                # Add text content if present
+
+                # Add text/multimodal content if present
                 if message.content:
-                    content.append({
-                        "type": "text",
-                        "text": message.content
-                    })
-                
+                    if isinstance(message.content, str):
+                        content.append({
+                            "type": "text",
+                            "text": message.content
+                        })
+                    elif isinstance(message.content, list):
+                        # Handle multimodal content
+                        for block in message.content:
+                            content.append(self._convert_content_block(block))
+
                 # Add tool calls if present
                 if message.tool_calls:
                     for tool_call in message.tool_calls:
@@ -119,24 +228,26 @@ class AnthropicProvider(LLMProviderInterface):
                             arguments = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
                         except json.JSONDecodeError:
                             arguments = {}
-                        
+
                         content.append({
                             "type": "tool_use",
                             "id": tool_call.id,
                             "name": tool_call.function.name,
                             "input": arguments
                         })
-                
+
                 anthropic_messages.append({
                     "role": "assistant",
-                    "content": content if content else message.content
+                    "content": content if content else (message.text_content if message.is_multimodal else message.content)
                 })
             elif message.role == "user":
+                # Handle user messages - can be text or multimodal
+                converted_content = self._convert_message_content(message.content)
                 anthropic_messages.append({
                     "role": "user",
-                    "content": message.content
+                    "content": converted_content
                 })
-        
+
         return system_content, anthropic_messages
     
     def _convert_tools(self, tools: List[Dict]) -> List[Dict]:
