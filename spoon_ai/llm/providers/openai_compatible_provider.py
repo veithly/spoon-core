@@ -24,6 +24,41 @@ from spoon_ai.callbacks.manager import CallbackManager
 logger = getLogger(__name__)
 
 
+def _normalize_mime_type(mime_type: str) -> str:
+    """Normalize MIME type for OpenAI-compatible API compatibility.
+    
+    OpenAI-compatible APIs support standard image MIME types. This function validates
+    that the MIME type is supported. Note: image/jpg is supported and kept as-is.
+    
+    Args:
+        mime_type: Original MIME type string
+        
+    Returns:
+        MIME type string (unchanged, as OpenAI-compatible APIs support image/jpg directly)
+        
+    Raises:
+        ValueError: If the MIME type is not supported by OpenAI-compatible APIs
+    """
+    # Validate supported MIME types for OpenAI-compatible APIs
+    # According to OpenAI API docs: https://platform.openai.com/docs/guides/vision
+    supported_image_types = {
+        "image/png",
+        "image/jpeg",
+        "image/jpg",  # Supported, kept as-is
+        "image/webp"
+    }
+    
+    if mime_type not in supported_image_types:
+        raise ValueError(
+            f"Unsupported MIME type for OpenAI-compatible API: {mime_type}. "
+            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
+            f"Please convert your image to one of these formats."
+        )
+    
+    # Return as-is (no conversion needed for OpenAI-compatible APIs)
+    return mime_type
+
+
 class OpenAICompatibleProvider(LLMProviderInterface):
     """Base class for OpenAI-compatible providers."""
 
@@ -150,8 +185,11 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             return result
 
         elif isinstance(block, ImageContent):
+            # Normalize and validate MIME type
+            normalized_mime_type = _normalize_mime_type(block.source.media_type)
+            
             # Convert base64 image to OpenAI's data URL format
-            data_url = f"data:{block.source.media_type};base64,{block.source.data}"
+            data_url = f"data:{normalized_mime_type};base64,{block.source.data}"
             return {
                 "type": "image_url",
                 "image_url": {"url": data_url}

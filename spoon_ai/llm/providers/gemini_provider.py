@@ -10,6 +10,19 @@ import uuid
 from typing import List, Dict, Any, Optional, AsyncIterator
 from logging import getLogger
 from uuid import uuid4
+import mimetypes
+
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    try:
+        import requests
+        REQUESTS_AVAILABLE = True
+        HTTPX_AVAILABLE = False
+    except ImportError:
+        REQUESTS_AVAILABLE = False
+        HTTPX_AVAILABLE = False
 
 from google import genai
 from google.genai import types
@@ -26,6 +39,47 @@ from ..errors import ProviderError, AuthenticationError, RateLimitError, ModelNo
 from ..registry import register_provider
 
 logger = getLogger(__name__)
+
+
+def _normalize_mime_type(mime_type: str) -> str:
+    """Normalize MIME type for Gemini API compatibility.
+    
+    Gemini API requires standard MIME types. This function normalizes
+    'image/jpg' to 'image/jpeg' (Gemini doesn't accept image/jpg directly)
+    and validates that the MIME type is supported by Gemini.
+    
+    Args:
+        mime_type: Original MIME type string
+        
+    Returns:
+        Normalized MIME type string
+        
+    Raises:
+        ValueError: If the MIME type is not supported by Gemini API
+    """
+    # Normalize image/jpg to image/jpeg (Gemini doesn't accept image/jpg, must convert)
+    if mime_type == "image/jpg":
+        return "image/jpeg"
+    
+    # Validate supported MIME types for Gemini
+    # According to Gemini API docs: https://ai.google.dev/gemini-api/docs/prompting_with_media#supported_file_formats
+    # Note: image/jpg is supported by users but must be converted to image/jpeg for Gemini
+    supported_image_types = {
+        "image/png",
+        "image/jpeg",
+        "image/jpg",  # Supported by users, will be normalized to image/jpeg
+        "image/webp"
+    }
+    
+    if mime_type not in supported_image_types:
+        raise ValueError(
+            f"Unsupported MIME type for Gemini API: {mime_type}. "
+            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
+            f"Please convert your image to one of these formats."
+        )
+    
+    # Return normalized version (image/jpg -> image/jpeg, others as-is)
+    return "image/jpeg" if mime_type == "image/jpg" else mime_type
 
 
 @register_provider("gemini", [
@@ -248,10 +302,18 @@ class GeminiProvider(LLMProviderInterface):
 
         elif isinstance(block, ImageContent):
             # Base64 image data - convert to bytes
-            image_data = base64.b64decode(block.source.data)
+            try:
+                image_data = base64.b64decode(block.source.data)
+            except Exception as e:
+                raise ValueError(
+                    f"Invalid base64 image data: {str(e)}. "
+                    f"Please ensure the image data is properly base64 encoded."
+                )
+            # Normalize MIME type (e.g., image/jpg -> image/jpeg)
+            normalized_mime_type = _normalize_mime_type(block.source.media_type)
             return types.Part.from_bytes(
                 data=image_data,
-                mime_type=block.source.media_type
+                mime_type=normalized_mime_type
             )
 
         elif isinstance(block, ImageUrlContent):
@@ -259,18 +321,73 @@ class GeminiProvider(LLMProviderInterface):
             # Check if it's a data URL (base64)
             if url.startswith("data:"):
                 # Parse data URL: data:image/png;base64,<data>
-                match = re.match(r"data:([^;]+);base64,(.+)", url)
-                if match:
-                    mime_type, b64_data = match.groups()
+                # More robust regex: case-insensitive, validates base64 characters
+                match = re.match(r"data:([^;]+);base64,([A-Za-z0-9+/=]+)", url, re.IGNORECASE)
+                if not match:
+                    raise ValueError(f"Invalid data URL format: {url[:100]}...")
+                mime_type, b64_data = match.groups()
+                # Strip whitespace from base64 data
+                b64_data = b64_data.strip()
+                try:
                     image_data = base64.b64decode(b64_data)
-                    return types.Part.from_bytes(
-                        data=image_data,
-                        mime_type=mime_type
+                except Exception as e:
+                    raise ValueError(
+                        f"Invalid base64 data in data URL: {str(e)}. "
+                        f"Please ensure the data URL contains valid base64 encoded image data."
                     )
-            # For regular URLs, Gemini needs the file to be uploaded or downloaded
-            # For now, we'll log a warning and include as text
-            logger.warning(f"External image URLs require download. URL: {url[:50]}...")
-            return types.Part.from_text(text=f"[Image URL: {url}]")
+                # Normalize MIME type (e.g., image/jpg -> image/jpeg)
+                normalized_mime_type = _normalize_mime_type(mime_type)
+                return types.Part.from_bytes(
+                    data=image_data,
+                    mime_type=normalized_mime_type
+                )
+            # For regular URLs, download the image and convert to bytes
+            if not HTTPX_AVAILABLE and not REQUESTS_AVAILABLE:
+                logger.error(
+                    "httpx or requests is required to download external image URLs. "
+                    "Please install one with: pip install httpx (or pip install requests)"
+                )
+                raise ValueError(
+                    f"Cannot process external image URL: {url}. "
+                    "httpx or requests is required but not installed."
+                )
+            
+            try:
+                # Download the image using available library
+                if HTTPX_AVAILABLE:
+                    # Use httpx (preferred, supports async but we use sync here)
+                    with httpx.Client(timeout=10.0) as client:
+                        response = client.get(url)
+                        response.raise_for_status()
+                        image_bytes = response.content
+                        content_type = response.headers.get("Content-Type")
+                else:
+                    # Fallback to requests
+                    import requests
+                    response = requests.get(url, timeout=10.0)
+                    response.raise_for_status()
+                    image_bytes = response.content
+                    content_type = response.headers.get("Content-Type")
+                
+                # Detect MIME type from URL or Content-Type header
+                if not content_type:
+                    mime_type, _ = mimetypes.guess_type(url)
+                    content_type = mime_type or "image/jpeg"
+                
+                # Extract MIME type (remove charset if present)
+                mime_type = content_type.split(";")[0].strip()
+                # Normalize MIME type (e.g., image/jpg -> image/jpeg)
+                normalized_mime_type = _normalize_mime_type(mime_type)
+                
+                logger.debug(f"Downloaded image from URL: {url[:50]}... (size: {len(image_bytes)} bytes, type: {normalized_mime_type})")
+                
+                return types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=normalized_mime_type
+                )
+            except Exception as e:
+                logger.error(f"Failed to download image from URL {url}: {e}")
+                raise ValueError(f"Cannot process image URL: {url}. Download failed: {e}")
 
         elif isinstance(block, DocumentContent):
             # Gemini supports PDFs and documents via inline_data
@@ -294,9 +411,11 @@ class GeminiProvider(LLMProviderInterface):
                 source = block.get("source", {})
                 if source.get("type") == "base64":
                     image_data = base64.b64decode(source.get("data", ""))
+                    # Normalize MIME type (e.g., image/jpg -> image/jpeg)
+                    normalized_mime_type = _normalize_mime_type(source.get("media_type", "image/png"))
                     return types.Part.from_bytes(
                         data=image_data,
-                        mime_type=source.get("media_type", "image/png")
+                        mime_type=normalized_mime_type
                     )
             elif block_type == "image_url":
                 url = block.get("image_url", {}).get("url", "")
@@ -305,9 +424,11 @@ class GeminiProvider(LLMProviderInterface):
                     if match:
                         mime_type, b64_data = match.groups()
                         image_data = base64.b64decode(b64_data)
+                        # Normalize MIME type (e.g., image/jpg -> image/jpeg)
+                        normalized_mime_type = _normalize_mime_type(mime_type)
                         return types.Part.from_bytes(
                             data=image_data,
-                            mime_type=mime_type
+                            mime_type=normalized_mime_type
                         )
                 return types.Part.from_text(text=f"[Image URL: {url}]")
             return types.Part.from_text(text=str(block))

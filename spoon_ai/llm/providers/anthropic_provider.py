@@ -23,6 +23,41 @@ from ..registry import register_provider
 logger = getLogger(__name__)
 
 
+def _normalize_mime_type(mime_type: str) -> str:
+    """Normalize MIME type for Anthropic API compatibility.
+    
+    Anthropic API supports standard image MIME types. This function validates
+    that the MIME type is supported. Note: image/jpg is supported and kept as-is.
+    
+    Args:
+        mime_type: Original MIME type string
+        
+    Returns:
+        MIME type string (unchanged, as Anthropic supports image/jpg directly)
+        
+    Raises:
+        ValueError: If the MIME type is not supported by Anthropic API
+    """
+    # Validate supported MIME types for Anthropic
+    # According to Anthropic API docs: https://docs.anthropic.com/claude/docs/vision
+    supported_image_types = {
+        "image/png",
+        "image/jpeg",
+        "image/jpg",  # Supported, kept as-is
+        "image/webp"
+    }
+    
+    if mime_type not in supported_image_types:
+        raise ValueError(
+            f"Unsupported MIME type for Anthropic API: {mime_type}. "
+            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
+            f"Please convert your image to one of these formats."
+        )
+    
+    # Return as-is (no conversion needed for Anthropic)
+    return mime_type
+
+
 @register_provider("anthropic", [
     ProviderCapability.CHAT,
     ProviderCapability.COMPLETION,
@@ -87,11 +122,19 @@ class AnthropicProvider(LLMProviderInterface):
 
         elif isinstance(block, ImageContent):
             # Anthropic's native base64 image format
+            # Validate base64 format
+            import re
+            if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', block.source.data):
+                raise ValueError(f"Invalid base64 format for image data")
+            
+            # Normalize and validate MIME type
+            normalized_mime_type = _normalize_mime_type(block.source.media_type)
+            
             return {
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": block.source.media_type,
+                    "media_type": normalized_mime_type,
                     "data": block.source.data
                 }
             }
@@ -102,18 +145,29 @@ class AnthropicProvider(LLMProviderInterface):
             # Check if it's a data URL (base64)
             if url.startswith("data:"):
                 # Parse data URL: data:image/png;base64,<data>
+                # More robust regex: case-insensitive, validates base64 characters
                 import re
-                match = re.match(r"data:([^;]+);base64,(.+)", url)
-                if match:
-                    media_type, data = match.groups()
-                    return {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": data
-                        }
+                match = re.match(r"data:([^;]+);base64,([A-Za-z0-9+/=]+)", url, re.IGNORECASE)
+                if not match:
+                    raise ValueError(f"Invalid data URL format: {url[:100]}...")
+                media_type, data = match.groups()
+                # Strip whitespace from base64 data
+                data = data.strip()
+                # Validate base64 format
+                if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', data):
+                    raise ValueError(f"Invalid base64 data in data URL")
+                
+                # Normalize and validate MIME type
+                normalized_mime_type = _normalize_mime_type(media_type)
+                
+                return {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": normalized_mime_type,
+                        "data": data
                     }
+                }
             # Otherwise, use URL source (Anthropic supports URLs)
             return {
                 "type": "image",
