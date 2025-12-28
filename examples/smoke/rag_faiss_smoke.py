@@ -44,7 +44,7 @@ async def main():
     print(f"Ingested {n} chunks.")
     query = "What is the code for the add_message_with_image method in sooncore，If the answer is not in the context, say you don't know"
     retr = RagRetriever(config=cfg, store=store, embeddings=embed)
-    chunks = retr.retrieve(query, top_k=10)
+    chunks = retr.retrieve(query, top_k=3)
 
     print(f"\n[Debug] Retrieved {len(chunks)} chunks for query: {query}")
     for i, c in enumerate(chunks, 1):
