@@ -138,8 +138,48 @@ class ToolCallAgent(ReActAgent):
             unique_tools[tool_name] = tool
         unique_tools_list = list(unique_tools.values())
 
+        # Check if messages contain images or documents (multimodal content)
+        # Images and documents require more processing time, so increase timeout
+        has_images = False
+        has_documents = False
+        try:
+            for msg in self.memory.messages:
+                # Check for images using Message.has_images property
+                if hasattr(msg, 'has_images') and msg.has_images:
+                    has_images = True
+                # Check for documents using Message.has_documents property
+                if hasattr(msg, 'has_documents') and msg.has_documents:
+                    has_documents = True
+                # Fallback: check for data URLs in string content (for Data URL method)
+                if hasattr(msg, 'content') and isinstance(msg.content, str):
+                    if "data:image" in msg.content:
+                        has_images = True
+                    if "data:application/pdf" in msg.content or "application/pdf" in str(msg.content):
+                        has_documents = True
+                # Early exit if both found
+                if has_images and has_documents:
+                    break
+        except Exception:
+            pass  # If check fails, use default timeout
+
         # Bound LLM tool selection time to avoid step-level timeouts
-        llm_timeout = max(20.0, min(60.0, getattr(self, '_default_timeout', 30.0) - 5.0))
+        # Increase timeout for image/document processing (especially Data URLs and PDFs which can be slower)
+        base_timeout = max(20.0, min(60.0, getattr(self, '_default_timeout', 30.0) - 5.0))
+        if has_images or has_documents:
+            # Increase timeout for image/document processing
+            # Documents (especially PDFs) can be large and require more processing time
+            # Use maximum timeout (120s) for documents, as they can be very large
+            if has_documents:
+                llm_timeout = 60.0  # Directly set to max for documents (PDFs can be very large)
+            elif has_images:
+                llm_timeout = min(60.0, base_timeout * 2)  # Double for images
+            else:
+                llm_timeout = min(60.0, base_timeout * 2)
+            
+            content_type = "images and documents" if (has_images and has_documents) else ("images" if has_images else "documents")
+            logger.debug(f"Detected {content_type}, increased timeout to {llm_timeout}s for processing")
+        else:
+            llm_timeout = base_timeout
         try:
             response = await asyncio.wait_for(
                 self.llm.ask_tool(
@@ -247,6 +287,38 @@ class ToolCallAgent(ReActAgent):
                         if getattr(self, 'tool_calls', None):
                             # Bump step timeout modestly when tools are selected
                             step_timeout = max(step_timeout, 60.0)
+                        
+                        # Check if messages contain images or documents (multimodal content)
+                        # These require more processing time, so increase step timeout
+                        has_images = False
+                        has_documents = False
+                        try:
+                            for msg in self.memory.messages:
+                                if hasattr(msg, 'has_images') and msg.has_images:
+                                    has_images = True
+                                if hasattr(msg, 'has_documents') and msg.has_documents:
+                                    has_documents = True
+                                if hasattr(msg, 'content') and isinstance(msg.content, str):
+                                    if "data:image" in msg.content:
+                                        has_images = True
+                                    if "data:application/pdf" in msg.content or "application/pdf" in str(msg.content):
+                                        has_documents = True
+                                if has_images and has_documents:
+                                    break
+                        except Exception:
+                            pass
+                        
+                        if has_images or has_documents:
+                            # Increase step timeout significantly for image/document processing
+                            # Documents (especially PDFs) can be large and require more processing time
+                            # Use maximum timeout (120s) for documents
+                            if has_documents:
+                                step_timeout = max(step_timeout, 60.0)  # Directly set to max for documents
+                            else:
+                                step_timeout = max(step_timeout, 60.0)  # Also max for images
+                            content_type = "images and documents" if (has_images and has_documents) else ("images" if has_images else "documents")
+                            logger.debug(f"Detected {content_type}, increased step timeout to {step_timeout}s for processing")
+                        
                         step_result = await asyncio.wait_for(self.step(), timeout=step_timeout)
                         if await self.is_stuck():
                             await self.handle_stuck_state()

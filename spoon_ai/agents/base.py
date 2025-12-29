@@ -254,6 +254,39 @@ class BaseAgent(BaseModel, ABC):
 
         if not image_url and not image_data:
             raise ValueError("Either image_url or image_data must be provided")
+        
+        # Validate image_data is not empty (if provided)
+        # Three upload methods:
+        # - Method 1: image_data (base64) - image_data must have a value
+        # - Method 2: image_url (external URL) - image_data should be None
+        # - Method 3: image_url (data URL) - image_data should be None
+        # If user provides image_data parameter but it's empty or only whitespace, raise error
+        if image_data is not None:
+            # Check if empty string
+            if not image_data:
+                raise ValueError("image_data cannot be empty. If you want to use URL-based images, use image_url parameter instead.")
+            # Check if only whitespace (empty after strip)
+            if not image_data.strip():
+                raise ValueError("image_data cannot be empty (only whitespace). If you want to use URL-based images, use image_url parameter instead.")
+        
+        # Validate image_url format if provided
+        # image_url supports both external URLs (way 2) and data URLs (way 3)
+        if image_url:
+            from urllib.parse import urlparse
+            # Data URL (way 3): data:image/png;base64,...
+            if image_url.startswith("data:"):
+                # Data URL is valid, no further validation needed
+                pass
+            else:
+                # External URL (way 2): must be valid HTTP/HTTPS URL
+                parsed = urlparse(image_url)
+                if not parsed.scheme or parsed.scheme not in ["http", "https"]:
+                    raise ValueError(
+                        f"Invalid image URL format: {image_url}. "
+                        f"Must be a valid HTTP/HTTPS URL (for external images) or data URL (for embedded images)."
+                    )
+        
+        # No MIME type validation - pass through all types to LLM providers
 
         content_blocks: List[ContentBlock] = [TextContent(text=text)]
 
