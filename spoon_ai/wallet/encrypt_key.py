@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """
-Interactive helper to produce ENC:v1 payloads for PRIVATE_KEY (or any secret).
+Interactive helper to produce ENC:v2 payloads for PRIVATE_KEY (or any secret).
+
+Uses AES-256-GCM encryption with Argon2id key derivation.
 """
 
 import getpass

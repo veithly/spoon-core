@@ -184,5 +184,5 @@ def load_wallet():
 
     raise ValueError(
         "No valid signing method configured; set one of "
-        f"{', '.join(env_priority)} (plain or ENC:v1) or Turnkey credentials in your .env file."
+        f"{', '.join(env_priority)} (plain or ENC:v2) or Turnkey credentials in your .env file."
     )

@@ -1,24 +1,26 @@
 """
-Environment security helpers for ENC:v1 secrets.
+Environment security helpers for ENC:v2 encrypted secrets.
 
 Security model:
-- By default, Spoon does NOT permanently overwrite `os.environ` with decrypted values.
-- Instead, tools can opt into a *scoped* decryption context that temporarily exposes
-  plaintext env vars for the duration of a single operation, then restores the
-  original encrypted values.
+- Decrypted secrets are stored in SecretVault, NOT in os.environ.
+- The `decrypted_secrets` context manager provides scoped access to secrets
+  via the vault, automatically wiping them when the context exits.
+- Legacy `decrypted_environ` is DEPRECATED and will emit a warning.
 
-This avoids a common footgun where secrets remain printable (and leakable) for the
-entire lifetime of a Python process after a one-time decrypt.
+This avoids the critical security issue where secrets remain in os.environ
+(readable via /proc/{pid}/environ, inherited by subprocesses, etc.).
 """
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager, contextmanager
+import atexit
 import getpass
 import os
 import sys
+import warnings
 import weakref
+from contextlib import asynccontextmanager, contextmanager
 from typing import Dict, Iterable, Iterator, List, Optional
 
 try:
@@ -26,13 +28,22 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     load_dotenv = None  # type: ignore
 
-from spoon_ai.wallet.security import ENCRYPTED_PREFIX, decrypt_private_key
+from spoon_ai.wallet.security import (
+    ENCRYPTED_PREFIX_V2,
+    DecryptionError,
+    decrypt_and_store,
+)
+from spoon_ai.wallet.vault import SecretVault, get_vault
+
+ENCRYPTED_PREFIX = ENCRYPTED_PREFIX_V2
 
 _MASTER_PASSWORD_ENV = "SPOON_MASTER_PWD"
 _DOTENV_LOADED = False
 _DECRYPT_ON_IMPORT_ENV = "SPOON_SECURITY_DECRYPT_ON_IMPORT"
 
-_LOOP_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = weakref.WeakKeyDictionary()
+_LOOP_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -42,7 +53,7 @@ def _truthy(value: Optional[str]) -> bool:
 
 
 def _get_loop_lock() -> asyncio.Lock:
-    """Return a per-event-loop lock to serialize env mutation during scoped decrypt."""
+    """Return a per-event-loop lock to serialize vault operations."""
     loop = asyncio.get_running_loop()
     lock = _LOOP_LOCKS.get(loop)
     if lock is None:
@@ -51,18 +62,36 @@ def _get_loop_lock() -> asyncio.Lock:
     return lock
 
 
+def _is_encrypted(value: str) -> bool:
+    """Check if a value is an encrypted secret (ENC:v2 format)."""
+    return value.startswith(ENCRYPTED_PREFIX_V2)
+
+
 def _collect_encrypted_vars(env: Dict[str, str]) -> List[str]:
-    return [key for key, value in env.items() if isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX)]
+    """Find all environment variable names with encrypted values."""
+    return [
+        key
+        for key, value in env.items()
+        if isinstance(value, str) and _is_encrypted(value)
+    ]
 
 
 def _resolve_master_password(*, prompt: bool = True) -> str:
+    """
+    Resolve the master password from environment or interactive prompt.
+
+    Note: Reading password from env var is less secure than interactive prompt,
+    but may be necessary for CI/CD environments.
+    """
     pwd = os.getenv(_MASTER_PASSWORD_ENV)
     if pwd:
         return pwd
     # Fallback: interactive prompt if TTY is available
     try:
         if prompt and sys.stdin.isatty():
-            return getpass.getpass(f"Enter master password {_MASTER_PASSWORD_ENV} to decrypt environment secrets: ")
+            return getpass.getpass(
+                f"Enter master password ({_MASTER_PASSWORD_ENV}) to decrypt secrets: "
+            )
     except Exception:
         pass
     return ""
@@ -85,37 +114,62 @@ def _load_env_files() -> None:
     _DOTENV_LOADED = True
 
 
-def _decrypt_env_vars_in_place(keys: Iterable[str], *, password: str) -> None:
+def _decrypt_to_vault(
+    keys: Iterable[str],
+    *,
+    password: str,
+    vault: SecretVault,
+) -> List[str]:
+    """
+    Decrypt encrypted env vars and store in vault.
+
+    Returns:
+        List of vault keys that were successfully stored.
+    """
+    stored_keys: List[str] = []
     for key in keys:
         value = os.environ.get(key)
-        if not (isinstance(value, str) and value.startswith(ENCRYPTED_PREFIX)):
+        if not (isinstance(value, str) and _is_encrypted(value)):
             continue
-        os.environ[key] = decrypt_private_key(value, password)
+        try:
+            decrypt_and_store(value, password, key, vault=vault)
+            stored_keys.append(key)
+        except DecryptionError:
+            raise
+    return stored_keys
 
 
-def init_security() -> None:
+def init_security(*, vault: Optional[SecretVault] = None) -> SecretVault:
     """
-    Initialize env security features.
+    Initialize env security features and return the vault.
 
-    Default behaviour:
+    Behaviour:
     - Load `.env` files (if python-dotenv is installed).
-    - Detect presence of ENC:v1 values and set `SPOON_ENC_PRESENT=1`.
-    - Do NOT overwrite `os.environ` with plaintext.
+    - Detect presence of ENC:v2 encrypted values.
+    - If `SPOON_SECURITY_DECRYPT_ON_IMPORT` is truthy, decrypt all encrypted
+      env vars and store in SecretVault (NOT os.environ).
+    - Register atexit handler to wipe vault on shutdown.
 
-    Legacy/compat mode (not recommended):
-    - If `SPOON_SECURITY_DECRYPT_ON_IMPORT` is truthy, decrypt all ENC:v1 env vars
-      and overwrite `os.environ` (previous behaviour).
+    Returns:
+        The SecretVault instance containing decrypted secrets.
+
+    Raises:
+        RuntimeError: If encrypted vars found but no password provided.
+        DecryptionError: If decryption fails.
     """
+    if vault is None:
+        vault = get_vault()
+
     _load_env_files()
     encrypted_keys = _collect_encrypted_vars(os.environ)
     if not encrypted_keys:
-        return
+        return vault
 
-    # Mark that encrypted secrets were present (used by wallet selection logic)
+    # Mark that encrypted secrets were present (for wallet selection logic)
     os.environ["SPOON_ENC_PRESENT"] = "1"
 
     if not _truthy(os.getenv(_DECRYPT_ON_IMPORT_ENV)):
-        return
+        return vault
 
     master_pwd = _resolve_master_password(prompt=True)
     if not master_pwd:
@@ -125,9 +179,138 @@ def init_security() -> None:
         )
 
     try:
-        _decrypt_env_vars_in_place(encrypted_keys, password=master_pwd)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to decrypt environment secrets on import: {exc}") from exc
+        _decrypt_to_vault(encrypted_keys, password=master_pwd, vault=vault)
+    except DecryptionError as exc:
+        raise RuntimeError(f"Failed to decrypt environment secrets: {exc}") from exc
+
+    # Register cleanup on exit
+    atexit.register(vault.wipe_all)
+
+    return vault
+
+
+@contextmanager
+def decrypted_secrets(
+    keys: Optional[Iterable[str]] = None,
+    *,
+    password: Optional[str] = None,
+    prompt: bool = True,
+    vault: Optional[SecretVault] = None,
+) -> Iterator[SecretVault]:
+    """
+    Context manager for scoped access to decrypted secrets via SecretVault.
+
+    This is the RECOMMENDED way to access encrypted secrets. Secrets are:
+    1. Decrypted and stored in the vault on context entry.
+    2. Accessible via `vault.get_decoded(key)` within the context.
+    3. Automatically wiped from the vault on context exit.
+
+    Args:
+        keys: Specific env var names to decrypt. If None, all encrypted vars.
+        password: Master password. If None, resolved from env or prompt.
+        prompt: Whether to prompt for password if not in env.
+        vault: Optional vault instance (defaults to singleton).
+
+    Yields:
+        SecretVault instance with decrypted secrets.
+
+    Example:
+        with decrypted_secrets(["PRIVATE_KEY"]) as vault:
+            with vault.get_decoded("PRIVATE_KEY") as pk:
+                account = Account.from_key(pk)
+                # Use account...
+        # Secrets wiped automatically
+    """
+    if vault is None:
+        vault = get_vault()
+
+    _load_env_files()
+    env = os.environ
+    target_keys = list(keys) if keys is not None else _collect_encrypted_vars(env)
+    target_keys = [
+        k for k in target_keys if isinstance(env.get(k), str) and _is_encrypted(env[k])
+    ]
+
+    if not target_keys:
+        yield vault
+        return
+
+    master_pwd = password or _resolve_master_password(prompt=prompt)
+    if not master_pwd:
+        raise RuntimeError(
+            f"Found encrypted environment variables {target_keys} but {_MASTER_PASSWORD_ENV} is not set."
+        )
+
+    stored_keys: List[str] = []
+    try:
+        stored_keys = _decrypt_to_vault(target_keys, password=master_pwd, vault=vault)
+        yield vault
+    finally:
+        # Wipe only the keys we stored in this context
+        for k in stored_keys:
+            vault.wipe(k)
+
+
+@asynccontextmanager
+async def async_decrypted_secrets(
+    keys: Optional[Iterable[str]] = None,
+    *,
+    password: Optional[str] = None,
+    prompt: bool = True,
+    vault: Optional[SecretVault] = None,
+) -> Iterator[SecretVault]:
+    """
+    Async version of `decrypted_secrets()` with per-event-loop locking.
+
+    This prevents race conditions when multiple async tasks attempt to
+    decrypt/wipe secrets concurrently.
+
+    Args:
+        keys: Specific env var names to decrypt. If None, all encrypted vars.
+        password: Master password. If None, resolved from env or prompt.
+        prompt: Whether to prompt for password if not in env.
+        vault: Optional vault instance (defaults to singleton).
+
+    Yields:
+        SecretVault instance with decrypted secrets.
+    """
+    if vault is None:
+        vault = get_vault()
+
+    _load_env_files()
+    env = os.environ
+    target_keys = list(keys) if keys is not None else _collect_encrypted_vars(env)
+    target_keys = [
+        k for k in target_keys if isinstance(env.get(k), str) and _is_encrypted(env[k])
+    ]
+
+    if not target_keys:
+        yield vault
+        return
+
+    master_pwd = password or _resolve_master_password(prompt=prompt)
+    if not master_pwd:
+        raise RuntimeError(
+            f"Found encrypted environment variables {target_keys} but {_MASTER_PASSWORD_ENV} is not set."
+        )
+
+    lock = _get_loop_lock()
+    stored_keys: List[str] = []
+
+    async with lock:
+        try:
+            stored_keys = _decrypt_to_vault(
+                target_keys, password=master_pwd, vault=vault
+            )
+            yield vault
+        finally:
+            for k in stored_keys:
+                vault.wipe(k)
+
+
+# =============================================================================
+# DEPRECATED: Legacy functions that modify os.environ
+# =============================================================================
 
 
 @contextmanager
@@ -138,16 +321,28 @@ def decrypted_environ(
     prompt: bool = True,
 ) -> Iterator[None]:
     """
-    Temporarily decrypt selected ENC:v1 env vars for the scope of a `with` block.
+    DEPRECATED: Use `decrypted_secrets()` instead.
 
-    Notes:
-    - This mutates `os.environ` temporarily and restores the original values in `finally`.
-    - Prefer `async_decrypted_environ()` inside async code.
+    This function modifies os.environ, which is a security risk.
+    Secrets in os.environ can be read via /proc/{pid}/environ.
     """
+    warnings.warn(
+        "decrypted_environ() is deprecated due to security concerns. "
+        "Use decrypted_secrets() which stores secrets in SecretVault instead of os.environ.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    # Import here to avoid circular import
+    from spoon_ai.wallet.security import decrypt_private_key
+
     _load_env_files()
     env = os.environ
     target_keys = list(keys) if keys is not None else _collect_encrypted_vars(env)
-    target_keys = [k for k in target_keys if isinstance(env.get(k), str) and env[k].startswith(ENCRYPTED_PREFIX)]
+    target_keys = [
+        k for k in target_keys if isinstance(env.get(k), str) and _is_encrypted(env[k])
+    ]
+
     if not target_keys:
         yield
         return
@@ -160,7 +355,10 @@ def decrypted_environ(
 
     original = {k: env[k] for k in target_keys}
     try:
-        _decrypt_env_vars_in_place(target_keys, password=master_pwd)
+        for key in target_keys:
+            value = env.get(key)
+            if value and _is_encrypted(value):
+                env[key] = decrypt_private_key(value, master_pwd)
         yield
     finally:
         for k, v in original.items():
@@ -175,13 +373,26 @@ async def async_decrypted_environ(
     prompt: bool = True,
 ) -> Iterator[None]:
     """
-    Async version of `decrypted_environ()` with per-event-loop locking to avoid
-    concurrent env mutation races.
+    DEPRECATED: Use `async_decrypted_secrets()` instead.
+
+    This function modifies os.environ, which is a security risk.
     """
+    warnings.warn(
+        "async_decrypted_environ() is deprecated due to security concerns. "
+        "Use async_decrypted_secrets() which stores secrets in SecretVault instead of os.environ.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    from spoon_ai.wallet.security import decrypt_private_key
+
     _load_env_files()
     env = os.environ
     target_keys = list(keys) if keys is not None else _collect_encrypted_vars(env)
-    target_keys = [k for k in target_keys if isinstance(env.get(k), str) and env[k].startswith(ENCRYPTED_PREFIX)]
+    target_keys = [
+        k for k in target_keys if isinstance(env.get(k), str) and _is_encrypted(env[k])
+    ]
+
     if not target_keys:
         yield
         return
@@ -196,7 +407,10 @@ async def async_decrypted_environ(
     async with lock:
         original = {k: env[k] for k in target_keys}
         try:
-            _decrypt_env_vars_in_place(target_keys, password=master_pwd)
+            for key in target_keys:
+                value = env.get(key)
+                if value and _is_encrypted(value):
+                    env[key] = decrypt_private_key(value, master_pwd)
             yield
         finally:
             for k, v in original.items():

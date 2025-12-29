@@ -22,7 +22,7 @@ from spoon_ai.turnkey import Turnkey
 class TurnkeyBaseTool(BaseTool):
     """Base class for Turnkey tools with shared client initialization"""
 
-    # Turnkey credentials (especially TURNKEY_API_PRIVATE_KEY) may be stored as ENC:v1.
+    # Turnkey credentials (especially TURNKEY_API_PRIVATE_KEY) may be stored as ENC:v2.
     # Run Turnkey tool calls inside a scoped env decryption context.
     requires_decrypted_env = True
     

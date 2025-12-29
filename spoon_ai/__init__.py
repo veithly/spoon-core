@@ -104,6 +104,7 @@ except Exception:  # pragma: no cover - optional dependency surface
     ContentBlock = None  # type: ignore
     _exported = ["__version__"]
 
+
 init_security()
 
 __all__ = _exported
