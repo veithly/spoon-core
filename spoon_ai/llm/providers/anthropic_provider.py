@@ -23,41 +23,6 @@ from ..registry import register_provider
 logger = getLogger(__name__)
 
 
-def _normalize_mime_type(mime_type: str) -> str:
-    """Normalize MIME type for Anthropic API compatibility.
-    
-    Anthropic API supports standard image MIME types. This function validates
-    that the MIME type is supported. Note: image/jpg is supported and kept as-is.
-    
-    Args:
-        mime_type: Original MIME type string
-        
-    Returns:
-        MIME type string (unchanged, as Anthropic supports image/jpg directly)
-        
-    Raises:
-        ValueError: If the MIME type is not supported by Anthropic API
-    """
-    # Validate supported MIME types for Anthropic
-    # According to Anthropic API docs: https://docs.anthropic.com/claude/docs/vision
-    supported_image_types = {
-        "image/png",
-        "image/jpeg",
-        "image/jpg",  # Supported, kept as-is
-        "image/webp"
-    }
-    
-    if mime_type not in supported_image_types:
-        raise ValueError(
-            f"Unsupported MIME type for Anthropic API: {mime_type}. "
-            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
-            f"Please convert your image to one of these formats."
-        )
-    
-    # Return as-is (no conversion needed for Anthropic)
-    return mime_type
-
-
 @register_provider("anthropic", [
     ProviderCapability.CHAT,
     ProviderCapability.COMPLETION,
@@ -127,14 +92,11 @@ class AnthropicProvider(LLMProviderInterface):
             if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', block.source.data):
                 raise ValueError(f"Invalid base64 format for image data")
             
-            # Normalize and validate MIME type
-            normalized_mime_type = _normalize_mime_type(block.source.media_type)
-            
             return {
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": normalized_mime_type,
+                    "media_type": block.source.media_type,
                     "data": block.source.data
                 }
             }
@@ -157,14 +119,11 @@ class AnthropicProvider(LLMProviderInterface):
                 if not re.match(r'^[A-Za-z0-9+/]*={0,2}$', data):
                     raise ValueError(f"Invalid base64 data in data URL")
                 
-                # Normalize and validate MIME type
-                normalized_mime_type = _normalize_mime_type(media_type)
-                
                 return {
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": normalized_mime_type,
+                        "media_type": media_type,
                         "data": data
                     }
                 }
@@ -178,16 +137,43 @@ class AnthropicProvider(LLMProviderInterface):
             }
 
         elif isinstance(block, DocumentContent):
-            # Anthropic native PDF/document support
+            # Anthropic only supports PDF documents natively
             # https://docs.anthropic.com/en/docs/build-with-claude/pdf-support
-            return {
-                "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": block.source.media_type,
-                    "data": block.source.data
+            if block.source.media_type == "application/pdf":
+                # Use native PDF support
+                return {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": block.source.media_type,
+                        "data": block.source.data
+                    }
                 }
-            }
+            else:
+                # For non-PDF documents (text/plain, application/json, etc.),
+                # decode the base64 content and include as text
+                import base64
+                try:
+                    decoded_bytes = base64.b64decode(block.source.data)
+                    # Try to decode as UTF-8 text
+                    try:
+                        text_content = decoded_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        # If not valid UTF-8, return as base64 representation
+                        text_content = f"[Binary document: {block.source.media_type}, size: {len(decoded_bytes)} bytes]"
+                    
+                    # Include filename in text if available
+                    if block.filename:
+                        text_content = f"[Document: {block.filename} ({block.source.media_type})]\n\n{text_content}"
+                    
+                    logger.debug(f"Converting non-PDF document ({block.source.media_type}) to text content for Anthropic")
+                    return {"type": "text", "text": text_content}
+                except Exception as e:
+                    logger.warning(f"Failed to decode document content: {e}, converting to text placeholder")
+                    return {
+                        "type": "text",
+                        "text": f"[Document: {block.filename or 'unknown'} ({block.source.media_type}) - Failed to decode]"
+                    }
 
         elif isinstance(block, FileContent):
             # File content - include as text (Anthropic doesn't support files directly)
@@ -750,7 +736,9 @@ class AnthropicProvider(LLMProviderInterface):
             raise RateLimitError("anthropic", context={"original_error": str(error)})
         elif "model" in error_str and "not found" in error_str:
             raise ModelNotFoundError("anthropic", self.model, context={"original_error": str(error)})
-        elif "timeout" in error_str or "connection" in error_str:
-            raise NetworkError("anthropic", "Network error", original_error=error)
+        elif "timeout" in error_str or "connection" in error_str or "network" in error_str:
+            # Provide more helpful error message for network errors
+            error_msg = f"Network error: {str(error)}. This may be a temporary issue. Please try again."
+            raise NetworkError("anthropic", error_msg, original_error=error)
         else:
             raise ProviderError("anthropic", f"Request failed: {str(error)}", original_error=error)

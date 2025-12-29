@@ -24,41 +24,6 @@ from spoon_ai.callbacks.manager import CallbackManager
 logger = getLogger(__name__)
 
 
-def _normalize_mime_type(mime_type: str) -> str:
-    """Normalize MIME type for OpenAI-compatible API compatibility.
-    
-    OpenAI-compatible APIs support standard image MIME types. This function validates
-    that the MIME type is supported. Note: image/jpg is supported and kept as-is.
-    
-    Args:
-        mime_type: Original MIME type string
-        
-    Returns:
-        MIME type string (unchanged, as OpenAI-compatible APIs support image/jpg directly)
-        
-    Raises:
-        ValueError: If the MIME type is not supported by OpenAI-compatible APIs
-    """
-    # Validate supported MIME types for OpenAI-compatible APIs
-    # According to OpenAI API docs: https://platform.openai.com/docs/guides/vision
-    supported_image_types = {
-        "image/png",
-        "image/jpeg",
-        "image/jpg",  # Supported, kept as-is
-        "image/webp"
-    }
-    
-    if mime_type not in supported_image_types:
-        raise ValueError(
-            f"Unsupported MIME type for OpenAI-compatible API: {mime_type}. "
-            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
-            f"Please convert your image to one of these formats."
-        )
-    
-    # Return as-is (no conversion needed for OpenAI-compatible APIs)
-    return mime_type
-
-
 class OpenAICompatibleProvider(LLMProviderInterface):
     """Base class for OpenAI-compatible providers."""
 
@@ -185,29 +150,54 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             return result
 
         elif isinstance(block, ImageContent):
-            # Normalize and validate MIME type
-            normalized_mime_type = _normalize_mime_type(block.source.media_type)
-            
             # Convert base64 image to OpenAI's data URL format
-            data_url = f"data:{normalized_mime_type};base64,{block.source.data}"
+            data_url = f"data:{block.source.media_type};base64,{block.source.data}"
             return {
                 "type": "image_url",
                 "image_url": {"url": data_url}
             }
 
         elif isinstance(block, DocumentContent):
-            # OpenAI supports PDF via type: "file" with file_data as data URL
+            # OpenAI only supports PDF via type: "file" with file_data as data URL
             # https://platform.openai.com/docs/guides/pdf-files
-            filename = block.filename or "document.pdf"
-            # Format: data:application/pdf;base64,<base64_data>
-            file_data = f"data:{block.source.media_type};base64,{block.source.data}"
-            return {
-                "type": "file",
-                "file": {
-                    "filename": filename,
-                    "file_data": file_data
+            # For non-PDF documents, convert to text content
+            if block.source.media_type == "application/pdf":
+                # Use native PDF support
+                filename = block.filename or "document.pdf"
+                # Format: data:application/pdf;base64,<base64_data>
+                file_data = f"data:{block.source.media_type};base64,{block.source.data}"
+                return {
+                    "type": "file",
+                    "file": {
+                        "filename": filename,
+                        "file_data": file_data
+                    }
                 }
-            }
+            else:
+                # For non-PDF documents (text/plain, application/json, etc.),
+                # decode the base64 content and include as text
+                import base64
+                try:
+                    decoded_bytes = base64.b64decode(block.source.data)
+                    # Try to decode as UTF-8 text
+                    try:
+                        text_content = decoded_bytes.decode("utf-8")
+                    except UnicodeDecodeError:  
+                        # If not valid UTF-8, return as base64 representation
+                        text_content = f"[Binary document: {block.source.media_type}, size: {len(decoded_bytes)} bytes]"
+                    
+                    # Include filename in text if available
+                    if block.filename:
+                        text_content = f"[Document: {block.filename} ({block.source.media_type})]\n\n{text_content}"
+                    
+                    logger.debug(f"Converting non-PDF document ({block.source.media_type}) to text content for OpenAI")
+                    return {"type": "text", "text": text_content}
+                except Exception as e:
+                    logger.warning(f"Failed to decode document content: {e}, converting to text placeholder")
+                    return {
+                        "type": "text",
+                        "text": f"[Document: {block.filename or 'unknown'} ({block.source.media_type}) - Failed to decode]"
+                    }
 
         elif isinstance(block, FileContent):
             # File content - include as text with path info (OpenAI doesn't support files directly)
@@ -327,7 +317,22 @@ class OpenAICompatibleProvider(LLMProviderInterface):
 
                 # Merge content if both have content
                 if (fixed_messages[-1].get("content") and current_msg.get("content")):
-                    fixed_messages[-1]["content"] += "\n" + current_msg["content"]
+                    prev_content = fixed_messages[-1]["content"]
+                    curr_content = current_msg["content"]
+                    
+                    # Handle different content types
+                    if isinstance(prev_content, list) and isinstance(curr_content, list):
+                        # Both are lists (multimodal) - merge lists
+                        fixed_messages[-1]["content"] = prev_content + curr_content
+                    elif isinstance(prev_content, list) and isinstance(curr_content, str):
+                        # Previous is list, current is string - convert string to text object and append
+                        fixed_messages[-1]["content"] = prev_content + [{"type": "text", "text": curr_content}]
+                    elif isinstance(prev_content, str) and isinstance(curr_content, list):
+                        # Previous is string, current is list - convert string to text object and prepend
+                        fixed_messages[-1]["content"] = [{"type": "text", "text": prev_content}] + curr_content
+                    else:
+                        # Both are strings - simple concatenation
+                        fixed_messages[-1]["content"] = prev_content + "\n" + curr_content
                     i += 1
                     continue
                 # If current message has content but previous doesn't, replace

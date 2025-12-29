@@ -44,42 +44,20 @@ logger = getLogger(__name__)
 def _normalize_mime_type(mime_type: str) -> str:
     """Normalize MIME type for Gemini API compatibility.
     
-    Gemini API requires standard MIME types. This function normalizes
-    'image/jpg' to 'image/jpeg' (Gemini doesn't accept image/jpg directly)
-    and validates that the MIME type is supported by Gemini.
+    Only converts image/jpg to image/jpeg (Gemini doesn't accept image/jpg directly).
+    All other MIME types are passed through without validation.
     
     Args:
         mime_type: Original MIME type string
         
     Returns:
-        Normalized MIME type string
-        
-    Raises:
-        ValueError: If the MIME type is not supported by Gemini API
+        Normalized MIME type string (image/jpg -> image/jpeg, others unchanged)
     """
-    # Normalize image/jpg to image/jpeg (Gemini doesn't accept image/jpg, must convert)
+    # Only normalize image/jpg to image/jpeg for Gemini compatibility
+    # All other MIME types are passed through as-is
     if mime_type == "image/jpg":
         return "image/jpeg"
-    
-    # Validate supported MIME types for Gemini
-    # According to Gemini API docs: https://ai.google.dev/gemini-api/docs/prompting_with_media#supported_file_formats
-    # Note: image/jpg is supported by users but must be converted to image/jpeg for Gemini
-    supported_image_types = {
-        "image/png",
-        "image/jpeg",
-        "image/jpg",  # Supported by users, will be normalized to image/jpeg
-        "image/webp"
-    }
-    
-    if mime_type not in supported_image_types:
-        raise ValueError(
-            f"Unsupported MIME type for Gemini API: {mime_type}. "
-            f"Supported image types are: image/png, image/jpeg, image/jpg, image/webp. "
-            f"Please convert your image to one of these formats."
-        )
-    
-    # Return normalized version (image/jpg -> image/jpeg, others as-is)
-    return "image/jpeg" if mime_type == "image/jpg" else mime_type
+    return mime_type
 
 
 @register_provider("gemini", [
@@ -390,12 +368,38 @@ class GeminiProvider(LLMProviderInterface):
                 raise ValueError(f"Cannot process image URL: {url}. Download failed: {e}")
 
         elif isinstance(block, DocumentContent):
-            # Gemini supports PDFs and documents via inline_data
-            document_data = base64.b64decode(block.source.data)
-            return types.Part.from_bytes(
-                data=document_data,
-                mime_type=block.source.media_type
-            )
+            # Gemini supports PDFs natively, but other document types should be converted to text
+            # Check if it's a PDF
+            if block.source.media_type == "application/pdf":
+                # Use native PDF support
+                document_data = base64.b64decode(block.source.data)
+                return types.Part.from_bytes(
+                    data=document_data,
+                    mime_type=block.source.media_type
+                )
+            else:
+                # For non-PDF documents (text/plain, application/json, etc.),
+                # decode the base64 content and include as text
+                try:
+                    decoded_bytes = base64.b64decode(block.source.data)
+                    # Try to decode as UTF-8 text
+                    try:
+                        text_content = decoded_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        # If not valid UTF-8, return as base64 representation
+                        text_content = f"[Binary document: {block.source.media_type}, size: {len(decoded_bytes)} bytes]"
+                    
+                    # Include filename in text if available
+                    if block.filename:
+                        text_content = f"[Document: {block.filename} ({block.source.media_type})]\n\n{text_content}"
+                    
+                    logger.debug(f"Converting non-PDF document ({block.source.media_type}) to text content for Gemini")
+                    return types.Part.from_text(text=text_content)
+                except Exception as e:
+                    logger.warning(f"Failed to decode document content: {e}, converting to text placeholder")
+                    return types.Part.from_text(
+                        text=f"[Document: {block.filename or 'unknown'} ({block.source.media_type}) - Failed to decode]"
+                    )
 
         elif isinstance(block, FileContent):
             # File content - include as text (Gemini doesn't support files directly without upload)
@@ -1177,5 +1181,16 @@ class GeminiProvider(LLMProviderInterface):
             raise ModelNotFoundError("gemini", self.model, context={"original_error": str(error)})
         elif "timeout" in error_str or "connection" in error_str:
             raise NetworkError("gemini", "Network error", original_error=error)
+        elif "unsupported mime type" in error_str.lower() or "mime type" in error_str.lower():
+            # Extract the MIME type from error message if possible
+            mime_match = None
+            import re
+            mime_match = re.search(r'mime type[:\s]+([^\s\'"]+)', error_str, re.IGNORECASE)
+            mime_type = mime_match.group(1) if mime_match else "unknown"
+            raise ProviderError(
+                "gemini",
+                f"Gemini API does not support MIME type: {mime_type}. "
+                f"This is a limitation of the Gemini API, not the spoon-core framework. "
+            )
         else:
             raise ProviderError("gemini", f"Request failed: {str(error)}", original_error=error)
