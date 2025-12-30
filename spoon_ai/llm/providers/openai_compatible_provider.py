@@ -41,8 +41,6 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         self.provider_name: str = "openai_compatible"
         self.default_base_url: str = "https://api.openai.com/v1"
         self.default_model: str = "gpt-4.1"
-        # Track uploaded file IDs for cleanup
-        self._uploaded_file_ids: List[str] = []
 
     def _uses_completion_token_param(self, model: str) -> bool:
         """Whether this model expects max_completion_tokens instead of max_tokens.
@@ -163,7 +161,6 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             )
 
             file_id = response.id
-            self._uploaded_file_ids.append(file_id)
             logger.info(f"Uploaded file '{filename}' to OpenAI, file_id: {file_id}")
             return file_id
 
@@ -171,23 +168,27 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             logger.error(f"Failed to upload file to OpenAI: {e}")
             raise ProviderError(self.get_provider_name(), f"File upload failed: {str(e)}", original_error=e)
 
-    async def _cleanup_uploaded_files(self) -> None:
+    async def _cleanup_uploaded_files(self, file_ids: List[str]) -> None:
         """Clean up uploaded files from OpenAI.
 
         Call this after the chat completion to remove temporary files.
+        This method is request-scoped to ensure concurrent requests don't
+        interfere with each other's file cleanup.
+
+        Args:
+            file_ids: List of file IDs to delete (scoped to the current request)
         """
-        if not self.client or not self._uploaded_file_ids:
+        if not self.client or not file_ids:
             return
 
-        for file_id in self._uploaded_file_ids[:]:  # Copy list to avoid modification during iteration
+        for file_id in file_ids:
             try:
                 await self.client.files.delete(file_id)
-                self._uploaded_file_ids.remove(file_id)
                 logger.debug(f"Deleted uploaded file: {file_id}")
             except Exception as e:
                 logger.warning(f"Failed to delete uploaded file {file_id}: {e}")
 
-    async def _prepare_large_files(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _prepare_large_files(self, messages: List[Dict[str, Any]]) -> tuple:
         """Process messages and upload any large files to OpenAI Files API.
 
         Finds file blocks marked with _pending_upload and uploads them,
@@ -197,8 +198,12 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             messages: Converted OpenAI-format messages
 
         Returns:
-            Messages with large files uploaded and file_ids filled in
+            Tuple of (messages, uploaded_file_ids) where:
+            - messages: Messages with large files uploaded and file_ids filled in
+            - uploaded_file_ids: List of file IDs uploaded in this request (for cleanup)
         """
+        uploaded_file_ids: List[str] = []
+
         for msg in messages:
             content = msg.get("content")
             if not isinstance(content, list):
@@ -223,6 +228,7 @@ class OpenAICompatibleProvider(LLMProviderInterface):
 
                     # Upload to OpenAI
                     file_id = await self._upload_file_to_openai(file_bytes, filename)
+                    uploaded_file_ids.append(file_id)
 
                     # Replace the placeholder with the actual file reference
                     content[i] = {
@@ -245,7 +251,7 @@ class OpenAICompatibleProvider(LLMProviderInterface):
                         }
                     }
 
-        return messages
+        return messages, uploaded_file_ids
 
     def _convert_content_block(self, block: ContentBlock) -> Dict[str, Any]:
         """Convert a content block to OpenAI-compatible format.
@@ -553,13 +559,14 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         if not self.client:
             raise ProviderError(self.get_provider_name(), "Provider not initialized")
 
+        uploaded_file_ids: List[str] = []
         try:
             start_time = asyncio.get_event_loop().time()
 
             openai_messages = self._convert_messages(messages)
 
-            # Handle large files by uploading to Files API
-            openai_messages = await self._prepare_large_files(openai_messages)
+            # Handle large files by uploading to Files API (request-scoped)
+            openai_messages, uploaded_file_ids = await self._prepare_large_files(openai_messages)
 
             # Extract parameters
             model = kwargs.get('model', self.model)
@@ -594,8 +601,8 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         except Exception as e:
             await self._handle_error(e)
         finally:
-            # Clean up any uploaded files
-            await self._cleanup_uploaded_files()
+            # Clean up any uploaded files (request-scoped)
+            await self._cleanup_uploaded_files(uploaded_file_ids)
 
     async def chat_stream(self,messages: List[Message],callbacks: Optional[List[BaseCallbackHandler]] = None,**kwargs) -> AsyncIterator[LLMResponseChunk]:
         """Send streaming chat request with full callback support.
@@ -608,12 +615,13 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         # Create callback manager
         callback_manager = CallbackManager.from_callbacks(callbacks)
         run_id = uuid4()
+        uploaded_file_ids: List[str] = []
 
         try:
             openai_messages = self._convert_messages(messages)
 
-            # Handle large files by uploading to Files API
-            openai_messages = await self._prepare_large_files(openai_messages)
+            # Handle large files by uploading to Files API (request-scoped)
+            openai_messages, uploaded_file_ids = await self._prepare_large_files(openai_messages)
 
             # Extract parameters
             model = kwargs.get('model', self.model)
@@ -803,8 +811,8 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             )
             await self._handle_error(e)
         finally:
-            # Clean up any uploaded files
-            await self._cleanup_uploaded_files()
+            # Clean up any uploaded files (request-scoped)
+            await self._cleanup_uploaded_files(uploaded_file_ids)
 
     async def completion(self, prompt: str, **kwargs) -> LLMResponse:
         """Send completion request to the provider."""
@@ -817,10 +825,14 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         if not self.client:
             raise ProviderError(self.get_provider_name(), "Provider not initialized")
 
+        uploaded_file_ids: List[str] = []
         try:
             start_time = asyncio.get_event_loop().time()
 
             openai_messages = self._convert_messages(messages)
+
+            # Handle large files by uploading to Files API (request-scoped)
+            openai_messages, uploaded_file_ids = await self._prepare_large_files(openai_messages)
 
             # Extract parameters
             model = kwargs.get('model', self.model)
@@ -852,6 +864,9 @@ class OpenAICompatibleProvider(LLMProviderInterface):
 
         except Exception as e:
             await self._handle_error(e)
+        finally:
+            # Clean up any uploaded files (request-scoped)
+            await self._cleanup_uploaded_files(uploaded_file_ids)
 
     def get_metadata(self) -> ProviderMetadata:
         """Get provider metadata. Should be overridden by subclasses."""
