@@ -185,6 +185,37 @@ AGENT_REGISTRY_ABI = [
         "stateMutability": "nonpayable",
         "type": "function",
     },
+    # Events for event indexing
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": False, "internalType": "bytes32", "name": "didHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "address", "name": "controller", "type": "address"},
+            {"indexed": False, "internalType": "string", "name": "agentCardURI", "type": "string"},
+            {"indexed": False, "internalType": "string", "name": "didDocURI", "type": "string"},
+        ],
+        "name": "AgentRegistered",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": False, "internalType": "bytes32", "name": "didHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "string", "name": "agentCardURI", "type": "string"},
+            {"indexed": False, "internalType": "string", "name": "didDocURI", "type": "string"},
+        ],
+        "name": "URIsUpdated",
+        "type": "event",
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": False, "internalType": "bytes32", "name": "didHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "string[]", "name": "capabilities", "type": "string[]"},
+        ],
+        "name": "CapabilitiesUpdated",
+        "type": "event",
+    },
 ]
 
 
