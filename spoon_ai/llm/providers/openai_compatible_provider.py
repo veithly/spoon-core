@@ -280,36 +280,64 @@ class OpenAICompatibleProvider(LLMProviderInterface):
         elif isinstance(block, DocumentContent):
             # OpenAI supports PDF via type: "file" with file_data as data URL
             # https://platform.openai.com/docs/guides/pdf-files
-            filename = block.filename or "document.pdf"
+            # For non-PDF documents, convert to text content
+            if block.source.media_type == "application/pdf":
+                # Use native PDF support
+                filename = block.filename or "document.pdf"
 
-            # Check if file size exceeds inline limit (4MB)
-            # Base64 data size ≈ original size * 4/3
-            decoded_size = len(block.source.data) * 3 // 4  # Approximate original size
+                # Check if file size exceeds inline limit (4MB)
+                # Base64 data size ≈ original size * 4/3
+                decoded_size = len(block.source.data) * 3 // 4  # Approximate original size
 
-            if decoded_size > MAX_INLINE_FILE_SIZE:
-                # Large file - mark for async upload via Files API
-                # The actual upload will be handled in _prepare_large_files()
-                logger.info(f"Document '{filename}' ({decoded_size / (1024*1024):.2f} MB) exceeds inline limit, will use Files API")
-                return {
-                    "type": "file",
-                    "file": {
-                        "file_id": None,  # Will be filled by _prepare_large_files()
-                        "_pending_upload": True,
-                        "_base64_data": block.source.data,
-                        "_media_type": block.source.media_type,
-                        "_filename": filename
+                if decoded_size > MAX_INLINE_FILE_SIZE:
+                    # Large file - mark for async upload via Files API
+                    # The actual upload will be handled in _prepare_large_files()
+                    logger.info(f"Document '{filename}' ({decoded_size / (1024*1024):.2f} MB) exceeds inline limit, will use Files API")
+                    return {
+                        "type": "file",
+                        "file": {
+                            "file_id": None,  # Will be filled by _prepare_large_files()
+                            "_pending_upload": True,
+                            "_base64_data": block.source.data,
+                            "_media_type": block.source.media_type,
+                            "_filename": filename
+                        }
                     }
-                }
+                else:
+                    # Small file - use inline base64 data URL
+                    # Format: data:application/pdf;base64,<base64_data>
+                    file_data = f"data:{block.source.media_type};base64,{block.source.data}"
+                    return {
+                        "type": "file",
+                        "file": {
+                            "filename": filename,
+                            "file_data": file_data
+                        }
+                    }
             else:
-                # Small file - use inline base64 data URL
-                file_data = f"data:{block.source.media_type};base64,{block.source.data}"
-                return {
-                    "type": "file",
-                    "file": {
-                        "filename": filename,
-                        "file_data": file_data
+                # For non-PDF documents (text/plain, application/json, etc.),
+                # decode the base64 content and include as text
+                try:
+                    decoded_bytes = base64.b64decode(block.source.data)
+                    # Try to decode as UTF-8 text
+                    try:
+                        text_content = decoded_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        # If not valid UTF-8, return as base64 representation
+                        text_content = f"[Binary document: {block.source.media_type}, size: {len(decoded_bytes)} bytes]"
+
+                    # Include filename in text if available
+                    if block.filename:
+                        text_content = f"[Document: {block.filename} ({block.source.media_type})]\n\n{text_content}"
+
+                    logger.debug(f"Converting non-PDF document ({block.source.media_type}) to text content for OpenAI")
+                    return {"type": "text", "text": text_content}
+                except Exception as e:
+                    logger.warning(f"Failed to decode document content: {e}, converting to text placeholder")
+                    return {
+                        "type": "text",
+                        "text": f"[Document: {block.filename or 'unknown'} ({block.source.media_type}) - Failed to decode]"
                     }
-                }
 
         elif isinstance(block, FileContent):
             # File content - include as text with path info (OpenAI doesn't support files directly)
@@ -429,7 +457,22 @@ class OpenAICompatibleProvider(LLMProviderInterface):
 
                 # Merge content if both have content
                 if (fixed_messages[-1].get("content") and current_msg.get("content")):
-                    fixed_messages[-1]["content"] += "\n" + current_msg["content"]
+                    prev_content = fixed_messages[-1]["content"]
+                    curr_content = current_msg["content"]
+                    
+                    # Handle different content types
+                    if isinstance(prev_content, list) and isinstance(curr_content, list):
+                        # Both are lists (multimodal) - merge lists
+                        fixed_messages[-1]["content"] = prev_content + curr_content
+                    elif isinstance(prev_content, list) and isinstance(curr_content, str):
+                        # Previous is list, current is string - convert string to text object and append
+                        fixed_messages[-1]["content"] = prev_content + [{"type": "text", "text": curr_content}]
+                    elif isinstance(prev_content, str) and isinstance(curr_content, list):
+                        # Previous is string, current is list - convert string to text object and prepend
+                        fixed_messages[-1]["content"] = [{"type": "text", "text": prev_content}] + curr_content
+                    else:
+                        # Both are strings - simple concatenation
+                        fixed_messages[-1]["content"] = prev_content + "\n" + curr_content
                     i += 1
                     continue
                 # If current message has content but previous doesn't, replace

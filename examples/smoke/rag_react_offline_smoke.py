@@ -6,7 +6,7 @@ Runs the three tools sequentially: ingest → search → qa with RAG_FAKE_QA=1.
 import asyncio
 import os
 try:
-    from spoon_ai.tools.rag_tools import , RAGSearchTool, RAGQATool
+    from spoon_ai.tools.rag_tools import RAGIngestTool, RAGSearchTool, RAGQATool
 except ModuleNotFoundError:
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
