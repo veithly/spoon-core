@@ -396,6 +396,179 @@ class BaseAgent(BaseModel, ABC):
 
         await self.add_message(role, content_blocks, timeout=timeout)
 
+    async def add_message_with_pdf_file(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        file_path: str,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with a PDF file from disk.
+
+        Automatically handles base64 encoding.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the PDF
+            file_path: Path to the PDF file on disk
+            timeout: Operation timeout in seconds
+
+        Example:
+            await agent.add_message_with_pdf_file(
+                "user",
+                "Summarize this document",
+                file_path="./documents/report.pdf"
+            )
+        """
+        import base64
+        from pathlib import Path
+
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"PDF file not found: {file_path}")
+
+        with open(path, "rb") as f:
+            pdf_data = base64.b64encode(f.read()).decode("utf-8")
+
+        await self.add_message_with_pdf(
+            role=role,
+            text=text,
+            pdf_data=pdf_data,
+            filename=path.name,
+            timeout=timeout
+        )
+
+    async def add_message_with_image_file(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        file_path: str,
+        detail: str = "auto",
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with an image file from disk.
+
+        Automatically handles base64 encoding and MIME type detection.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the image
+            file_path: Path to the image file on disk
+            detail: Image detail level (auto, low, high)
+            timeout: Operation timeout in seconds
+
+        Example:
+            await agent.add_message_with_image_file(
+                "user",
+                "What's in this image?",
+                file_path="./images/photo.jpg"
+            )
+        """
+        import base64
+        import mimetypes
+        from pathlib import Path
+
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Image file not found: {file_path}")
+
+        # Detect MIME type
+        mime_type, _ = mimetypes.guess_type(str(path))
+        if not mime_type or not mime_type.startswith("image/"):
+            mime_type = "image/png"  # Default fallback
+
+        with open(path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+
+        await self.add_message_with_image(
+            role=role,
+            text=text,
+            image_data=image_data,
+            image_media_type=mime_type,
+            detail=detail,
+            timeout=timeout
+        )
+
+    async def add_message_with_file(
+        self,
+        role: Literal["user", "assistant"],
+        text: str,
+        file_path: str,
+        timeout: Optional[float] = None
+    ) -> None:
+        """Convenience method to add a message with any supported file from disk.
+
+        Automatically detects file type and handles base64 encoding.
+        Supports: PDF, images (png, jpg, gif, webp), text files.
+
+        Args:
+            role: Message role (user or assistant)
+            text: Text content accompanying the file
+            file_path: Path to the file on disk
+            timeout: Operation timeout in seconds
+
+        Example:
+            # Works with any supported file type
+            await agent.add_message_with_file("user", "Analyze this", "./report.pdf")
+            await agent.add_message_with_file("user", "What's this?", "./photo.jpg")
+        """
+        import base64
+        import mimetypes
+        from pathlib import Path
+
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Detect MIME type
+        mime_type, _ = mimetypes.guess_type(str(path))
+        if not mime_type:
+            # Try to infer from extension
+            ext = path.suffix.lower()
+            mime_map = {
+                ".pdf": "application/pdf",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+                ".txt": "text/plain",
+                ".md": "text/markdown",
+                ".json": "application/json",
+            }
+            mime_type = mime_map.get(ext, "application/octet-stream")
+
+        with open(path, "rb") as f:
+            file_data = base64.b64encode(f.read()).decode("utf-8")
+
+        # Route to appropriate handler based on MIME type
+        if mime_type == "application/pdf":
+            await self.add_message_with_pdf(
+                role=role,
+                text=text,
+                pdf_data=file_data,
+                filename=path.name,
+                timeout=timeout
+            )
+        elif mime_type.startswith("image/"):
+            await self.add_message_with_image(
+                role=role,
+                text=text,
+                image_data=file_data,
+                image_media_type=mime_type,
+                timeout=timeout
+            )
+        else:
+            # Text-based or other document types
+            await self.add_message_with_document(
+                role=role,
+                text=text,
+                document_data=file_data,
+                media_type=mime_type,
+                filename=path.name,
+                timeout=timeout
+            )
+
     @asynccontextmanager
     async def state_context(self, new_state: AgentState, timeout: Optional[float] = None):
         """Thread-safe state context manager with deadlock prevention.
