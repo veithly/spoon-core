@@ -400,21 +400,6 @@ class ERC8004Client:
         _, req_hash = self.validation_request(did, self.account.address, reason or "validation")
         return self.validation_response(req_hash, resp)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     # ---------------- Identity ----------------
     def register_agent(self, token_uri: str, metadata: Optional[List[Tuple[str, bytes]]] = None) -> int:
         """Register agent on IdentityRegistry; returns agentId."""
@@ -452,9 +437,18 @@ class ERC8004Client:
             agent_id = int(self.identity_registry.functions.totalAgents().call())
 
         # If we couldn't batch metadata at register-time, apply it post-register.
+        #
+        # Important: metadata writes are best-effort. Some registries may not implement setMetadata,
+        # or may disable/deny metadata writes for certain callers. In those cases, registration can
+        # still succeed (agent minted) but setMetadata txs will revert. We must NOT treat that as a
+        # registration failure, otherwise upstream callers may retry and accidentally create duplicate agents.
         if metadata and not used_batch_register:
             for key, value in metadata:
-                self.set_metadata(agent_id, key, value)
+                try:
+                    self.set_metadata(agent_id, key, value)
+                except Exception:
+                    # Stop further attempts to avoid wasting gas; keep registration successful.
+                    break
 
         return agent_id
 
