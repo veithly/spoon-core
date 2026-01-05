@@ -6,6 +6,7 @@ Handles on-chain interactions with agent registries
 from typing import List, Dict, Optional, Tuple, Union
 from web3 import Web3
 from web3.contract import Contract
+from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
 from eth_account.messages import encode_typed_data
 from eth_utils import keccak, to_checksum_address
@@ -30,6 +31,13 @@ class ERC8004Client:
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         if not self.w3.is_connected():
             raise ConnectionError(f"Failed to connect to RPC: {rpc_url}")
+
+        # NeoX / other PoA-style chains may require the extraData middleware.
+        try:
+            if int(self.w3.eth.chain_id) in (12227332, 97, 56, 11155111):
+                self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        except Exception:
+            pass
 
         self.private_key = private_key
         if private_key:
@@ -412,21 +420,43 @@ class ERC8004Client:
         """Register agent on IdentityRegistry; returns agentId."""
         if not self.account:
             raise ValueError("Private key required for registration")
-        func = self.identity_registry.functions.register(token_uri)
+        used_batch_register = False
+        func = None
+
+        # Prefer the batched register(tokenURI, metadata[]) overload when available.
         if metadata:
-            func = self.identity_registry.functions.register(
-                token_uri, [(k, v) for k, v in metadata]
-            )
+            try:
+                func = self.identity_registry.functions.register(token_uri, [(k, v) for k, v in metadata])
+                used_batch_register = True
+            except Exception:
+                func = None
+
+        if func is None:
+            func = self.identity_registry.functions.register(token_uri)
         tx = func.build_transaction(self._tx_params())
         receipt = self._send_tx(tx)
-        # Try to infer agentId
+        # Try to infer agentId (avoid noisy web3 warnings by filtering logs ourselves)
+        agent_id: Optional[int] = None
         try:
-            logs = self.identity_registry.events.Registered().process_receipt(receipt)
-            if logs:
-                return int(logs[0]["args"]["agentId"])
+            registered_topic0 = self.w3.keccak(text="Registered(uint256,string,address)").hex()
+            for log in receipt.get("logs", []):
+                topics = log.get("topics") or []
+                if topics and topics[0].hex() == registered_topic0:
+                    decoded = self.identity_registry.events.Registered().process_log(log)
+                    agent_id = int(decoded["args"]["agentId"])
+                    break
         except Exception:
-            pass
-        return int(self.identity_registry.functions.totalAgents().call())
+            agent_id = None
+
+        if agent_id is None:
+            agent_id = int(self.identity_registry.functions.totalAgents().call())
+
+        # If we couldn't batch metadata at register-time, apply it post-register.
+        if metadata and not used_batch_register:
+            for key, value in metadata:
+                self.set_metadata(agent_id, key, value)
+
+        return agent_id
 
     def set_metadata(self, agent_id: int, key: str, value: bytes) -> str:
         if not self.account:
@@ -493,13 +523,21 @@ class ERC8004Client:
     # ---------------- Helpers ----------------
     def _tx_params(self) -> Dict:
         gas_price = self.w3.eth.gas_price
-        return {
+        params: Dict = {
             "from": self.account.address if self.account else None,
             "nonce": self.w3.eth.get_transaction_count(self.account.address),
             "gas": 600000,
-            "maxFeePerGas": gas_price,
-            "maxPriorityFeePerGas": gas_price // 2,
         }
+        chain_id = int(getattr(self.w3.eth, "chain_id", 0) or 0)
+
+        # NeoX Testnet T4 (12227332) behaves more reliably with legacy gasPrice txs.
+        if chain_id == 12227332:
+            params["gasPrice"] = gas_price
+        else:
+            params["maxFeePerGas"] = gas_price
+            params["maxPriorityFeePerGas"] = gas_price // 2
+
+        return params
 
     def _send_tx(self, tx: Dict) -> any:
         signed = self.account.sign_transaction(tx)

@@ -169,6 +169,8 @@ def _register_on_chain_if_requested(
     )
     try:
         metadata = []
+        if agent_card_uri:
+            metadata.append(("card_uri", agent_card_uri.encode()))
         if did_uri:
             metadata.append(("did_uri", did_uri.encode()))
         if did_doc_uri:
@@ -217,7 +219,7 @@ def main() -> None:
     parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
     parser.add_argument("--validation", default=os.getenv("NEOX_VALIDATION_REGISTRY"))
     parser.add_argument("--agent-registry", default=os.getenv("NEOX_AGENT_REGISTRY") or os.getenv("AGENT_REGISTRY"))
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
+    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://neoxt4seed1.ngd.network"))
     parser.add_argument("--chain-id", type=int, default=int(os.getenv("NEOX_CHAIN_ID", "12227332")))
     parser.add_argument(
         "--private-key",

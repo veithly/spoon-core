@@ -8,7 +8,7 @@ Responsibilities:
 - Send a question to the local server (server_agent.py) and print the answer.
 
 Env / CLI:
-    NEOX_RPC_URL              RPC endpoint (default: https://testnet.rpc.banelabs.org)
+    NEOX_RPC_URL              RPC endpoint (default: https://neoxt4seed1.ngd.network)
     NEOX_CHAIN_ID             Chain ID (default: 12227332)
     NEOX_IDENTITY_REGISTRY    IdentityRegistry address (required)
     ERC8004_AGENT_ID          Agent tokenId to inspect (default: 1)
@@ -51,7 +51,15 @@ def fetch_agent_info(registry_addr: str, agent_id: int, rpc_url: str, chain_id: 
     # Direct web3 call for totalAgents (no private key needed)
     w3 = _connect_w3(rpc_url, chain_id)
     contract = w3.eth.contract(address=Web3.to_checksum_address(registry_addr), abi=IDENTITY_ABI_MIN)
-    total = contract.functions.totalAgents().call()
+
+    # Some public RPC endpoints may lag briefly after writes; retry a few times.
+    total = 0
+    for _ in range(10):
+        total = contract.functions.totalAgents().call()
+        if total > 0 and agent_id <= total:
+            break
+        time.sleep(1)
+
     if total == 0:
         raise ValueError("registry has no agents (totalAgents=0)")
     if agent_id > total:
@@ -59,11 +67,13 @@ def fetch_agent_info(registry_addr: str, agent_id: int, rpc_url: str, chain_id: 
 
     token_uri = client.identity_registry.functions.tokenURI(agent_id).call()
     did_uri_bytes = client.identity_registry.functions.getMetadata(agent_id, "did_uri").call()
+    did_doc_uri_bytes = client.identity_registry.functions.getMetadata(agent_id, "did_doc_uri").call()
     card_uri_bytes = client.identity_registry.functions.getMetadata(agent_id, "card_uri").call()
     return {
         "agent_id": agent_id,
         "token_uri": token_uri,
         "did_uri": did_uri_bytes.decode(errors="ignore") if did_uri_bytes else "",
+        "did_doc_uri": did_doc_uri_bytes.decode(errors="ignore") if did_doc_uri_bytes else "",
         "card_uri": card_uri_bytes.decode(errors="ignore") if card_uri_bytes else "",
     }
 
@@ -84,7 +94,7 @@ def ask_server(server_url: str, question: str) -> Dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ERC-8004 DID client demo")
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
+    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://neoxt4seed1.ngd.network"))
     parser.add_argument("--chain-id", type=int, default=int(os.getenv("NEOX_CHAIN_ID", "12227332")))
     parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
     parser.add_argument("--agent-id", type=int, default=int(os.getenv("ERC8004_AGENT_ID", "3")))
