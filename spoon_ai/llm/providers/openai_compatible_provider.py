@@ -113,7 +113,26 @@ class OpenAICompatibleProvider(LLMProviderInterface):
 
             # Treat explicit None/empty base_url as "use provider default".
             base_url = config.get('base_url') or self.get_default_base_url()
-            timeout = config.get('timeout', 30)
+            # Increase default timeout to 300s (5 minutes) for better support of large documents (PDFs, images)
+            # Use httpx.Timeout for granular control: read timeout is most important for large document processing
+            timeout_config = config.get('timeout', 300)
+            try:
+                import httpx
+                HTTPX_AVAILABLE = True
+            except ImportError:
+                HTTPX_AVAILABLE = False
+            
+            if HTTPX_AVAILABLE and isinstance(timeout_config, (int, float)):
+                # Use httpx.Timeout for better control: read timeout is critical for large documents
+                timeout = httpx.Timeout(
+                    connect=10.0,  # Connection timeout: 10 seconds
+                    read=float(timeout_config),  # Read timeout: configurable (default 300s for large docs)
+                    write=30.0,  # Write timeout: 30 seconds
+                    pool=10.0  # Pool timeout: 10 seconds
+                )
+            else:
+                # Fallback to simple timeout if httpx not available or timeout is already a Timeout object
+                timeout = timeout_config
 
             # Get provider-specific headers
             additional_headers = self.get_additional_headers(config)
@@ -154,8 +173,27 @@ class OpenAICompatibleProvider(LLMProviderInterface):
             file_obj = BytesIO(file_data)
             file_obj.name = filename
 
-            # Upload to OpenAI Files API
-            response = await self.client.files.create(
+            # Upload to OpenAI Files API with extended timeout for large files
+            # Large files (4MB+) may need up to 600 seconds (10 minutes) to upload
+            # Use httpx.Timeout for granular control: write timeout is critical for file uploads
+            try:
+                import httpx
+                # For file uploads, we need longer write timeout (uploading data) and read timeout (waiting for response)
+                upload_timeout = httpx.Timeout(
+                    connect=30.0,  # Connection timeout: 30 seconds
+                    read=600.0,  # Read timeout: 10 minutes (waiting for server response)
+                    write=600.0,  # Write timeout: 10 minutes (uploading file data) - CRITICAL for large files
+                    pool=30.0  # Pool timeout: 30 seconds
+                )
+                logger.debug(f"[File Upload] Using granular timeout: connect=30s, read=600s, write=600s, pool=30s")
+            except ImportError:
+                # Fallback to simple timeout if httpx not available
+                upload_timeout = 600.0  # 10 minutes
+                logger.debug(f"[File Upload] httpx not available, using simple timeout: {upload_timeout}s")
+            
+            # Use with_options to temporarily increase timeout for this specific call
+            # This overrides the client's default timeout (300s) with a longer timeout for file uploads
+            response = await self.client.with_options(timeout=upload_timeout).files.create(
                 file=file_obj,
                 purpose=purpose
             )

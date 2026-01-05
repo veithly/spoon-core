@@ -168,11 +168,11 @@ class ToolCallAgent(ReActAgent):
         if has_images or has_documents:
             # Increase timeout for image/document processing
             # Documents (especially PDFs) can be large and require more processing time
-            # Use maximum timeout (120s) for documents, as they can be very large
+            # Large PDFs (4MB+) may need up to 180 seconds (3 minutes) for processing
             if has_documents:
-                llm_timeout = 60.0  # Directly set to max for documents (PDFs can be very large)
+                llm_timeout = 180.0  # 3 minutes for large PDF processing
             elif has_images:
-                llm_timeout = min(60.0, base_timeout * 2)  # Double for images
+                llm_timeout = min(120.0, base_timeout * 2)  # 2 minutes for images
             else:
                 llm_timeout = min(60.0, base_timeout * 2)
             
@@ -311,11 +311,11 @@ class ToolCallAgent(ReActAgent):
                         if has_images or has_documents:
                             # Increase step timeout significantly for image/document processing
                             # Documents (especially PDFs) can be large and require more processing time
-                            # Use maximum timeout (120s) for documents
+                            # Large PDFs (4MB+) may need up to 180 seconds (3 minutes) for upload + processing
                             if has_documents:
-                                step_timeout = max(step_timeout, 60.0)  # Directly set to max for documents
+                                step_timeout = max(step_timeout, 180.0)  # 3 minutes for large PDF processing
                             else:
-                                step_timeout = max(step_timeout, 60.0)  # Also max for images
+                                step_timeout = max(step_timeout, 120.0)  # 2 minutes for images
                             content_type = "images and documents" if (has_images and has_documents) else ("images" if has_images else "documents")
                             logger.debug(f"Detected {content_type}, increased step timeout to {step_timeout}s for processing")
                         
