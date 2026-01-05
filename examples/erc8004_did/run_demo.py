@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
     parser.add_argument("--validation", default=os.getenv("NEOX_VALIDATION_REGISTRY"))
     parser.add_argument("--agent-registry", default=os.getenv("NEOX_AGENT_REGISTRY") or os.getenv("AGENT_REGISTRY"))
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://neoxt4seed1.ngd.network"))
+    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
     parser.add_argument("--chain-id", default=os.getenv("NEOX_CHAIN_ID", "12227332"))
     parser.add_argument(
         "--private-key",

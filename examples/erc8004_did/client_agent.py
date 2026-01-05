@@ -8,7 +8,7 @@ Responsibilities:
 - Send a question to the local server (server_agent.py) and print the answer.
 
 Env / CLI:
-    NEOX_RPC_URL              RPC endpoint (default: https://neoxt4seed1.ngd.network)
+    NEOX_RPC_URL              RPC endpoint (default: https://testnet.rpc.banelabs.org)
     NEOX_CHAIN_ID             Chain ID (default: 12227332)
     NEOX_IDENTITY_REGISTRY    IdentityRegistry address (required)
     ERC8004_AGENT_ID          Agent tokenId to inspect (default: 1)
@@ -41,10 +41,10 @@ def _connect_w3(rpc_url: str, chain_id: int) -> Web3:
 def fetch_agent_info(registry_addr: str, agent_id: int, rpc_url: str, chain_id: int) -> Dict[str, Any]:
     client = ERC8004Client(
         rpc_url=rpc_url,
-        agent_registry_address=os.getenv("NEOX_AGENT_REGISTRY") or "0x0000000000000000000000000000000000000000",
+        agent_registry_address=os.getenv("NEOX_AGENT_REGISTRY") or "0x2B11c9C19fdAeE8dB3f63b54fbb3077Fb455C683",
         identity_registry_address=registry_addr,
-        reputation_registry_address=os.getenv("NEOX_REPUTATION_REGISTRY") or "0x0000000000000000000000000000000000000000",
-        validation_registry_address=os.getenv("NEOX_VALIDATION_REGISTRY") or "0x0000000000000000000000000000000000000000",
+        reputation_registry_address=os.getenv("NEOX_REPUTATION_REGISTRY") or "0x8bb086D12659D6e2c7220b07152255d10b2fB049",
+        validation_registry_address=os.getenv("NEOX_VALIDATION_REGISTRY") or "0x18A9240c99c7283d9332B738f9C6972b5B59aEc2",
         private_key=None,
     )
 
@@ -94,7 +94,7 @@ def ask_server(server_url: str, question: str) -> Dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ERC-8004 DID client demo")
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://neoxt4seed1.ngd.network"))
+    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
     parser.add_argument("--chain-id", type=int, default=int(os.getenv("NEOX_CHAIN_ID", "12227332")))
     parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
     parser.add_argument("--agent-id", type=int, default=int(os.getenv("ERC8004_AGENT_ID", "3")))
