@@ -1,19 +1,28 @@
 """
 ERC-8004 DID Search Agent (Server)
-----------------------------------
+==================================
 
-- ReAct-style agent powered by spoon_ai.agents.spoon_react_mcp
-- Uses Tavily MCP tool for live web search (requires TAVILY_API_KEY)
+A ReAct-style agent powered by spoon_ai that:
+- Uses Tavily MCP tool for live web search
 - Focuses on answering questions about ERC-8004 agents/standard
-- Exposes a very small HTTP JSON API on /ask for demo purposes
+- Exposes a simple HTTP JSON API on /ask for demo purposes
 
-Run:
-    python -m core.examples.erc8004_did.server_agent --port 8004
+Usage:
+    python -m examples.erc8004_did.server_agent --port 8004
 
-Env (or CLI flags):
-    TAVILY_API_KEY          Tavily API key (required)
-    ERC8004_AGENT_NAME      Optional display name returned with answers
-    ERC8004_AGENT_DID_URI   Optional DID/metadata URI to echo in responses
+Environment variables:
+    TAVILY_API_KEY       Tavily API key (required for search)
+    OPENAI_API_KEY       OpenAI API key (required for LLM)
+    ERC8004_AGENT_PORT   Server port (default: 8004)
+    ERC8004_AGENT_NAME   Agent display name (optional)
+
+Deployed contracts (NeoX Testnet - open registration):
+    IdentityRegistry:   0xaB5623F3DD66f2a52027FA06007C78c7b0E63508
+    ReputationRegistry: 0x8bb086D12659D6e2c7220b07152255d10b2fB049
+    ValidationRegistry: 0x18A9240c99c7283d9332B738f9C6972b5B59aEc2
+
+To register a new agent, use the separate registration script:
+    python -m examples.erc8004_did.scripts.register_agent --help
 """
 
 from __future__ import annotations
@@ -23,7 +32,9 @@ import asyncio
 import json
 import logging
 import os
+
 os.environ.setdefault("WEB3_ENABLE_CKZG", "0")
+
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Optional
 
@@ -31,7 +42,6 @@ from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.chat import ChatBot
 from spoon_ai.tools.mcp_tool import MCPTool
 from spoon_ai.tools.tool_manager import ToolManager
-from spoon_ai.identity.erc8004_client import ERC8004Client
 
 
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +86,6 @@ class _RequestHandler(BaseHTTPRequestHandler):
     agent: Optional[ERC8004SearchAgent] = None
     loop: Optional[asyncio.AbstractEventLoop] = None
     agent_name: str = "ERC8004 Search Agent"
-    agent_did_uri: Optional[str] = None
 
     def _send_json(self, code: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
@@ -86,7 +95,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self) -> None:  # type: ignore
+    def do_POST(self) -> None:
         if self.path != "/ask":
             self._send_json(404, {"error": "not found"})
             return
@@ -94,7 +103,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             data = json.loads(self.rfile.read(length) or b"{}")
             question = str(data.get("question", "")).strip()
-        except Exception as exc:  # pragma: no cover - demo handler
+        except Exception as exc:
             logger.exception("Malformed request: %s", exc)
             self._send_json(400, {"error": "bad request"})
             return
@@ -107,7 +116,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
         fut = asyncio.run_coroutine_threadsafe(self.agent.run(question), self.loop)
         try:
             answer = fut.result(timeout=120)
-        except Exception as exc:  # pragma: no cover - demo handler
+        except Exception as exc:
             logger.exception("Agent failed: %s", exc)
             self._send_json(500, {"error": "agent_error", "detail": str(exc)})
             return
@@ -116,83 +125,31 @@ class _RequestHandler(BaseHTTPRequestHandler):
             200,
             {
                 "agent": self.agent_name,
-                "did_uri": self.agent_did_uri,
                 "question": question,
                 "answer": answer,
             },
         )
 
-    def log_message(self, fmt: str, *args: Any) -> None:  # type: ignore
+    def log_message(self, fmt: str, *args: Any) -> None:
         logger.info("%s - %s", self.address_string(), fmt % args)
 
 
-async def _prepare_agent(agent_name: str, agent_did_uri: Optional[str]) -> ERC8004SearchAgent:
+async def _prepare_agent(agent_name: str) -> ERC8004SearchAgent:
     agent = ERC8004SearchAgent(llm=ChatBot(llm_provider="openai"))
     await agent.initialize()
-    logger.info("Agent ready: %s (DID=%s)", agent_name, agent_did_uri)
+    logger.info("Agent ready: %s", agent_name)
     return agent
 
 
-def _register_on_chain_if_requested(
-    rpc_url: Optional[str],
-    chain_id: int,
-    private_key: Optional[str],
-    agent_card_uri: Optional[str],
-    did_uri: Optional[str],
-    did_doc_uri: Optional[str],
-    identity_registry: Optional[str],
-    reputation_registry: Optional[str],
-    validation_registry: Optional[str],
-    agent_registry: Optional[str],
-) -> Optional[int]:
-    if not all(
-        [
-            rpc_url,
-            private_key,
-            agent_card_uri,
-            did_uri,
-            identity_registry,
-            reputation_registry,
-            validation_registry,
-            agent_registry,
-        ]
-    ):
-        logger.info("Skip on-chain registration (missing config).")
-        return None
-    client = ERC8004Client(
-        rpc_url=rpc_url,
-        agent_registry_address=agent_registry,
-        identity_registry_address=identity_registry,
-        reputation_registry_address=reputation_registry,
-        validation_registry_address=validation_registry,
-        private_key=private_key,
-    )
-    try:
-        metadata = []
-        if agent_card_uri:
-            metadata.append(("card_uri", agent_card_uri.encode()))
-        if did_uri:
-            metadata.append(("did_uri", did_uri.encode()))
-        if did_doc_uri:
-            metadata.append(("did_doc_uri", did_doc_uri.encode()))
-        agent_id = client.register_agent(agent_card_uri, metadata=metadata or None)
-        logger.info("Registered agentId=%s", agent_id)
-        return agent_id
-    except Exception as exc:
-        logger.error("Register failed: %s", exc)
-        return None
-
-
-def run_server(port: int, agent_name: str, agent_did_uri: Optional[str]) -> None:
+def run_server(port: int, agent_name: str) -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    agent = loop.run_until_complete(_prepare_agent(agent_name, agent_did_uri))
+    agent = loop.run_until_complete(_prepare_agent(agent_name))
 
     _RequestHandler.agent = agent
     _RequestHandler.loop = loop
     _RequestHandler.agent_name = agent_name
-    _RequestHandler.agent_did_uri = agent_did_uri
 
     server = HTTPServer(("0.0.0.0", port), _RequestHandler)
     logger.info("HTTP server listening on http://127.0.0.1:%d/ask", port)
@@ -209,44 +166,35 @@ def run_server(port: int, agent_name: str, agent_did_uri: Optional[str]) -> None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ERC-8004 DID Search Agent server")
-    parser.add_argument("--port", type=int, default=int(os.getenv("ERC8004_AGENT_PORT", "8004")))
-    parser.add_argument("--agent-name", default=os.getenv("ERC8004_AGENT_NAME", "ERC8004 Search Agent"))
-    parser.add_argument("--did-uri", default=os.getenv("ERC8004_AGENT_DID_URI"))
-    parser.add_argument("--did-doc-uri", default=os.getenv("AGENT_DID_DOC_URI") or os.getenv("DID_DOC_URI"))
-    parser.add_argument("--register-agent", action="store_true", help="Register agent on-chain before serving")
-    parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
-    parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
-    parser.add_argument("--validation", default=os.getenv("NEOX_VALIDATION_REGISTRY"))
-    parser.add_argument("--agent-registry", default=os.getenv("NEOX_AGENT_REGISTRY") or os.getenv("AGENT_REGISTRY"))
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
-    parser.add_argument("--chain-id", type=int, default=int(os.getenv("NEOX_CHAIN_ID", "12227332")))
-    parser.add_argument(
-        "--private-key",
-        default=os.getenv("PRIVATE_KEY") or os.getenv("NEOX_PRIVATE_KEY") or os.getenv("REACT_PRIVATE_KEY"),
+    parser = argparse.ArgumentParser(
+        description="ERC-8004 DID Search Agent server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This server exposes a single endpoint:
+    POST /ask
+    Body: {"question": "your question here"}
+    Response: {"agent": "...", "question": "...", "answer": "..."}
+
+Example:
+    curl -X POST http://127.0.0.1:8004/ask \\
+         -H "Content-Type: application/json" \\
+         -d '{"question": "What is ERC-8004?"}'
+        """,
     )
     parser.add_argument(
-        "--token-uri",
-        default=os.getenv("AGENT_CARD_URI") or os.getenv("AGENT_DID_URI"),
-        help="Agent Card URI used as tokenURI in register()",
+        "--port",
+        type=int,
+        default=int(os.getenv("ERC8004_AGENT_PORT", "8004")),
+        help="Server port (default: 8004)",
+    )
+    parser.add_argument(
+        "--agent-name",
+        default=os.getenv("ERC8004_AGENT_NAME", "ERC8004 Search Agent"),
+        help="Agent display name",
     )
     args = parser.parse_args()
 
-    if args.register_agent:
-        _register_on_chain_if_requested(
-            rpc_url=args.rpc,
-            chain_id=args.chain_id,
-            private_key=args.private_key,
-            agent_card_uri=args.token_uri,
-            did_uri=args.did_uri,
-            did_doc_uri=args.did_doc_uri,
-            identity_registry=args.registry,
-            reputation_registry=args.reputation,
-            validation_registry=args.validation,
-            agent_registry=args.agent_registry,
-        )
-
-    run_server(args.port, args.agent_name, args.did_uri)
+    run_server(args.port, args.agent_name)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,37 @@
 """
-End-to-end launcher:
-- Starts the ERC8004SearchAgent server
-- Calls the client to fetch on-chain data and ask a question
-- Stops the server
+ERC-8004 DID Demo Launcher
+==========================
 
-Run:
+End-to-end demo that:
+1. Starts the ERC8004SearchAgent server (ReAct agent with Tavily search)
+2. Runs the client to fetch on-chain agent data and ask a question
+3. Stops the server
+
+Usage:
+    # Use default pre-registered agent (ID=3):
     python -m examples.erc8004_did.run_demo
 
-Prereqs:
-    export TAVILY_API_KEY=...
-    export NEOX_IDENTITY_REGISTRY=0xaB5623F3DD66f2a52027FA06007C78c7b0E63508  # or your own
-    (Optional) ERC8004_AGENT_ID, ERC8004_AGENT_DID_URI, NEOX_RPC_URL, NEOX_CHAIN_ID
+    # Specify a different agent ID:
+    python -m examples.erc8004_did.run_demo --agent-id 7
+
+    # Custom registry address:
+    python -m examples.erc8004_did.run_demo --registry 0x...
+
+Environment variables:
+    TAVILY_API_KEY            Required for live web search
+    OPENAI_API_KEY            Required for the ReAct agent
+    NEOX_IDENTITY_REGISTRY    IdentityRegistry address (default: 0xaB5623F3DD66f2a52027FA06007C78c7b0E63508)
+    ERC8004_AGENT_ID          Agent token ID to query (default: 3)
+    NEOX_RPC_URL              RPC endpoint (default: https://testnet.rpc.banelabs.org)
+    NEOX_CHAIN_ID             Chain ID (default: 12227332)
+
+Deployed contracts (NeoX Testnet - open registration):
+    IdentityRegistry:   0xaB5623F3DD66f2a52027FA06007C78c7b0E63508
+    ReputationRegistry: 0x8bb086D12659D6e2c7220b07152255d10b2fB049
+    ValidationRegistry: 0x18A9240c99c7283d9332B738f9C6972b5B59aEc2
+
+To register a new agent, use the separate registration script:
+    python -m examples.erc8004_did.scripts.register_agent --help
 """
 
 from __future__ import annotations
@@ -23,100 +44,129 @@ import sys
 import time
 
 try:
-    # Load local dev secrets/config (e.g. PRIVATE_KEY, NEOX_RPC_URL) without printing.
-    from dotenv import load_dotenv  # type: ignore
-
+    from dotenv import load_dotenv
     core_dir = Path(__file__).resolve().parents[2]
     load_dotenv(core_dir / ".env", override=False)
 except Exception:
     pass
 
 
+# Default contract addresses (NeoX Testnet)
+DEFAULT_IDENTITY_REGISTRY = "0xaB5623F3DD66f2a52027FA06007C78c7b0E63508"
+DEFAULT_RPC_URL = "https://testnet.rpc.banelabs.org"
+DEFAULT_CHAIN_ID = "12227332"
+DEFAULT_AGENT_ID = "3"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run ERC8004 server + client demo")
-    parser.add_argument("--register-agent", action="store_true", help="Pre-register agent on IdentityRegistry before serving")
-    parser.add_argument("--token-uri", default=os.getenv("AGENT_CARD_URI") or os.getenv("AGENT_DID_URI"))
-    parser.add_argument("--did-uri", default=os.getenv("ERC8004_AGENT_DID_URI"))
-    parser.add_argument("--did-doc-uri", default=os.getenv("AGENT_DID_DOC_URI") or os.getenv("DID_DOC_URI"))
-    parser.add_argument("--registry", default=os.getenv("NEOX_IDENTITY_REGISTRY"))
-    parser.add_argument("--reputation", default=os.getenv("NEOX_REPUTATION_REGISTRY"))
-    parser.add_argument("--validation", default=os.getenv("NEOX_VALIDATION_REGISTRY"))
-    parser.add_argument("--agent-registry", default=os.getenv("NEOX_AGENT_REGISTRY") or os.getenv("AGENT_REGISTRY"))
-    parser.add_argument("--rpc", default=os.getenv("NEOX_RPC_URL", "https://testnet.rpc.banelabs.org"))
-    parser.add_argument("--chain-id", default=os.getenv("NEOX_CHAIN_ID", "12227332"))
-    parser.add_argument(
-        "--private-key",
-        default=os.getenv("PRIVATE_KEY") or os.getenv("NEOX_PRIVATE_KEY") or os.getenv("REACT_PRIVATE_KEY"),
+    parser = argparse.ArgumentParser(
+        description="Run ERC-8004 server + client demo",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    # Run with default pre-registered agent:
+    python -m examples.erc8004_did.run_demo
+
+    # Run with a specific agent ID:
+    python -m examples.erc8004_did.run_demo --agent-id 7
+
+    # Custom question:
+    python -m examples.erc8004_did.run_demo --question "What is ERC-8004?"
+        """,
     )
+
+    parser.add_argument(
+        "--agent-id",
+        type=int,
+        default=int(os.getenv("ERC8004_AGENT_ID", DEFAULT_AGENT_ID)),
+        help=f"Agent token ID to query (default: {DEFAULT_AGENT_ID})",
+    )
+    parser.add_argument(
+        "--registry",
+        default=os.getenv("NEOX_IDENTITY_REGISTRY", DEFAULT_IDENTITY_REGISTRY),
+        help="IdentityRegistry contract address",
+    )
+    parser.add_argument(
+        "--rpc",
+        default=os.getenv("NEOX_RPC_URL", DEFAULT_RPC_URL),
+        help="RPC endpoint URL",
+    )
+    parser.add_argument(
+        "--chain-id",
+        default=os.getenv("NEOX_CHAIN_ID", DEFAULT_CHAIN_ID),
+        help="Chain ID",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("ERC8004_AGENT_PORT", "8004")),
+        help="Server port (default: 8004)",
+    )
+    parser.add_argument(
+        "--question",
+        default="What is ERC-8004 and how do I register an agent?",
+        help="Question to ask the agent",
+    )
+
     args = parser.parse_args()
 
-    server_port = int(os.getenv("ERC8004_AGENT_PORT", "8004"))
+    # Prepare environment
     env = os.environ.copy()
-    # Ensure core package path on PYTHONPATH so sub-processes can import examples.*
     core_dir = Path(__file__).resolve().parents[2]
     env["PYTHONPATH"] = f"{core_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
-    if args.private_key:
-        # Avoid passing secrets via argv (process list / logs).
-        env["PRIVATE_KEY"] = str(args.private_key)
 
+    # Start server
     server_cmd = [
         sys.executable,
         "-m",
         "examples.erc8004_did.server_agent",
         "--port",
-        str(server_port),
+        str(args.port),
     ]
-    if args.register_agent:
-        server_cmd += [
-            "--register-agent",
-            "--registry",
-            args.registry or "",
-            "--reputation",
-            args.reputation or "",
-            "--validation",
-            args.validation or "",
-            "--agent-registry",
-            args.agent_registry or "",
-            "--rpc",
-            args.rpc,
-            "--chain-id",
-            str(args.chain_id),
-        ]
-        if args.token_uri:
-            server_cmd += ["--token-uri", args.token_uri]
-        if args.did_uri:
-            server_cmd += ["--did-uri", args.did_uri]
-        if args.did_doc_uri:
-            server_cmd += ["--did-doc-uri", args.did_doc_uri]
 
-    print("Launching server:", " ".join(server_cmd))
+    print("=" * 60)
+    print("ERC-8004 DID Demo")
+    print("=" * 60)
+    print(f"Agent ID: {args.agent_id}")
+    print(f"Registry: {args.registry}")
+    print(f"RPC: {args.rpc}")
+    print(f"Chain ID: {args.chain_id}")
+    print("=" * 60)
+    print()
+
+    print("Starting server:", " ".join(server_cmd))
     server = subprocess.Popen(server_cmd, env=env)
-    time.sleep(10)  # give server time to start (and finish optional registration)
 
+    # Wait for server to start
+    print("Waiting for server to initialize...")
+    time.sleep(10)
+
+    # Run client
     client_cmd = [
         sys.executable,
         "-m",
         "examples.erc8004_did.client_agent",
         "--server",
-        f"http://127.0.0.1:{server_port}",
+        f"http://127.0.0.1:{args.port}",
+        "--agent-id",
+        str(args.agent_id),
+        "--registry",
+        args.registry,
+        "--rpc",
+        args.rpc,
+        "--chain-id",
+        str(args.chain_id),
+        "--question",
+        args.question,
     ]
-    if args.registry:
-        client_cmd += ["--registry", args.registry]
-    if args.token_uri:
-        client_cmd += ["--token-uri", args.token_uri]
-    if args.did_uri:
-        client_cmd += ["--did-uri", args.did_uri]
-    elif os.getenv("AGENT_DID_URI"):
-        client_cmd += ["--did-uri", os.getenv("AGENT_DID_URI")]
-    if args.chain_id:
-        client_cmd += ["--chain-id", str(args.chain_id)]
-    if args.rpc:
-        client_cmd += ["--rpc", args.rpc]
-    print("Running client:", " ".join(client_cmd), "\n")
+
+    print("\nRunning client:", " ".join(client_cmd[:6]), "...")
+    print()
+
     try:
         subprocess.check_call(client_cmd, env=env)
     finally:
-        print("Stopping server...")
+        print("\nStopping server...")
         server.terminate()
         try:
             server.wait(timeout=5)
