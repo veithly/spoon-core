@@ -34,13 +34,15 @@ import time
 
 os.environ.setdefault("WEB3_ENABLE_CKZG", "0")
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 from spoon_ai.identity.erc8004_abi import IDENTITY_ABI_MIN
 from spoon_ai.identity.erc8004_client import ERC8004Client
+from spoon_ai.identity.storage_client import DIDStorageClient
+from spoon_ai.identity.did_models import AgentDID, ServiceEndpoint, ServiceType
 
 
 # Default contract addresses (NeoX Testnet)
@@ -120,6 +122,90 @@ def fetch_agent_info(
         "did_doc_uri": did_doc_uri_bytes.decode(errors="ignore") if did_doc_uri_bytes else "",
         "card_uri": card_uri_bytes.decode(errors="ignore") if card_uri_bytes else "",
     }
+
+
+def fetch_agent_card(uri: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetch Agent Card from NeoFS or IPFS URI.
+    
+    Args:
+        uri: NeoFS or IPFS URI (e.g., neofs://container/object or ipfs://cid)
+        
+    Returns:
+        Agent Card JSON dict, or None if fetch fails
+    """
+    if not uri or not (uri.startswith("neofs://") or uri.startswith("ipfs://")):
+        return None
+    
+    # Skip placeholder IPFS URIs (not real CIDs)
+    if uri.startswith("ipfs://") and not uri.startswith("ipfs://Qm") and not uri.startswith("ipfs://baf"):
+        # Check if it looks like a placeholder (e.g., "ipfs://spoon/...")
+        if "/spoon/" in uri or not uri.replace("ipfs://", "").strip().startswith(("Qm", "baf")):
+            print(f"Warning: Skipping placeholder IPFS URI: {uri}")
+            return None
+    
+    try:
+        # Use minimal storage client (no auth needed for public reads)
+        storage = DIDStorageClient(
+            neofs_url=os.getenv("NEOFS_BASE_URL", "https://rest.t5.fs.neo.org"),
+            neofs_owner=None,  # Public read doesn't need owner
+            neofs_private_key=None,
+            ipfs_gateway=os.getenv("IPFS_GATEWAY_URL", "https://ipfs.io/ipfs"),
+        )
+        return storage.fetch_did_document(uri)
+    except Exception as e:
+        print(f"Warning: Failed to fetch Agent Card from {uri}: {e}")
+        return None
+
+
+def extract_service_endpoint(agent_info: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract service endpoint from agent metadata.
+    
+    Tries in order:
+    1. DID Document service endpoints (from did_doc_uri)
+    2. Agent Card metadata
+    3. Returns None if not found
+    
+    Args:
+        agent_info: Dict with token_uri, card_uri, did_doc_uri
+        
+    Returns:
+        Service endpoint URL, or None
+    """
+    # Try DID Document first (has structured service endpoints)
+    did_doc_uri = agent_info.get("did_doc_uri")
+    if did_doc_uri:
+        try:
+            did_doc = fetch_agent_card(did_doc_uri)
+            if did_doc:
+                # Look for AgentService or APIService endpoints
+                services = did_doc.get("service", [])
+                for svc in services:
+                    if isinstance(svc, dict):
+                        svc_type = svc.get("type", "")
+                        if svc_type in ("AgentService", "APIService", "MessagingService"):
+                            endpoint = svc.get("serviceEndpoint") or svc.get("service_endpoint")
+                            if endpoint and endpoint.startswith("http"):
+                                return endpoint
+        except Exception as e:
+            print(f"Warning: Failed to parse DID Document: {e}")
+    
+    # Fallback: Try Agent Card
+    card_uri = agent_info.get("card_uri") or agent_info.get("token_uri")
+    if card_uri:
+        try:
+            card = fetch_agent_card(card_uri)
+            if card:
+                # Agent Card might have service endpoint in metadata
+                metadata = card.get("metadata", {})
+                endpoint = metadata.get("service_endpoint") or metadata.get("serviceEndpoint")
+                if endpoint and endpoint.startswith("http"):
+                    return endpoint
+        except Exception as e:
+            print(f"Warning: Failed to parse Agent Card: {e}")
+    
+    return None
 
 
 def ask_server(server_url: str, question: str) -> Dict[str, Any]:
@@ -211,11 +297,23 @@ Examples:
         print(f"Warning: {exc}")
         info = {"agent_id": args.agent_id, "error": str(exc)}
 
+    # Try to extract service endpoint from Agent Card / DID Document
+    service_endpoint = extract_service_endpoint(info)
+    
+    # Use agent's service endpoint if found, otherwise fallback to provided server URL
+    if service_endpoint:
+        print(f"\n✓ Found service endpoint in Agent Card: {service_endpoint}")
+        server_url = service_endpoint
+    else:
+        print(f"\n⚠ No service endpoint found in Agent Card, using default: {args.server}")
+        print("  (To use agent's own service, ensure Agent Card includes service endpoints)")
+        server_url = args.server
+
     # Ask the server
-    print(f"\nAsking server at {args.server} ...")
+    print(f"\nAsking server at {server_url} ...")
     print(f"Question: {args.question}\n")
 
-    result = ask_server(args.server, args.question)
+    result = ask_server(server_url, args.question)
     print("Response:")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
