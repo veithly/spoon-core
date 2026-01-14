@@ -35,8 +35,9 @@ import os
 
 os.environ.setdefault("WEB3_ENABLE_CKZG", "0")
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from typing import Any, Optional
+import threading
 
 from spoon_ai.agents.spoon_react_mcp import SpoonReactMCP
 from spoon_ai.chat import ChatBot
@@ -86,6 +87,8 @@ class _RequestHandler(BaseHTTPRequestHandler):
     agent: Optional[ERC8004SearchAgent] = None
     loop: Optional[asyncio.AbstractEventLoop] = None
     agent_name: str = "ERC8004 Search Agent"
+    # Lock to serialize agent.run() calls for thread safety
+    _agent_lock: threading.Lock = threading.Lock()
 
     def _send_json(self, code: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
@@ -113,13 +116,17 @@ class _RequestHandler(BaseHTTPRequestHandler):
             return
 
         assert self.agent and self.loop
-        fut = asyncio.run_coroutine_threadsafe(self.agent.run(question), self.loop)
-        try:
-            answer = fut.result(timeout=120)
-        except Exception as exc:
-            logger.exception("Agent failed: %s", exc)
-            self._send_json(500, {"error": "agent_error", "detail": str(exc)})
-            return
+        # Serialize agent.run() calls to prevent concurrent execution issues
+        # The agent's internal _run_lock provides additional protection, but
+        # this ensures requests are handled one at a time at the HTTP level
+        with self._agent_lock:
+            fut = asyncio.run_coroutine_threadsafe(self.agent.run(question), self.loop)
+            try:
+                answer = fut.result(timeout=120)
+            except Exception as exc:
+                logger.exception("Agent failed: %s", exc)
+                self._send_json(500, {"error": "agent_error", "detail": str(exc)})
+                return
 
         self._send_json(
             200,
@@ -151,8 +158,10 @@ def run_server(port: int, agent_name: str) -> None:
     _RequestHandler.loop = loop
     _RequestHandler.agent_name = agent_name
 
-    server = HTTPServer(("0.0.0.0", port), _RequestHandler)
-    logger.info("HTTP server listening on http://127.0.0.1:%d/ask", port)
+    # Use ThreadingHTTPServer to handle concurrent requests safely
+    # The agent's internal locks and the request-level lock ensure thread safety
+    server = ThreadingHTTPServer(("0.0.0.0", port), _RequestHandler)
+    logger.info("HTTP server listening on http://127.0.0.1:%d/ask (threading enabled)", port)
 
     try:
         loop.run_in_executor(None, server.serve_forever)

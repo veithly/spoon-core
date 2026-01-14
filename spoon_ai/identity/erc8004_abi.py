@@ -21,6 +21,13 @@ IDENTITY_ABI_MIN = [
         "type": "function",
     },
     {
+        "inputs": [{"internalType": "uint256", "name": "tokenId", "type": "uint256"}],
+        "name": "ownerOf",
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+    {
         "inputs": [
             {"internalType": "uint256", "name": "agentId", "type": "uint256"},
             {"internalType": "string", "name": "key", "type": "string"},

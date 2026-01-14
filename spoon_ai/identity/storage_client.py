@@ -146,23 +146,65 @@ class DIDStorageClient:
         container_id = parts[0]
         object_id = parts[1] if len(parts) > 1 else ""
 
-        bearer_response = self.neofs_client.get_binary_bearer_token()
-        bearer_token = bearer_response.token
+            # Try to get bearer token (may not be needed for public containers)
+        bearer_token = None
+        try:
+            bearer_response = self.neofs_client.get_binary_bearer_token()
+            bearer_token = bearer_response.token if bearer_response.token else None
+        except Exception as e:
+            # If bearer token acquisition fails, try without token (public container)
+            print(f"⚠️  Failed to get NeoFS bearer token: {e}")
+            print("   Attempting to access without bearer token (public container)...")
 
-        response = self.neofs_client.download_object_by_id(
-            container_id=container_id,
-            object_id=object_id,
-            bearer_token=bearer_token
-        )
+        # Try to download object (bearer_token is optional for public containers)
+        try:
+            response = self.neofs_client.download_object_by_id(
+                container_id=container_id,
+                object_id=object_id,
+                bearer_token=bearer_token
+            )
+        except Exception as e:
+            if "empty bearer token" in str(e).lower() or "bearer" in str(e).lower():
+                raise ValueError(
+                    f"NeoFS access failed: {e}\n"
+                    "Possible reasons:\n"
+                    "1. NEOFS_PRIVATE_KEY_WIF format is incorrect (must be WIF format, not hex)\n"
+                    "2. NEOFS_OWNER_ADDRESS does not match the private key\n"
+                    "3. Container is not public and requires a valid bearer token"
+                ) from e
+            raise
 
-        return response.content
+        # NeoFS REST API may return JSON-wrapped format (with base64 payload) or raw content
+        content = response.content
+        
+        # Check if it's JSON format (contains payload field)
+        try:
+            import json
+            import base64
+            json_data = json.loads(content.decode('utf-8'))
+            if isinstance(json_data, dict) and 'payload' in json_data:
+                # Decode base64 payload
+                payload_b64 = json_data['payload']
+                content = base64.b64decode(payload_b64)
+        except (json.JSONDecodeError, UnicodeDecodeError, KeyError, ValueError):
+            # Not JSON format or no payload, use raw content directly
+            pass
+
+        return content
 
     def _fetch_from_ipfs(self, uri: str) -> bytes:
         """Fetch from IPFS"""
-        cid = uri.replace("ipfs://", "")
+        cid = uri.replace("ipfs://", "").strip("/")
 
         try:
-            response = self.ipfs_http_client.get(f"{self.ipfs_gateway}/ipfs/{cid}")
+            # Handle gateway URL: if it already ends with /ipfs, don't add it again
+            gateway = self.ipfs_gateway.rstrip("/")
+            if gateway.endswith("/ipfs"):
+                url = f"{gateway}/{cid}"
+            else:
+                url = f"{gateway}/ipfs/{cid}"
+            
+            response = self.ipfs_http_client.get(url)
             response.raise_for_status()
             return response.content
         except Exception as e:
