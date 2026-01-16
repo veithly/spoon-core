@@ -535,6 +535,7 @@ Examples:
     metadata = [("card_uri", card_uri)]
     if did_uri:
         metadata.append(("did_uri", did_uri))
+        metadata.append(("did_doc_uri", did_uri))  # Also set did_doc_uri for compatibility
 
     agent_id = register_on_chain(
         w3=w3,
