@@ -125,7 +125,7 @@ def create_script_tools(
     Args:
         skill_name: Parent skill name
         scripts: List of script definitions
-        working_directory: Base working directory
+        working_directory: Base working directory (fallback if script has none)
 
     Returns:
         List of ScriptTool instances
@@ -134,10 +134,12 @@ def create_script_tools(
 
     for script in scripts:
         try:
+            # Per-script working_directory takes precedence over skill-level
+            script_working_dir = script.working_directory or working_directory
             tool = ScriptTool(
                 script=script,
                 skill_name=skill_name,
-                working_directory=working_directory
+                working_directory=script_working_dir
             )
             tools.append(tool)
             logger.debug(f"Created script tool: {tool.name}")

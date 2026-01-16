@@ -553,9 +553,11 @@ class SkillManager:
             return results
 
         executor = get_executor()
-        working_dir = skill.metadata.scripts.working_directory
+        base_working_dir = skill.metadata.scripts.working_directory
 
         for script in scripts:
+            # Per-script working_directory takes precedence over skill-level
+            working_dir = script.working_directory or base_working_dir
             logger.info(f"Running {phase} script '{script.name}' for skill '{skill.name}'")
             result = await executor.execute(
                 script=script,
@@ -613,12 +615,21 @@ class SkillManager:
         if not skill.metadata.has_scripts():
             raise ValueError(f"Skill '{skill_name}' has no scripts defined")
 
+        # Check per-skill scripts.enabled flag
+        if not skill.metadata.scripts_enabled():
+            return ScriptResult(
+                script_name=script_name,
+                success=False,
+                error=f"Script execution is disabled for skill '{skill_name}'"
+            )
+
         script = skill.metadata.scripts.get_script(script_name)
         if not script:
             raise ValueError(f"Script '{script_name}' not found in skill '{skill_name}'")
 
         executor = get_executor()
-        working_dir = skill.metadata.scripts.working_directory
+        # Per-script working_directory takes precedence over skill-level
+        working_dir = script.working_directory or skill.metadata.scripts.working_directory
 
         return await executor.execute(
             script=script,
