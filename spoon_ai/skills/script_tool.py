@@ -100,7 +100,13 @@ class ScriptTool(BaseTool):
         if result.success:
             return result.stdout if result.stdout else "(script completed with no output)"
         else:
-            return f"Script failed: {result.error or result.stderr}"
+            # On failure, provide as much context as possible
+            error_msg = result.error or result.stderr
+            if not error_msg and result.stdout:
+                # Some scripts (like tavily_search.py) print error JSON to stdout
+                error_msg = result.stdout
+            
+            return f"Script failed: {error_msg or 'Unknown error (no output captured)'}"
 
     def to_param(self) -> dict:
         """Generate OpenAI-compatible function definition."""
