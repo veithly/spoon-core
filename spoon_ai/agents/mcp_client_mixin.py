@@ -9,7 +9,15 @@ logger = logging.getLogger(__name__)
 
 class MCPClientMixin:
     def __init__(self, mcp_transport):
-        self._client = MCPClient(mcp_transport)
+        if mcp_transport and mcp_transport != "mcp_server":
+            try:
+                self._client = MCPClient(mcp_transport)
+            except Exception as e:
+                logger.warning(f"Failed to initialize MCP client with transport {mcp_transport}: {e}")
+                self._client = None
+        else:
+            self._client = None
+            
         self._last_sender = None
         self._last_topic = None
         self._last_message_id = None
@@ -41,6 +49,9 @@ class MCPClientMixin:
         - Proper cleanup on cancellation/failure
         - Periodic cleanup of stale sessions
         """
+        if self._client is None:
+            raise RuntimeError("MCP client is not configured (mcp_transport is missing or invalid)")
+
         current_task = asyncio.current_task()
         if current_task is None:
             raise RuntimeError("MCPClientMixin.get_session() must be called from within an async task")
@@ -122,7 +133,7 @@ class MCPClientMixin:
             if session_info and not session_info.get("closed", False):
                 session_info["closed"] = True
                 
-            if session:
+            if session and self._client:
                 try:
                     await self._client.__aexit__(None, None, None)
                     self._session_stats["closed"] += 1
@@ -194,11 +205,15 @@ class MCPClientMixin:
 
     async def list_mcp_tools(self):
         """Get the list of available tools from the MCP server"""
+        if self._client is None:
+            return []
         async with self.get_session() as session:
             return await session.list_tools()
 
     async def call_mcp_tool(self, tool_name: str, **kwargs):
         """Call a tool on the MCP server"""
+        if self._client is None:
+            return f"MCP tool '{tool_name}' failed: Client not initialized"
         try:
             async with self.get_session() as session:
                 res = await session.call_tool(tool_name, arguments=kwargs)
@@ -251,6 +266,8 @@ class MCPClientMixin:
         Returns:
             bool: Whether the message was sent successfully
         """
+        if self._client is None:
+            return False
         if isinstance(message, str):
             content = {
                 "text": message,

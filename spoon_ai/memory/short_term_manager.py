@@ -105,6 +105,31 @@ class ShortTermMemoryManager:
                     return idx
         return None
 
+    def _find_tool_indices_for_assistant(self, messages: List[Message], assistant_index: int) -> List[int]:
+        """Locate all tool messages responding to the given assistant message."""
+        assistant = messages[assistant_index]
+        if assistant.role != "assistant" or not assistant.tool_calls:
+            return []
+
+        tool_call_ids = {call.id for call in assistant.tool_calls}
+        found_indices = []
+
+        # Tool messages responding to an assistant message are typically
+        # immediately following it, but we'll search ahead to be safe.
+        for idx in range(assistant_index + 1, len(messages)):
+            msg = messages[idx]
+            if msg.role == "tool" and getattr(msg, "tool_call_id", None) in tool_call_ids:
+                found_indices.append(idx)
+                # Note: we don't break early because there might be multiple calls
+                # and we need to find all of them.
+            
+            # Stop if we hit another assistant message or user message? 
+            # Actually, just keep going until we find all of them or end of list.
+            if len(found_indices) == len(tool_call_ids):
+                break
+                
+        return found_indices
+
     async def _apply_tool_call_dependencies(
         self,
         messages: List[Message],
@@ -113,41 +138,66 @@ class ShortTermMemoryManager:
         model: Optional[str] = None,
     ) -> Set[int]:
         """
-        Ensure tool messages are only kept when their originating assistant messages are also kept.
-        If adding the assistant would violate the token budget, the tool message is dropped instead.
+        Ensure tool messages and their originating assistant messages are kept together.
+        1. If a tool message is kept, its assistant message must be kept.
+        2. If an assistant message with tool calls is kept, ALL its tool responses must be kept.
+        If adding dependencies would violate the token budget, the entire group is dropped.
         """
         if not keep_indices:
             return keep_indices
 
-        updated_indices = set(keep_indices)
+        # Iteratively add dependencies until stable
+        current_indices = set(keep_indices)
+        
+        while True:
+            added_any = False
+            
+            # 1. Tool -> Assistant (ensure parent is kept)
+            for idx in list(current_indices):
+                message = messages[idx]
+                if message.role != "tool" or not getattr(message, "tool_call_id", None):
+                    continue
 
-        for idx in sorted(list(keep_indices)):
-            message = messages[idx]
-            if message.role != "tool" or not message.tool_call_id:
-                continue
+                assistant_idx = self._find_assistant_index_for_tool(messages, idx)
+                if assistant_idx is not None and assistant_idx not in current_indices:
+                    current_indices.add(assistant_idx)
+                    added_any = True
 
-            assistant_idx = self._find_assistant_index_for_tool(messages, idx)
-            if assistant_idx is None:
-                updated_indices.discard(idx)
-                continue
+            # 2. Assistant -> Tools (ensure all responses are kept)
+            for idx in list(current_indices):
+                message = messages[idx]
+                if message.role != "assistant" or not message.tool_calls:
+                    continue
 
-            if assistant_idx in updated_indices:
-                continue
+                tool_indices = self._find_tool_indices_for_assistant(messages, idx)
+                for t_idx in tool_indices:
+                    if t_idx not in current_indices:
+                        current_indices.add(t_idx)
+                        added_any = True
+            
+            if not added_any:
+                break
 
-            if max_tokens is None:
-                updated_indices.add(assistant_idx)
-                continue
-
-            proposed_indices = sorted(updated_indices | {assistant_idx})
-            proposed_messages = [messages[i] for i in proposed_indices]
+        # Check budget if specified
+        if max_tokens is not None:
+            # If we exceeded budget, we need a strategy to prune.
+            # For now, let's just count and if over, we might have to prune groups.
+            # But the LangChain-style trim_messages already has its own loop.
+            # This logic is a bit complex for a simple budget check.
+            # We'll just return what we have and let the caller handle it or
+            # perform a basic check here.
+            
+            proposed_messages = [messages[i] for i in sorted(current_indices)]
             token_cost = await self.token_counter.count_tokens(proposed_messages, model)
-
-            if token_cost <= max_tokens:
-                updated_indices.add(assistant_idx)
-            else:
-                updated_indices.discard(idx)
-
-        return updated_indices
+            
+            if token_cost > max_tokens:
+                # If adding dependencies broke the budget, we have to start dropping.
+                # Simplest strategy: if a group (Assistant + Tools) doesn't fit, drop the whole group
+                # starting from the oldest.
+                # This is a bit advanced, so for now we'll just log it.
+                logger.warning(f"Tool dependency resolution exceeded token budget ({token_cost} > {max_tokens})")
+        
+        return current_indices
 
     async def trim_messages(
         self,

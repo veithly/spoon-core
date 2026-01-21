@@ -13,6 +13,7 @@ from spoon_ai.tools import ToolManager
 
 
 from .toolcall import ToolCallAgent
+from .mcp_client_mixin import MCPClientMixin
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def create_configured_chatbot():
         logger.error(f"Failed to initialize ChatBot with LLM manager: {e}")
         raise RuntimeError(f"Failed to initialize ChatBot: {e}") from e
 
-class SpoonReactAI(ToolCallAgent):
+class SpoonReactAI(MCPClientMixin, ToolCallAgent):
 
     name: str = "spoon_react"
     description: str = "A smart ai agent in neo blockchain"
@@ -59,6 +60,10 @@ class SpoonReactAI(ToolCallAgent):
         """Initialize SpoonReactAI with both ToolCallAgent and MCPClientMixin initialization"""
         # Call parent class initializers
         ToolCallAgent.__init__(self, **kwargs)
+        
+        # Initialize MCP client mixin
+        MCPClientMixin.__init__(self, self.mcp_transport)
+
         # Normalize available_tools input (list -> ToolManager)
         if isinstance(getattr(self, "available_tools", None), list):
             self.available_tools = ToolManager(self.available_tools)
@@ -105,6 +110,19 @@ class SpoonReactAI(ToolCallAgent):
         self.next_step_prompt = NEXT_STEP_PROMPT_TEMPLATE.format(
             tool_list=tool_list,
         )
+
+    async def connect(self):
+        """Establish connection to MCP server."""
+        if self.mcp_transport == "mcp_server":
+            logger.debug(f"Skipping MCP connection for default 'mcp_server' transport in agent {self.name}")
+            return
+
+        try:
+            # MCPClientMixin.get_session() handles the actual connection
+            async with self.get_session() as session:
+                logger.info(f"Successfully connected to MCP server via {self.mcp_transport}")
+        except Exception as e:
+            logger.warning(f"Failed to connect to MCP server: {e}. Agent will continue without MCP tools.")
 
     async def initialize(self, __context: Any = None):
         """Initialize async components and subscribe to topics"""
